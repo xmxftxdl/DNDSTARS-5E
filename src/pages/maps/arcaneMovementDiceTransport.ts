@@ -1,5 +1,5 @@
 import {getRoomSession} from '../../lib/roomSession'
-import {requestSharedArcaneMovement} from '../../lib/sharedApi'
+import {requestSharedArcaneMovement} from "../../composition/browserSharedRoomResources"
 import type {ArcaneMovementChoiceTransport} from './arcaneMovementHazardCheckpoint'
 
 export interface ArcaneMovementDiceRequest {

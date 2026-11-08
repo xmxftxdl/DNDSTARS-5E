@@ -18,7 +18,7 @@ const indexHtml = await readFile(path.join(distDir, 'index.html'), 'utf8')
 for (const deferredChunk of [
   'MapsPage-',
   'MapViewportLayer-',
-  'monsterTurnPlanner-',
+  'dnd5eCombatSimulation.worker-',
   'diceFrame-',
 ]) {
   if (indexHtml.includes(deferredChunk)) {
@@ -29,7 +29,8 @@ for (const deferredChunk of [
 for (const expectedChunk of [
   'MapsPage-',
   'MapViewportLayer-',
-  'monsterTurnPlanner-',
+  // The planner now executes inside the simulator worker rather than a UI chunk.
+  'dnd5eCombatSimulation.worker-',
   'dnd5e-plugin-compiler-',
   'diceFrame-',
 ]) {

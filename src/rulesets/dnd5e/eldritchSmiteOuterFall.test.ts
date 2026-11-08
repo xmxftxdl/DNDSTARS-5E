@@ -1,3 +1,4 @@
+import { mapsWorkspaceSource as mapsSource } from '../../__tests__/mapsWorkspaceSource'
 import{afterEach,expect,it,vi}from'vitest'
 import{automationCapabilityFromLegacyStatus}from'../../domain/automation/automationCapability'
 import type{Dnd5eActivityDefinitionV1}from'./activities/dnd5eActivityContracts'
@@ -39,7 +40,7 @@ async function fixture(options:{level?:number;size?:'超大型'|'巨型';removeA
 
 import ts from'typescript'
 import vm from'node:vm'
-import mapsSource from'../../pages/MapsWorkspacePage.tsx?raw'
+
 import * as combat from'../../application/combat/dnd5eCombatRules'
 import{resolveDnd5ePreparedWithDamageReactions}from'./damageReactionFlow'
 function actualMapClosure(name:string,sandbox:Record<string,unknown>){const parsed=ts.createSourceFile('MapsWorkspacePage.tsx',mapsSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let expression:ts.Expression|undefined;const visit=(n:ts.Node)=>{if(!expression&&ts.isVariableDeclaration(n)&&n.name.getText(parsed)===name&&n.initializer)expression=n.initializer;ts.forEachChild(n,visit)};visit(parsed);if(!expression)throw Error('Actual Maps callback absent:'+name);vm.runInNewContext(ts.transpileModule('globalThis.callback='+expression.getText(parsed),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,sandbox);return(sandbox as any).callback}

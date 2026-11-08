@@ -27,14 +27,15 @@ const selection: AiProviderSelectionV1 = {
 }
 
 describe('resource structuring model routing', () => {
-  it('routes external resource extraction through the fixed Luna model without a Sol/Terra fallback', () => {
+  it('uses the configured account model when it is available without inventing a paid fallback', () => {
     expect(selectResourceStructuringModelRouting([
+      model('external:gpt-6.1-sol', 'GPT-6.1 Sol'),
       model('external:gpt-5.6-luna', 'GPT-5.6 Luna'),
       model('external:synthesis:gpt-5.6-terra', 'GPT-5.6 Terra'),
     ], selection)).toEqual({
       schemaVersion: 1,
       providerId: 'external-account',
-      primary: { modelId: 'external:gpt-5.6-luna', displayName: 'GPT-5.6 Luna', tier: 'luna' },
+      primary: { modelId: 'external:gpt-6.1-sol', displayName: 'GPT-6.1 Sol', tier: 'custom' },
       automatic: true,
     })
   })

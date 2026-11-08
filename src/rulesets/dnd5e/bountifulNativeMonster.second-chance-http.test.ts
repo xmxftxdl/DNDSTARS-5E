@@ -1,3 +1,4 @@
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import{readMastermindNativeDirectOwnerResume}from'../../pages/maps/mastermindNativeDirectOwnerResume'
 import{collectMastermindNativeDirectOwnerOriginal}from'../../pages/maps/mastermindMisdirectionNativeParent'
 import{readMastermindNativeWardResume}from'../../pages/maps/mastermindNativeWardResume'
@@ -100,7 +101,7 @@ it.each([false,true].flatMap(enemyController=>[false,true].map((targetDecline):{
    await expect(persistBountifulHostOperation(capability,gateway)).rejects.toThrow('HTTP 403')
    expect(transactions).toHaveLength(0)
    const rawRollId=durableD20RollId({mapId:'map',sourceMode:'dm',transactionId:source.transactionId,occurrenceIndex:0})
-   const actualMapSource=fs.readFileSync('src/pages/MapsWorkspacePage.tsx','utf8'),start=actualMapSource.indexOf('        const nativeRawId=durableD20RollId('),end=actualMapSource.indexOf('        const monsterAttackRollContext = {',start)
+   const actualMapSource=readMapsWorkspaceSource(),start=actualMapSource.indexOf('        const nativeRawId=durableD20RollId('),end=actualMapSource.indexOf('        const monsterAttackRollContext = {',start)
    if(start<0||end<0)throw Error('Actual Maps raw construction block missing')
    const context={collectMastermindNativeMonsterOriginal:(input:Parameters<typeof collectMastermindNativeMonsterOriginal>[0])=>collectMastermindNativeMonsterOriginal(input,{session:()=>roomSession.value,loadResource:gateway.loadResource,request:async()=>{throw Error('This actual original target has no native Misdirection source; no owner prompt may be issued')}}),nativeResume:undefined,createBountifulHostMonsterRawBoundary,createBountifulPersistentRoomUI,dnd5ePreparedMonsterAttackAutomaticallyHits,durableD20RollId,bountifulDeferredD20RequestId,bountifulIssuedHostOperation,
      latestMap:map,monsterEffectTransactionId:source.transactionId,attackMode:'normal',mode:'dm',combatActiveRef:{current:true},index:0,tranquility:{passed:true},monsterAttack:prepared.prepared,result:{moved:false,attacked:true,message:'Actual ordinary Native attack intent'},useProtection:false,protectionCandidate:undefined,areaAttackAdvantageReaction:undefined,nativeGateway:gateway,

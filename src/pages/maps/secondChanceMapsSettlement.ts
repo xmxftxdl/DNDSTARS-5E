@@ -1,5 +1,5 @@
 import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
-import type{Dnd5eActionResult}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eActionResult}from"../../application/combat/dnd5eCombatRules"
 import type{SecondChanceCombat}from'./secondChanceHostCommit'
 import{validateSecondChanceAttackReceipts}from'../../../shared/second-chance-state.mjs'
 import{getRoomSession}from'../../lib/roomSession'

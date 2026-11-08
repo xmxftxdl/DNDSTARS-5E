@@ -1,6 +1,6 @@
 import type {ArcaneNativeOwnerRequest} from '../../../shared/arcane-native-parent.mjs'
-import type {Dnd5eHeadlessCombatState} from '../../rulesets/dnd5e/headlessCombatEngine'
-import {dnd5eCombatantCanSee,dnd5eCombatantPairKey} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eHeadlessCombatState} from "../../application/combat/dnd5eCombatRules"
+import {dnd5eCombatantCanSee,dnd5eCombatantPairKey} from "../../application/combat/dnd5eCombatRules"
 
 export type ArcaneOwnerChoice=({parentId:string;stage:'arcane';decision:'use'|'decline'}|{parentId:string;stage:'shroud';decision:'use'|'decline';targetIds:string[]})&{checkpointId?:string}
 export function arcaneOwnerRequestKey(request:ArcaneNativeOwnerRequest){return request.parentId+':'+(request.checkpointId??'root')+':'+request.phase}

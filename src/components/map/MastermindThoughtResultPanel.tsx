@@ -1,6 +1,6 @@
 import{useEffect,useState}from'react'
 import DiceOverlayPortal from'../DiceOverlayPortal'
-import{requestSharedMastermindThoughtReading,subscribeSharedResourceInvalidation}from'../../lib/sharedApi'
+import{requestSharedMastermindThoughtReading,subscribeSharedResourceInvalidation}from"../../composition/browserSharedRoomResources"
 type Result={parentTransactionId:string;mapId:string;kind:'unavailable'|'thoughts';thoughts?:string}
 /** This projection contains only this actual caster's committed result. It
  * deliberately has no target feature, contest outcome, or owner answer. */

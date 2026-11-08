@@ -1,5 +1,5 @@
 import type{IncomingAttackRollFacts}from'../../rulesets/dnd5e/incomingAttackRerollCheckpoint'
-import type{Dnd5eHeadlessCombatState}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eHeadlessCombatState}from"../../application/combat/dnd5eCombatRules"
 const issued=new WeakSet<object>()
 /** Issued only while a genuine original Session/official Flow is paused at its
  * next actual eligible attack. A deserialized player object cannot represent it. */

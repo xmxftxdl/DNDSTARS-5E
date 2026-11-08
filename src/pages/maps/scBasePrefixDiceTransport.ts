@@ -1,5 +1,5 @@
 import {getRoomSession} from '../../lib/roomSession'
-import {requestSharedScBasePrefix} from '../../lib/sharedApi'
+import {requestSharedScBasePrefix} from "../../composition/browserSharedRoomResources"
 import type {ScBasePrefixTransport} from './scBasePrefixRolls'
 
 export interface ScBasePrefixDiceRequest {

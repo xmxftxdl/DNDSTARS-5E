@@ -36,7 +36,7 @@ describe('DM roll mode adjudication', () => {
     const html = renderToStaticMarkup(createElement(SecretDiceTrayControls, { confirmation, onConfirm: () => {} }))
     expect(html.indexOf('优势')).toBeLessThan(html.indexOf('正常'))
     expect(html.indexOf('正常')).toBeLessThan(html.indexOf('劣势'))
-    expect(html.indexOf('劣势')).toBeLessThan(html.indexOf('确认并继续'))
+    expect(html.indexOf('劣势')).toBeLessThan(html.indexOf('>确认</button>'))
     const damage = renderToStaticMarkup(createElement(SecretDiceTrayControls, {
       confirmation: { id: 'damage', label: '伤害', targetName: '', sides: 6, values: [3] }, onConfirm: () => {} }))
     expect(damage).not.toContain('DM 投掷模式')

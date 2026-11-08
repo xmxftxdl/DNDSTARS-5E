@@ -1,6 +1,6 @@
 import DiceOverlayPortal from'../DiceOverlayPortal'
 import{useEffect,useState}from'react'
-import{subscribeSharedResourceInvalidation}from'../../lib/sharedApi'
+import{subscribeSharedResourceInvalidation}from"../../composition/browserSharedRoomResources"
 import{answerMastermindThoughtReading,listMastermindThoughtPrompts,type MastermindThoughtPrompt}from'../../pages/maps/mastermindThoughtReadingParent'
 
 export default function MastermindThoughtConsentPanel({mapId}:{mapId:string}){

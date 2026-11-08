@@ -1,4 +1,4 @@
-import { resolveDnd5eHeadlessAction, dnd5eIncomingAttackRerollOptions, type Dnd5eAction, type Dnd5eHeadlessCombatState } from '../../rulesets/dnd5e/headlessCombatEngine';
+import { resolveDnd5eHeadlessAction, dnd5eIncomingAttackRerollOptions, type Dnd5eAction, type Dnd5eHeadlessCombatState } from "../../application/combat/dnd5eCombatRules";
 import { withIncomingAttackRerollCheckpoints, type IncomingAttackRollFacts, type IncomingAttackRerollChoice } from '../../rulesets/dnd5e/incomingAttackRerollCheckpoint';
 class Pending extends Error {
     readonly facts: IncomingAttackRollFacts;

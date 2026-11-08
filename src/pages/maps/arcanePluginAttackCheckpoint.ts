@@ -2,8 +2,8 @@ import { resolvePreparedDnd5ePluginFeatureAction } from '../../rulesets/dnd5e/pl
 import { dnd5ePluginHeadlessActionDefinition } from '../../rulesets/dnd5e/pluginApi'
 import { createDnd5ePreparedDamageCommitSession } from '../../rulesets/dnd5e/damageCommitSession'
 import { createDnd5eParentEffectClock } from '../../rulesets/dnd5e/activeEffects'
-import { dnd5eIncomingAttackArmorClassOptions } from '../../rulesets/dnd5e/headlessCombatEngine'
-import type { Dnd5eHeadlessCombatState } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eIncomingAttackArmorClassOptions } from "../../application/combat/dnd5eCombatRules"
+import type { Dnd5eHeadlessCombatState } from "../../application/combat/dnd5eCombatRules"
 import type { IncomingAttackArmorClassChoice } from '../../rulesets/dnd5e/incomingAttackArmorClassCheckpoint'
 import type { PostD20FeatureUseChoice } from '../../rulesets/dnd5e/postD20FeatureUseCheckpoint'
 import { captureSecondChancePreparedOriginal } from './secondChancePreparedParent'

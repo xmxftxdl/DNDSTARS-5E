@@ -1,6 +1,6 @@
 import type {SharedPlayerActionState,SharedPlayerActionAckState} from '../../lib/sharedCombatTypes'
 import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'
-import type {Dnd5eActionResult} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eActionResult} from "../../application/combat/dnd5eCombatRules"
 import {getRoomSession} from '../../lib/roomSession'
 import {decodeSecondChanceParentWire,type SecondChanceParentWire} from '../../lib/secondChanceParentWire'
 import {sameActivityParentData} from './postNativeActivityParent'

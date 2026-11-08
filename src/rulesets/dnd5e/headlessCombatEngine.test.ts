@@ -7635,7 +7635,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(recovered.state.initiativeIndex).toBe(0)
   })
 
-  it('applies unconscious and prone at 0 HP, including player overkill', () => {
+  it('applies unconscious and prone at 0 HP and instant death for massive player damage', () => {
     const dropped = resolveDnd5eHeadlessAction(
       startDnd5eHeadlessCombat('drop-to-zero', [
         fighter('attacker', 20, { controller: 'dm' }),
@@ -7670,8 +7670,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(killed.ok).toBe(true)
     if (!killed.ok) return
-    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 0, dead: false })
-    expect(killed.events).not.toContainEqual(expect.objectContaining({
+    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
+    expect(killed.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'attacker', targetId: 'target',
     }))
   })
@@ -7724,12 +7724,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(heavyDamageAtZero.ok).toBe(true)
     if (!heavyDamageAtZero.ok) return
     expect(heavyDamageAtZero.state.combatants.target.deathSaves).toMatchObject({
-      failures: 1, dead: false,
+      failures: 3, dead: true,
     })
     expect(heavyDamageAtZero.events).toContainEqual(expect.objectContaining({
-      type: 'death-save-failure', targetId: 'target', failures: 1,
+      type: 'instant-death', targetId: 'target',
     }))
-    expect(heavyDamageAtZero.events.some((event) => event.type === 'instant-death')).toBe(false)
+    expect(heavyDamageAtZero.events.some((event) => event.type === 'instant-death')).toBe(true)
   })
 
   it('ends concentration immediately when an incapacitating condition is present', () => {

@@ -1,3 +1,4 @@
+import { mapsWorkspaceSource as pageText } from '../../__tests__/mapsWorkspaceSource'
 import{assertActualOriginalDiceOwnerSemantics}from'./originalDicePageSemantics.testSupport'
 import{persistBountifulDamageZeroSavingLate}from'./bountifulDamageZeroSavingLateContinuation';import{encodeBountifulAfterDiceSource}from'./bountifulLuckAfterDice';import{resolveBountifulOriginalForNormalAck,publishBountifulOrOrdinaryPlayerActionAck}from'./bountifulLuckNormalAck';import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'./turnEconomy';import type{PublishPlayerActionAckInput}from'../../lib/playerActionAckPublish';
 import{createBountifulDamageZeroSavingLateDice,readBountifulDamageZeroSavingLateDiceRoute,readBountifulDamageZeroSavingLatePlayerDiceOwner}from'./bountifulDamageZeroSavingLateDice';
@@ -5,7 +6,7 @@ import{captureBountifulDamageZeroSavingLateCheckpoint,collectBountifulDamageZero
 import{originalD20ReplaySourceKey}from'./allyNaturalOneCheckpoint';
 import{restoreBountifulDamageZeroOriginalRaw}from'./bountifulDamageZeroOriginalRaw';
 /// <reference types="node" />
-import pageText from'../../pages/MapsWorkspacePage.tsx?raw';
+
 import{readBountifulDamageZeroOriginalPlayerDiceOwner,hasIssuedBountifulDamageZeroOriginalRequest,recordBountifulDamageZeroOriginalHostRaw,recordBountifulDamageZeroOriginalHostConfirmation}from'./bountifulDamageZeroOriginalRaw';
 
 import{performPlayerDiceRoll}from'../../pages/maps/playerDiceRoll';import type{SharedRollRequestEvent}from'../../lib/sharedCombatTypes';

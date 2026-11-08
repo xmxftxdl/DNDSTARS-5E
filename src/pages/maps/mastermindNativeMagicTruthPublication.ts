@@ -1,12 +1,12 @@
 import type{Character}from'../../types/character'
 import type{BattleMap}from'../../store/maps'
 import type{SharedCombatState}from'../../lib/sharedCombatTypes'
-import type{SharedResourceTransactionWrite,saveSharedResourcesAtomically}from'../../lib/sharedApi'
+import type{SharedResourceTransactionWrite,saveSharedResourcesAtomically}from"../../composition/browserSharedRoomResources"
 import type{MastermindMagicTruthGateway}from'./mastermindMagicTruthRoom'
 import{readMastermindNativeMagicTruthCompleted}from'./mastermindNativeMagicTruthRoom'
 import{mastermindNativeMagicTruthTransactionId}from'../../../shared/mastermind-magic-truth.mjs'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 type Gateway=MastermindMagicTruthGateway&{saveResourcesAtomically:typeof saveSharedResourcesAtomically}
 type View=Awaited<ReturnType<typeof readMastermindNativeMagicTruthCompleted>>
 const name='mastermind-magic-truth',order=(v:unknown):unknown=>Array.isArray(v)?v.map(order):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,x])=>[k,order(x)])):v,sig=(v:unknown)=>JSON.stringify(order(v)),same=(a:unknown,b:unknown)=>sig(a)===sig(b)

@@ -2,7 +2,7 @@ import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
 import type{MastermindOpportunityMisdirectionDecision}from'./mastermindOpportunityMisdirectionParent'
 import{readMastermindOpportunityMisdirectionCompletedSource,restoreMastermindOpportunityMisdirectionCompletedDecision}from'./mastermindOpportunityMisdirectionParent'
 import{readBountifulOpportunitySequenceCompletion,readBountifulOpportunitySequenceCompletedCheckpoint,type BountifulOpportunitySequenceCompletion}from'../../rulesets/dnd5e/bountifulOpportunitySequenceCollector'
-import{loadSharedResource}from'../../lib/sharedApi'
+import{loadSharedResource}from"../../composition/browserSharedRoomResources"
 import{resolveBountifulOpportunitySequenceCompletionForNormalAck,publishBountifulOpportunitySequenceAck}from'../../rulesets/dnd5e/bountifulOpportunitySequenceAck'
 import{encodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
 type ResolveInput=Parameters<typeof resolveBountifulOpportunitySequenceCompletionForNormalAck>[0]

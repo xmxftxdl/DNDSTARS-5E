@@ -1,6 +1,6 @@
 import type{InitiativeEntry}from'../../components/map/InitiativeTracker'
 import type{Dnd5eTurnEconomyByToken,Dnd5eTurnEconomyCounts}from'../../lib/sharedCombatTypes'
-import type{Dnd5eHeadlessCombatState}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eHeadlessCombatState}from"../../application/combat/dnd5eCombatRules"
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
 
 /** Complete the real combat-start producer before its existing first-turn

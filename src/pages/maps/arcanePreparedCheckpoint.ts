@@ -4,7 +4,7 @@ import{createDnd5eParentEffectClock}from'../../rulesets/dnd5e/activeEffects'
 import{resolvePreparedDnd5eEquipmentAttack}from'../../rulesets/dnd5e/equipmentAttackAction'
 import{resolvePreparedDnd5eMonsterAttack}from'../../rulesets/dnd5e/monsterAttackAction'
 import{createDnd5ePreparedDamageCommitSession}from'../../rulesets/dnd5e/damageCommitSession'
-import{dnd5eIncomingAttackArmorClassOptions}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eIncomingAttackArmorClassOptions}from"../../application/combat/dnd5eCombatRules"
 import type{IncomingAttackArmorClassChoice}from'../../rulesets/dnd5e/incomingAttackArmorClassCheckpoint'
 import type{PostD20FeatureUseChoice}from'../../rulesets/dnd5e/postD20FeatureUseCheckpoint'
 import{captureSecondChancePreparedOriginal,type SecondChancePreparedInput,type SecondChancePreparedResult}from'./secondChancePreparedParent'

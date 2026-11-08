@@ -1,5 +1,5 @@
 import{getRoomSession}from'../../lib/roomSession'
-import{requestSharedMastermindThoughtReading}from'../../lib/sharedApi'
+import{requestSharedMastermindThoughtReading}from"../../composition/browserSharedRoomResources"
 import{issueMastermindThoughtContestRolls,prepareMastermindThoughtContestPrefix}from'./mastermindThoughtContestPrefix'
 import{readMastermindThoughtContestOriginal,type MastermindThoughtOriginal,type MastermindThoughtGateway}from'./mastermindThoughtReadingParent'
 

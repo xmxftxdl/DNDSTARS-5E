@@ -1,4 +1,5 @@
-import pageText from'../../pages/MapsWorkspacePage.tsx?raw';import ts from'typescript';import{BountifulOriginalParentPending}from'./bountifulLuckPersistentRoomDriver';import{bountifulNativeLuckyPromptsForMember,submitCurrentBountifulNativeLuckyChoice}from'./bountifulNativeLuckyRoomChoice'
+import { mapsWorkspaceSource as pageText } from '../../__tests__/mapsWorkspaceSource'
+import ts from'typescript';import{BountifulOriginalParentPending}from'./bountifulLuckPersistentRoomDriver';import{bountifulNativeLuckyPromptsForMember,submitCurrentBountifulNativeLuckyChoice}from'./bountifulNativeLuckyRoomChoice'
 import{issueNextBountifulMonsterZeroOriginal}from'./bountifulMonsterZeroPersistentParent';
 import{recoverBountifulMonsterZeroOriginal}from'./bountifulMonsterZeroRecovery';
 import{projectDnd5eCombatApplicationStoreState}from'../../pages/maps/combatApplicationStoreProjection';

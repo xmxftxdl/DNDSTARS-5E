@@ -141,7 +141,11 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenForegroundLayer).toBeGreaterThan(borderFlowLayer)
     expect(tokenStatusContent).toBeGreaterThan(tokenForegroundLayer)
     expect(interactionOverlayContent).toBeGreaterThan(tokenStatusContent)
-    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(7)
+    // Seven base layers plus two player-only perception layers; the personal
+    // mask needs an isolated canvas so destination-out cannot erase ordinary fog.
+    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(9)
+    expect(canvasSource).toContain('{!isDM && <Layer name="map-personal-perception-mask"')
+    expect(canvasSource).toContain('{!isDM && <Layer name="map-source-location-hints"')
     expect(tokenNodeSource).toContain('const hasPresentationBorder = !!borderColor && !defeated')
     expect(tokenNodeSource).toContain('const bodyStrokeWidth = hasPresentationBorder ? 0 : baseStrokeW')
     expect(tokenNodeSource).toContain('const portraitClipInset = hasPresentationBorder ? 0')

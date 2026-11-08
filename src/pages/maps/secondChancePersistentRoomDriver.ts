@@ -5,7 +5,7 @@ import type{SecondChancePostNativeFrame,SecondChancePostNativeSettlement}from'./
 import{isSecondChanceAdditionalIncoming}from'./secondChanceAdditionalIncoming'
 import{secondChanceParentGroup,activeSecondChanceParentReceipt}from'./secondChanceParentGroup'
 import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
-import type{Dnd5eAction}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eAction}from"../../application/combat/dnd5eCombatRules"
 import{issueSecondChanceAttack}from'./issueSecondChanceAttack'
 import{processSecondChanceRequest}from'./processSecondChanceRequest'
 import{commitSecondChanceHostAttack,type PersistedSecondChanceAttack,type SecondChanceCombat}from'./secondChanceHostCommit'
@@ -39,7 +39,7 @@ export async function resumeSecondChancePersistentRoomParent(action:SharedPlayer
 /** Maps owns the authorized original action. UI callbacks publish actual owner
  * prompts and dice only; their returned values are deliberately ignored. Each
  * authoritative phase is read from the existing server-stamped append queue. */
-async function driveSecondChancePersistentRoomParentOnce(input:{mapId:string;parentTransactionId:string;action?:Dnd5eAction;state?:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eHeadlessCombatState;nativeContext?:import('../../rulesets/dnd5e/damageReactionFlow').Dnd5eDamageReactionMapContext;preparedOriginal?:SecondChancePreparedOriginal;options?:Parameters<typeof import('../../rulesets/dnd5e/headlessCombatEngine').resolveDnd5eHeadlessAction>[2]},gateway:Gateway,ui:SecondChancePersistentRoomUI):Promise<never>{
+async function driveSecondChancePersistentRoomParentOnce(input:{mapId:string;parentTransactionId:string;action?:Dnd5eAction;state?:import("../../application/combat/dnd5eCombatRules").Dnd5eHeadlessCombatState;nativeContext?:import('../../rulesets/dnd5e/damageReactionFlow').Dnd5eDamageReactionMapContext;preparedOriginal?:SecondChancePreparedOriginal;options?:Parameters<typeof import("../../application/combat/dnd5eCombatRules").resolveDnd5eHeadlessAction>[2]},gateway:Gateway,ui:SecondChancePersistentRoomUI):Promise<never>{
  // A persisted Armor decline is only a candidate here. Both issuance and final
  // replay independently rebuild its genuine checkpoint through opaque brands.
  const arcaneJournal=await gateway.loadResource<{parents:Record<string,{id:string;phase:string;mapId:string;parentTransactionId:string;prepared:SecondChancePreparedOriginal}>}>('arcane-native-parents')

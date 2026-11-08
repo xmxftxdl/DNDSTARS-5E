@@ -3,7 +3,7 @@ import*as nativeWard from'./mastermindNativeWardDiceTransport'
 import*as wardSaving from'./mastermindWardSavingDiceTransport'
 import*as wardOriginal from'./mastermindWardOriginalDiceTransport'
 import{getRoomSession}from'../../lib/roomSession'
-import{requestSharedMastermindSpellWindow}from'../../lib/sharedApi'
+import{requestSharedMastermindSpellWindow}from"../../composition/browserSharedRoomResources"
 import type{MastermindSpellWindowGateway}from'./mastermindSpellWindowParent'
 type Api=MastermindSpellWindowGateway['source']
 const isSpellWardBountifulRequest=(id:string)=>id.startsWith('mm-spell-ward-bountiful-pool:')

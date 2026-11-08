@@ -1,10 +1,10 @@
 import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
-import{loadSharedResource,readBountifulOpportunitySequenceBook,requestSharedMastermindMisdirection}from'../../lib/sharedApi'
+import{loadSharedResource,readBountifulOpportunitySequenceBook,requestSharedMastermindMisdirection}from"../../composition/browserSharedRoomResources"
 import{getRoomSession}from'../../lib/roomSession'
 import{encodeSecondChanceParentWire,decodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
 import{readCapturedDnd5eOpportunitySequenceCollectorCheckpoint}from'../../rulesets/dnd5e/opportunityMoveSequence'
 import{bountifulOpportunityCollectorSettlementSource}from'../../../shared/bountiful-opportunity-settlement.mjs'
-import{dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse}from"../../application/combat/dnd5eCombatRules"
 import{captureDnd5ePluginSubclassEnvelopeRegistrationV1,dnd5ePluginFeatureDefinition}from'../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import{dnd5eExecutionEventKey}from'../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import type{MastermindMisdirectionGateway}from'./mastermindMisdirectionParent'

@@ -1,10 +1,10 @@
 import type{Character}from'../../types/character'
 import type{BattleMap}from'../../store/maps'
 import type{SharedCombatState,SharedPlayerActionState}from'../../lib/sharedCombatTypes'
-import type{SharedResourceTransactionWrite,saveSharedResourcesAtomically}from'../../lib/sharedApi'
+import type{SharedResourceTransactionWrite,saveSharedResourcesAtomically}from"../../composition/browserSharedRoomResources"
 import{readMastermindSpellWindowCompleted,type MastermindSpellWindowGateway}from'./mastermindSpellWindowParent'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 type Gateway=MastermindSpellWindowGateway&{saveResourcesAtomically:typeof saveSharedResourcesAtomically}
 type View=Awaited<ReturnType<typeof readMastermindSpellWindowCompleted>>
 type Row=View['owners'][number]['row']

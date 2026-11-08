@@ -1,8 +1,9 @@
+import { mapsWorkspaceSource as pageSource } from '../../__tests__/mapsWorkspaceSource'
 import{it,expect}from'vitest'
 import ts from'typescript'
 import{gunzipSync}from'node:zlib'
 import{createHash}from'node:crypto'
-import pageSource from'../../pages/MapsWorkspacePage.tsx?raw'
+
 import{decodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
 import{assertBountifulAfterDiceSource}from'./bountifulLuckAfterDice'
 import{actualStormAfterDiceWireWitness as witness}from'./stormSorcery.actualAfterDiceWire.fixture'

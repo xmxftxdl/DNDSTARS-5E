@@ -6,20 +6,7 @@ import { rectangularLightHasClippedCells } from '../../../shared/clipped-prism-o
 import { ContinuousSpellLightMask } from './ContinuousSpellLightMask'
 import { Circle, Group, Line, Rect } from 'react-konva'
 import type { BattleMap, Token } from '../../store/maps'
-import {
-  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
-  mapGeometryAbsoluteElevationAtPoint,
-  mapGeometryLightPolygon,
-  mapGeometryMagicalDarknessObstacleIsSuppressed,
-  mapGeometryObstacleAffectsElevation,
-  mapGeometrySpellLightingSources,
-  mapGeometrySourceCanSeeThroughDarkness,
-  mapGeometryTokenElevation,
-  mapGeometryVisibilityPolygon,
-  mapGeometryVisibleTargets,
-  type MapGeometryPoint,
-  type MapGeometryState,
-} from '../../lib/mapGeometry'
+import { DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET, mapGeometryAbsoluteElevationAtPoint, mapGeometryLightPolygon, mapGeometryMagicalDarknessObstacleIsSuppressed, mapGeometryObstacleAffectsElevation, mapGeometrySpellLightingSources, mapGeometrySourceCanSeeThroughDarkness, mapGeometryTokenElevation, mapGeometryVisibilityPolygon, mapGeometryVisibleTargets, type MapGeometryPoint, type MapGeometryState, } from '../../lib/mapGeometry'
 import { campaignLightIsActive } from '../../lib/campaignTime'
 import {
   type FogShape,

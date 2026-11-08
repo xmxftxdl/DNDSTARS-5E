@@ -4,7 +4,7 @@ import {assertDnd5eKilledSummonContinuationSourceV1,readDnd5eKilledSummonContinu
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
-import type {Dnd5eActionResult} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eActionResult} from "../../application/combat/dnd5eCombatRules"
 import type {Dnd5eMapResultPlan} from '../../rulesets/dnd5e/mapBridge'
 import {encodeSecondChanceParentWire,decodeSecondChanceParentWire,type SecondChanceParentWire} from '../../lib/secondChanceParentWire'
 import {listRegisteredDnd5eActivityPackages} from '../../rulesets/dnd5e/activities/dnd5eActivityRegistry'

@@ -1,10 +1,10 @@
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState} from '../../lib/sharedCombatTypes'
-import type {SharedResourceTransactionWrite,saveSharedResourcesAtomically} from '../../lib/sharedApi'
+import type {SharedResourceTransactionWrite,saveSharedResourcesAtomically} from "../../composition/browserSharedRoomResources"
 import {readMastermindSpellMisdirectionCompleted} from './mastermindSpellMisdirectionParent'
 import {createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy} from '../../rulesets/dnd5e/turnEconomy'
-import {dnd5eHeadlessTurnKey} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eHeadlessTurnKey} from "../../application/combat/dnd5eCombatRules"
 type View=Awaited<ReturnType<typeof readMastermindSpellMisdirectionCompleted>>
 type Gateway=View['gateway']&{saveResourcesAtomically:typeof saveSharedResourcesAtomically}
 type Row={id:string;roomId:string;hostMemberId:string;parentTransactionId:string;phase:string;revision:number;versions:Record<string,number>;nativeOriginal:unknown;originalAction?:unknown;answer?:{choice:string;submittedByMemberId:string};ownerMemberId:string}

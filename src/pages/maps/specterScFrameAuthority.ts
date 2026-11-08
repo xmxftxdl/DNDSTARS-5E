@@ -2,7 +2,7 @@ import type {SecondChancePostNativeFrame} from './secondChancePostNativeBoundary
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
 import type {SharedPlayerActionState} from '../../lib/sharedCombatTypes'
-import type {Dnd5eActionResult} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eActionResult} from "../../application/combat/dnd5eCombatRules"
 import type {Dnd5eMapResultPlan} from '../../rulesets/dnd5e/mapBridge'
 import {getRoomSession} from '../../lib/roomSession'
 export interface SpecterScFrameView {

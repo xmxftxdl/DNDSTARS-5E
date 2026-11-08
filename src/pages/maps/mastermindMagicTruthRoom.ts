@@ -1,6 +1,6 @@
 import type{resolvePreparedDnd5ePluginSpellCast}from'../../rulesets/dnd5e/pluginSpellTransaction'
 import type{resolvePreparedDnd5ePluginFeatureAction}from'../../rulesets/dnd5e/pluginFeatureAction'
-import{requestSharedMastermindMagicTruth}from'../../lib/sharedApi'
+import{requestSharedMastermindMagicTruth}from"../../composition/browserSharedRoomResources"
 import{normalizeCharacter}from'../../store/characters'
 import{migrateMapsState}from'../../store/maps'
 import{normalizeSharedCampaignTime}from'../../lib/campaignTime'

@@ -1,0 +1,1237 @@
+{
+  "src/pages/maps/bountifulInitiativeCatalogBootstrap.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/bountifulInitiativeDicePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/bountifulInitiativeParent.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/bountifulInitiativeStart.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/fieldlessOwnerChoice.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/r61-all-private-r193/view/src/pages/maps/ClassFeatureInterruptPanels.tsx"
+  ],
+  "src/pages/maps/initiativeReadyReload.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindLateWardBountifulNative.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeDirectOwnerAnswerGuards.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeDirectOwnerAnswerRace.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeDirectOwnerPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeDirectOwnerResume.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeDirectSuccessor.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeFriendlyDirect.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBaneConsumer.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBaneFresh.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBaneLedger.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBanePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBaneTerminal.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBaseRebind.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBountifulOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBountifulPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBountifulRetarget.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardBountifulRoom.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainConsumer.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainFresh.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainLedger.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainNegative.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainOffer.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardChainPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardDicePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHost.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostOutcome.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostOutcomePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostPool.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostRetarget.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardHostWaste.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardRestore.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardResume.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardSavingContinuationSnapshot.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardSavingSnapshot.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardSuccessorChain.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardSuccessorOffers.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindNativeWardSuccessorProtocol.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindQueuedFormFormalWard.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindQueuedFormWardRetarget.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindQueuedFormWardWaste.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindQueuedFormWardWaste.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellFormalWard.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellRedirectChain.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellRedirectChainGuards.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellSuccessorCollector.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellSuccessorGuards.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellSuccessorPublication.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardBountifulBook.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardBountifulNative.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardBountifulParent.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardChoiceList.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardOriginal.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardOriginalFrontier.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardOutcome.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardPage.http.test.tsx": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardPageCold.http.test.tsx": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardPhysicalPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardProgressSnapshot.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardRefine.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardReplayContext.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardRetargetPage.http.test.tsx": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardRetargetPermission.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardSaving.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardSuccess.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWardWaste.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWindowCompletedAuthority.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWindowNoopRefine.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWindowRuleSignature.actual.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindSpellWindowSuccessor.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardBanePublication.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardBlessSource.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldBardic.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldBardicGreen.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldDeclineBinding.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldPage.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldPendingFresh.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardHeldPublication.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardOriginalPool.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardPendingFresh.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardReplayFallback.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardRetargetChain.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardRetargetChainConsumer.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardRetargetChainNegative.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardRetargetChainPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardSaveModifiers.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardSaveModifiers.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardSaveModifiersPage.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardSavingChoice.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardSavingInputBinding.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/mastermindWardTerminalInput.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/pages/maps/spellWardReplaySession.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/pages/maps/spellWardTempestuousBeforeJoint.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/pages/maps/spellWardTempestuousJoint.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/beginTurnAction.provenance.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityCollectorSession.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityCompletedProof.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityCompletion.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFirstOwn.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFirstOwnCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFirstOwnEligibility.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFirstOwnPageRoute.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFirstOwnPaired.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityFullSource.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHalfHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHalfPairedComplete.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHoldIndependentEffect.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHoldPageAckLoader.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityHoldPublicationLifetime.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityLaterOriginal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityLaterOwnEligibility.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityLocalProjection.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityMixedHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityMixedOwn.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityMixedOwn.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityMixedOwnFresh.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityNativeLifetime.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityNextActorPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOriginalBook.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOriginalOperation.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOriginalQualification.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOriginalReceipt.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOriginalRecovery.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOwnDelayed.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOwnFinalized.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityOwnNext.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPageCoordinator.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPageFrontier.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedConfirmationOrder.ui.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedEarlyOwn.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedOriginal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedOwnAfterB.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPairedOwnYield.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPendingTargetCold.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPersistentHost.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityProtectedPrefix.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityPureModeEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivitySavingOriginal.boundary.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivitySavingOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetHelpHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetOwn.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetOwn.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetOwnPageRoute.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetPaired.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetPaired.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulActivityTargetPairedHoldEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathFirstRepeatMapsProducer.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathFirstRepeatPageLateAck.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathRepeatDiceRoute.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathRepeatPageCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathRepeatPageLateAck.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathRepeatSavingCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulDeathRepeatTransport.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/bountifulResponseReentry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.ledger.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.normalAck.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.origin.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.own.deferred.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.own.deferredChoice.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.own.native.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.own.page.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathActiveArea.page.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathNoBClockPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatFirstOriginal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatFirstOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatHalfBrave.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatHalfBrave.counter.native.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-death-repeat-half-brave-r345-r1/actual-native-observation-r3.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatHalfBravePage.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatLate.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatLateDriver.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatPriorCounts.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatPriorCounts.counter.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatSavingOriginal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathRepeatSavingOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.area-original.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.area-stage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.bane-original.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.bane-stage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.beacon-original.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.beacon-stage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.bless-original.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.bless-stage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.cold.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.deferred-reader.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.deferred-stage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.driver.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.host.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.local-publication.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.native-lucky.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.page-begin-economy.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.page-command.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.page-economy-effect.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.tail.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/deathSaveTurnAction.bountiful.use20.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/depthGiftExplorationBreathing.actual.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/canonical-round2.json"
+  ],
+  "src/rulesets/dnd5e/environmentalMovement.readonly.actual.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeControllerSource.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeFirstTurnCarry.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeOriginal.room.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeOriginalCarry.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeOriginalDice.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/initiativeOriginalStart.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/installedSummonConstitution.scope.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/canonical-round2.json"
+  ],
+  "src/rulesets/dnd5e/magicTruthSourceChoices.readonly.actual.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindCollectorReadOperation.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindGenericWardSaving.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindPositiveWardBUse.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindProtectedWardReader.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSecondSpellWardFailureAuthority.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSecondSpellWardInput.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSecondSpellWardPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSecondSpellWardWaste.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSecondSpellWardWastePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardMultiOwner.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardMultiOwnerDeclinePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardMultiOwnerPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNewTargetPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod",
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNewTargetParent.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNextOwner.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNextOwnerCold.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNextOwnerDeclinePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardNextOwnerPage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardOutsideInitiative.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardOutsideInitiativePage.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWardRetargetProposal.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWindowPageClock.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindSpellWindowReadOperation.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.dice.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.legal.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.mainGates.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.pageBinding.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/r61-all-private-r351/view/src/pages/MapsWorkspacePage.tsx"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.protocol.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardOwn.qualifier.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingLaterB.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingLaterBFrontier.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingMixed.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingMixedCoordinator.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingMixedPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingMixedTwoDie.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingMixedTwoDiePage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingOwnCoordinator.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingOwnPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardSavingSession.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/mastermindWardTwoDieBUse.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/nativeLuckyPairedOnce.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/perytonExplorationBreathing.actual.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/canonical-round2.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityDriver.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityEmptyWillingPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityFirstColdRestore.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityFullPrefix.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityInitialEntry.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityNextOriginal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityNoChoiceGraphPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityObservation.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-ability-original-r303-r1/actual-native-first-spell-r1.json",
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityOriginalBook.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityOriginalPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod",
+    ".codex-temp/xge-next-feature/root-merge-preparation/r61-all-private-r303/view/src/pages/MapsWorkspacePage.tsx"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityOwnFinalized.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityOwnTargetCold.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityPendingAdmission.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityPendingPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellAbilityQualification.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundActualMainAckCombat.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-normal-ack-combat-r365-r1/sealed-r2/auxiliary/before-Main.tsx",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-normal-ack-combat-r365-r1/sealed-r2/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-normal-ack-combat-r365-r1/sealed-r2/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundAnsweredSessionActualNative.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-answered-combined-source-r362-r1/sealed-r2/auxiliary/single557.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundCompletedBurstActualMainBase.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-completed-burst-base-r364-r1/sealed-r1/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-completed-burst-base-r364-r1/sealed-r1/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundLateCastingCarrierActualMain.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-answered-page-preview-source-r363-r1/sealed-r1/auxiliary/single557.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundMissingEffect.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundNoBColdActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-no-b-r351-r1/actual-document-domain-r5.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundNoBFullActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-no-b-r351-r1/actual-document-domain-r5.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimary.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryAnswered.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryAnsweredColdWholeActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-answered-recovery-r355-r1/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-answered-recovery-r355-r1/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryAnsweredRoom.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-parent-r355-r1/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-parent-r355-r1/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryAnsweredWholeActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-parent-r355-r1/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-parent-r355-r1/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryBoilerplateActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryDeclineSavingWholeActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/answered-room-source-diagnostic-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/answered-room-ui-diagnostic-r4.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/append-failure-r3.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/append-guards-r4.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/decline-fact-optional-r5.json",
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-decline-r355-r1/evidence/pending-prefix-counters-r2.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryEmptyCastingCarrierActualMain.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryEmptyChoicesActualMain.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryFirstParent.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryHalfOwn0Dispatch.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryMissing.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryOwn.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellCompoundPrimaryPrepareTimeActualMain.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-compound-primary-prepare-time-r361-r1/sealed-r1/auxiliary/single557.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingActualPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingConditionalDamage.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingEffectMissing.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingFirstBContinuationActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingFrostbiteActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingIceKnifeFixedNative.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingInitialBrave.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-saving-brave-r349-r1/observed-mode-r1.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingMultiTargetActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/bountiful-luck/bountiful-plugin-spell-saving-multi-target-r349-r1/target-order-observed-r1.json",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingMultiTargetSecondBActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingNoBOwnActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingOriginalBook.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingOriginalOperation.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingOwnActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingPairedSingleNaturalOneActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingPhysicalPage.pipeline.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingTempBefore.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginSpellSavingTempBeforeActualPage.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginTempestuousSavingBefore.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/pluginTempestuousSavingMaterial.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/readonlyWardPresentation.counter.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/scalarFeatureRuntime.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingBountifulDriver.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingBountifulOriginal.normal-ack.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingBountifulOriginal.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingBountifulOriginalMint.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingBountifulOriginalQualification.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingNativeLucky.decline.normalAck.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingNativeLucky.deferredDecline.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingNativeLucky.deferredUse.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingNativeLucky.entry.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingNativeLucky.first.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOriginalSaving.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOriginalSaving.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOriginalSavingRoute.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOriginalTarget.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOwnNext.decline.complete.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOwnNext.deferredDecline.complete.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOwnNext.deferredUse.complete.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOwnNext.room-r3.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingOwnNext.use.complete.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetOriginal.normal-ack.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetOriginalCollector.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetOriginalCompletion.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetOriginalContinuation.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetOriginalEntry.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTargetPublicationLifetime.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTempestuousBountyCompletion.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellcastingTempestuousOwnCompletion.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellTargetOriginalPreparation.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellTargetOriginalSaving.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellTargetOriginalSaving.page.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardNewTargetChain.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardOriginalTargetRetarget.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardOwnerAnswerBarrier.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardRetargetDestination.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardRetargetOwner.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardRetargetSavingPrefix.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardSavingOriginal.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod",
+    ".codex-temp/xge-next-feature/mastermind/formal-cumulative-base152-root-r2/sealed-r1/private-base152-mastermind-prospective153-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardSavingReplay.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardSavingReplayChain.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/spellWardSavingReplayWitness.native.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/stormSoulExplorationBreathing.actual.test.ts": [
+    ".codex-temp/xge-next-feature/mastermind/bountiful-mastermind-base152-root-r1/sealed-r1/private-base152-bountiful-mastermind-prospective154-round2.starmod",
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/canonical-round2.json"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostOriginal.counter.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostOriginal.flow.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostOriginal.issued.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostOriginal.ledger.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostOriginal.source.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.actualEntry.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.after.bridge.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.bridge.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.clock.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.parentScope.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousHostWindow.prefix.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginOriginalInputs.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.actualBrowserGraph.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.beforeBase.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.book.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.coldPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.coldProbe.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.coldReprepare.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.earlyBook.normalAck.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.earlyPrelude.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.earlyRoom.normalAck.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.flight.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.flow.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.landing.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.landingBase.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.landingMissing.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.missing.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.original.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.original.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.original.normalAck.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.pageCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.pageFacade.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.pageIntent.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.phase.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.preRawPage.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.publicationCollector.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.publicationReadSet.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPluginXge.session.native.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousPositiveWard.frontier.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousWardRetargetCanonical.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousWardRetargetNormal.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousWardRetargetRoom.auth.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ],
+  "src/rulesets/dnd5e/tempestuousWardRetargetScope.native.http.test.ts": [
+    ".codex-temp/xge-next-feature/root-merge-preparation/prospective155-package-r305-r1/private-base152-prospective155-round2.starmod"
+  ]
+}

@@ -5,7 +5,7 @@ import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState,SharedPlayerActionState,SharedPlayerActionRequestQueueState} from '../../lib/sharedCombatTypes'
 import type {MastermindThoughtGateway,MastermindThoughtContestRequest,MastermindThoughtPrompt} from './mastermindThoughtReadingParent'
 import {prepareDnd5ePluginFeatureAction,resolvePreparedDnd5ePluginFeatureAction} from '../../rulesets/dnd5e/pluginFeatureAction'
-import {dnd5eAbilityCheckRollMode,dnd5eCombatantSoulOfDeceitFeatureId} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eAbilityCheckRollMode,dnd5eCombatantSoulOfDeceitFeatureId} from "../../application/combat/dnd5eCombatRules"
 import {dnd5ePluginFeatureDefinition} from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import {captureSoulOfDeceitReading,resolveSoulOfDeceitReading,withSoulOfDeceitReadingPermissionAsync} from '../../rulesets/dnd5e/mastermindSoulOfDeceit'
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'

@@ -23,7 +23,7 @@ import{isDnd5eEffectiveRulesContextV1}from'../../rulesets/dnd5e/effectiveRulesCo
 import type{Character}from'../../types/character'
 import type{BattleMap}from'../../store/maps'
 import type{SharedCombatState,SharedPlayerActionRequestQueueState,SharedPlayerActionState}from'../../lib/sharedCombatTypes'
-import{loadSharedResource,requestSharedMastermindSpellWindow,requestSharedMastermindMisdirection}from'../../lib/sharedApi'
+import{loadSharedResource,requestSharedMastermindSpellWindow,requestSharedMastermindMisdirection}from"../../composition/browserSharedRoomResources"
 import{getRoomSession}from'../../lib/roomSession'
 import{normalizeSharedMapGeometry}from'../../lib/mapGeometry'
 import{normalizeSharedCampaignTime}from'../../lib/campaignTime'
@@ -32,7 +32,7 @@ import{prepareDnd5eSpellCast,captureDnd5ePreparedSpellAttackWindow,readCapturedD
 import{createDnd5eParentEffectClock}from'../../rulesets/dnd5e/activeEffects'
 import{getDnd5eCoreSpellRuntimeDefinitionV1}from'../../rulesets/dnd5e/activities/dnd5eCoreSpellActivities'
 import{captureDnd5eSourceEnvelopeAutomationV1}from'../../rulesets/dnd5e/activities/dnd5eUnifiedContentRegistry'
-import{dnd5eAttackAttemptWardRequirements,dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eSpellTargetAttackInput,type Dnd5eCoverAttackRedirectUse}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eAttackAttemptWardRequirements,dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eSpellTargetAttackInput,type Dnd5eCoverAttackRedirectUse}from"../../application/combat/dnd5eCombatRules"
 import{runtimeDnd5ePluginFeatures,dnd5ePluginFeatureDefinition,captureDnd5ePluginSubclassEnvelopeRegistrationV1,registeredDnd5ePluginResources,registeredDnd5ePluginSubclasses,registeredDnd5ePluginSpells,registeredDnd5ePluginItems,registeredDnd5ePluginMonsters,registeredDnd5ePluginFeats,registeredDnd5ePluginRaces,registeredDnd5ePluginBackgrounds,dnd5ePluginFeatureCurrentEnvelopeFullV1,dnd5ePluginSubclassCurrentEnvelopeFullV1}from'../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import{dnd5eExecutionEventKey}from'../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 

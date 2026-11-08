@@ -4,6 +4,7 @@ import type{BountifulDeathFirstRepeatIdentity,BountifulDeathFirstPreparationBook
 import type{BountifulDeathRepeatSavingIdentity,BountifulDeathRepeatSavingBook}from'./dnd5eDeathRepeatSavingTransport'
 import type{BountifulPluginSpellAbilityOriginalIdentity,BountifulPluginSpellAbilityOriginalBook}from'./dnd5ePluginSpellAbilityOriginalTransport'
 import type{BountifulActivityOriginalIdentity,BountifulActivityOriginalBook}from'./dnd5eActivityOriginalTransport'
+import type { RoomJournalMutation } from '../lib/roomCommunications'
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
   | { status: 'skipped'; reason: 'spectator' | 'forbidden' }
@@ -17,7 +18,7 @@ export interface SharedResourceWriteOptions {
   readRevisions?: Readonly<Record<string, number>>
   undoGroupId?: string
   undoLabel?: string
-  roomJournalMutations?: readonly unknown[]
+  roomJournalMutations?: readonly RoomJournalMutation[]
 }
 
 export interface SharedResourceTransactionWrite<T = unknown> {
@@ -149,4 +150,30 @@ export interface SharedRoomGatewayPort {
       refreshOnVisibilityRestore?: boolean
     },
   ): () => void
+
+  submitSharedActivityDeathChoice?: typeof import('../lib/sharedApi').submitSharedActivityDeathChoice
+  submitSharedActivityDeathInitiativeRaw?: typeof import('../lib/sharedApi').submitSharedActivityDeathInitiativeRaw
+  requestSharedArcaneBasePrefix?: typeof import('../lib/sharedApi').requestSharedArcaneBasePrefix
+  requestSharedArcaneMovement?: typeof import('../lib/sharedApi').requestSharedArcaneMovement
+  requestSharedArcaneNative?: typeof import('../lib/sharedApi').requestSharedArcaneNative
+  requestSharedMastermindMagicTruth?: typeof import('../lib/sharedApi').requestSharedMastermindMagicTruth
+  requestSharedMastermindMisdirection?: typeof import('../lib/sharedApi').requestSharedMastermindMisdirection
+  readBountifulOpportunitySequenceBook?: typeof import('../lib/sharedApi').readBountifulOpportunitySequenceBook
+  publishSharedEvent?: typeof import('../lib/sharedApi').publishSharedEvent
+  requestSharedMastermindThoughtReading?: typeof import('../lib/sharedApi').requestSharedMastermindThoughtReading
+  requestSharedScBasePrefix?: typeof import('../lib/sharedApi').requestSharedScBasePrefix
+  mutateSharedCombatInterrupt?: typeof import('../lib/sharedApi').mutateSharedCombatInterrupt
+  requestSharedEffectEndConfirmedReceipt?: typeof import('../lib/sharedApi').requestSharedEffectEndConfirmedReceipt
+  loadBountifulMonsterDamageZeroOriginalSource?: typeof import('../lib/sharedApi').loadBountifulMonsterDamageZeroOriginalSource
+  probeBountifulMonsterDamageZeroOriginalParent?: typeof import('../lib/sharedApi').probeBountifulMonsterDamageZeroOriginalParent
+  loadBountifulMonsterDamageZeroOriginalParent?: typeof import('../lib/sharedApi').loadBountifulMonsterDamageZeroOriginalParent
+  currentBountifulMonsterDamageZeroOriginal?: typeof import('../lib/sharedApi').currentBountifulMonsterDamageZeroOriginal
+  readTempestuousBeforeOriginalPreparationBook?: typeof import('../lib/sharedApi').readTempestuousBeforeOriginalPreparationBook
+  inspectBountifulSpellDamageZeroOriginalParent?: typeof import('../lib/sharedApi').inspectBountifulSpellDamageZeroOriginalParent
+  readBountifulSpellDamageZeroOriginalBook?: typeof import('../lib/sharedApi').readBountifulSpellDamageZeroOriginalBook
+  readStormCastOriginalPreparationBook?: typeof import('../lib/sharedApi').readStormCastOriginalPreparationBook
+  inspectBountifulDamageZeroOriginalParent?: typeof import('../lib/sharedApi').inspectBountifulDamageZeroOriginalParent
+  readBountifulDamageZeroOriginalBook?: typeof import('../lib/sharedApi').readBountifulDamageZeroOriginalBook
+  submitSharedArmorNativeChoice?: typeof import('../lib/sharedApi').submitSharedArmorNativeChoice
+  submitSharedArmorNativeRaw?: typeof import('../lib/sharedApi').submitSharedArmorNativeRaw
 }

@@ -10,7 +10,7 @@ import{resolvePreparedDnd5eSpellCast}from'../../rulesets/dnd5e/spellAction'
 import{resolvePreparedDnd5ePluginSpellCast}from'../../rulesets/dnd5e/pluginSpellTransaction'
 import{resolvePreparedDnd5eClassFeature}from'../../rulesets/dnd5e/classFeatureAction'
 import{resolvePreparedDnd5eAdjudicatedSpell}from'../../rulesets/dnd5e/adjudicatedSpellAction'
-import type{Dnd5eActionResult,Dnd5eHeadlessCombatState}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eActionResult,Dnd5eHeadlessCombatState}from"../../application/combat/dnd5eCombatRules"
 import type{Dnd5eMapResultPlan}from'../../rulesets/dnd5e/mapBridge'
 import type{Character}from'../../types/character'
 import type{BattleMap}from'../../store/maps'

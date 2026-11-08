@@ -13,7 +13,7 @@ import{getRoomSession}from'../../lib/roomSession'
 import{normalizeSharedMapGeometry,type SharedMapGeometryState}from'../../lib/mapGeometry'
 import{createDnd5eMapCombatSnapshot}from'../../rulesets/dnd5e/mapBridge'
 import{createDnd5eDamageCommitSession}from'../../rulesets/dnd5e/damageCommitSession'
-import{dnd5eIncomingAttackRerollOptions,type Dnd5eAction}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eIncomingAttackRerollOptions,type Dnd5eAction}from"../../application/combat/dnd5eCombatRules"
 import{dnd5eTargetCriticalThreshold}from'../../rulesets/dnd5e/targetCriticalThreshold'
 import{dnd5ePluginFeatureCurrentEnvelopeFullV1,dnd5ePluginFeatureDefinition}from'../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import type{PersistedSecondChanceAttack,SecondChanceCombat}from'./secondChanceHostCommit'
@@ -38,7 +38,7 @@ function samePreparedCharacter(left:Character,right:Character|undefined){
 /** The parent caller passes its already authorized original action, not a reaction
  * payload. All ability, dice-mode, ownership, visibility, HP and reaction facts
  * are rebuilt from the current persisted room through the genuine map bridge. */
-export async function issueSecondChanceAttack(input:{arcaneBeforeSecondChance?:ArcaneBeforeSecondChanceDecline;armorBeforeSecondChance?:ArmorBeforeSecondChanceDecline;mapId:string;parentTransactionId:string;action?:Dnd5eAction;state?:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eHeadlessCombatState;nativeContext?:import('../../rulesets/dnd5e/damageReactionFlow').Dnd5eDamageReactionMapContext;preparedOriginal?:SecondChancePreparedOriginal;options?:Parameters<typeof import('../../rulesets/dnd5e/headlessCombatEngine').resolveDnd5eHeadlessAction>[2];featureId?:string;additionalIncoming?:SecondChanceAdditionalIncoming},gateway:Gateway):Promise<PersistedSecondChanceAttack>{
+export async function issueSecondChanceAttack(input:{arcaneBeforeSecondChance?:ArcaneBeforeSecondChanceDecline;armorBeforeSecondChance?:ArmorBeforeSecondChanceDecline;mapId:string;parentTransactionId:string;action?:Dnd5eAction;state?:import("../../application/combat/dnd5eCombatRules").Dnd5eHeadlessCombatState;nativeContext?:import('../../rulesets/dnd5e/damageReactionFlow').Dnd5eDamageReactionMapContext;preparedOriginal?:SecondChancePreparedOriginal;options?:Parameters<typeof import("../../application/combat/dnd5eCombatRules").resolveDnd5eHeadlessAction>[2];featureId?:string;additionalIncoming?:SecondChanceAdditionalIncoming},gateway:Gateway):Promise<PersistedSecondChanceAttack>{
  const firstNativeIssuedNow=Date.now()
  const session=getRoomSession(),guard=()=>{const current=getRoomSession();if(!session||session.role!=='dm'||current?.roomId!==session.roomId||current.memberId!==session.memberId||current.role!=='dm')throw Error('second-chance-issue:host-room-required')};guard()
  const[characters,maps,combat,rawGeometry,originalClock]=await Promise.all([gateway.loadResource<Snapshot<{characters:Character[]}>>('characters'),gateway.loadResource<Snapshot<{maps:BattleMap[]}>>('maps'),gateway.loadResource<Snapshot<SecondChanceCombat>>('combat'),gateway.loadResource<Snapshot<SharedMapGeometryState>>('map-geometry'),gateway.loadResource<import('../../lib/campaignTime').SharedCampaignTimeState&{_sync?:{revision?:number}}>('campaign-time')]);guard()

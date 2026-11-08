@@ -1,11 +1,11 @@
 import type{SharedPlayerActionState,SharedPlayerActionAckState,SharedCombatState}from'../../lib/sharedCombatTypes'
 import type{PublishPlayerActionAckInput}from'../../lib/playerActionAckPublish'
 import{publishPlayerActionAckWithSnapshots}from'../../lib/playerActionAckPublish'
-import type{SharedResourceTransactionWrite}from'../../lib/sharedApi'
+import type{SharedResourceTransactionWrite}from"../../composition/browserSharedRoomResources"
 import type{MastermindMagicTruthGateway}from'./mastermindMagicTruthRoom'
 import type{BattleMap}from'../../store/maps'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 import{readMastermindMagicTruthCompleted}from'./mastermindMagicTruthRoom'
 const readProtectedOriginal=(value:object,_gateway:MastermindMagicTruthGateway)=>readMastermindMagicTruthCompleted(value)
 export interface MastermindMagicTruthPublication{readonly mastermindMagicTruthPublication:unique symbol}

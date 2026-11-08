@@ -9,7 +9,7 @@ import{buildDnd5eLevelAdvancementPlan,applyDnd5eLevelAdvancement}from'../../rule
 import{dnd5eStartingEquipmentPlan,defaultDnd5eStartingEquipmentSelection,resolveDnd5eStartingEquipment}from'../../rulesets/dnd5e/startingEquipment'
 import{dnd5eAvailableWildShapeForms,dnd5eCanWildShapeInto,DND5E_WILD_SHAPE_KNOWN_FORMS_KEY}from'../../rulesets/dnd5e/wildShape'
 import{createDnd5eMapCombatSnapshot,planDnd5eMapResultApplication}from'../../rulesets/dnd5e/mapBridge'
-import{resolveDnd5eHeadlessAction,dnd5eCoverAttackRedirectEligible,dnd5eCombatantCoverRedirectFeatureIds}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{resolveDnd5eHeadlessAction,dnd5eCoverAttackRedirectEligible,dnd5eCombatantCoverRedirectFeatureIds}from"../../application/combat/dnd5eCombatRules"
 import{prepareDnd5eMonsterAttack}from'../../rulesets/dnd5e/monsterAttackAction'
 import{growMastermind}from'./mastermindMagicFamilies.fixture'
 import type{BattleMap}from'../../store/maps'

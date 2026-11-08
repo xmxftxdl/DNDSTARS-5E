@@ -13,7 +13,7 @@ import { type BountifulNativeDiceRoute } from "../../rulesets/dnd5e/bountifulHos
 import { type Dnd5eSpellDamageDieRerollUse, type Dnd5eSpellDamageDiceGroup } from "../../rulesets/dnd5e/spellDamageDieRerolls";
 import type {Dnd5eActionResult,Dnd5eCombatEvent,Dnd5eMapResultPlan,Dnd5eCombatant,Dnd5eHeadlessCombatState,Dnd5eOpeningAttackSavingThrowRoll,Dnd5eSpellDamageMaxDieBonusUse,Dnd5eDamageType,Dnd5eAction,Dnd5eUnsupportedAirborneFallPreview,Dnd5eActiveEffectSavingThrowRoll,Dnd5eOptionalBonusDieUse,Dnd5ePersistentAreaDmAdjustment,Dnd5ePersistentAreaTriggerCandidate,PreparedDnd5ePersistentAreaTrigger,PreparedDnd5eOpeningAttackSavingThrow} from '../../application/combat/dnd5eCombatRules'
 import {createDnd5eMapCombatSnapshot,planDnd5eMapResultApplication} from '../../rulesets/dnd5e/mapBridge'
-import {dnd5eSavingThrowRerollFeature,dnd5eCanActAtZeroHitPoints,previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,resolveDnd5eHeadlessAction,resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,observeCommittedDnd5ePersistentAreaTrigger} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eSavingThrowRerollFeature,dnd5eCanActAtZeroHitPoints,previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,resolveDnd5eHeadlessAction,resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,observeCommittedDnd5ePersistentAreaTrigger} from "../../application/combat/dnd5eCombatRules"
 import {dnd5eSavingThrowMode} from '../../rulesets/dnd5e/passiveDefenses'
 import {dnd5eConditionLabel} from '../../rulesets/dnd5e/conditions'
 import {getDnd5eSrdMonster} from '../../rulesets/dnd5e/monsters'

@@ -1,5 +1,5 @@
 import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'
-import type {Dnd5eActionResult} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eActionResult} from "../../application/combat/dnd5eCombatRules"
 import {restoreActivityDeathParent,readPublishedActivityDeathParent,type ActivityDeathParentIdentity,sameActivityParentData} from './postNativeActivityParent'
 
 export type ActivityDeathMapsSettlement=

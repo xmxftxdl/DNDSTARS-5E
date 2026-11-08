@@ -3,7 +3,7 @@ import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
 import{captureArcaneOrdinaryMoveParent,readArcaneOrdinaryMoveParent,restoreArcaneOrdinaryMoveParent}from'./arcaneOrdinaryMoveParent'
 import{settleArcaneOrdinaryMovementHazard,ArcaneMovementRollPending,ArcaneMovementOwnerChoicePending}from'./arcaneMovementHazardCheckpoint'
 import{publishArcaneOrdinaryMovement,readArcaneOrdinaryMovementPublished}from'./publishArcaneOrdinaryMovement'
-import{requestSharedArcaneMovement}from'../../lib/sharedApi'
+import{requestSharedArcaneMovement}from"../../composition/browserSharedRoomResources"
 import{arcaneMovementTransport,readArcaneMovementDiceRequest}from'./arcaneMovementDiceTransport'
 import type{Dnd5eMovementHazardsProducer}from'./movementHazardsProducer'
 type Gateway=Pick<SharedRoomGatewayPort,'loadResource'|'saveResourcesAtomically'>

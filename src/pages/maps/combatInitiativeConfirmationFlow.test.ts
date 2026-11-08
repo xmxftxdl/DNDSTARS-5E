@@ -1,7 +1,8 @@
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const workspaceSource = readFileSync(new URL('../MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+const workspaceSource = readMapsWorkspaceSource()
 const dialogSource = readFileSync(
   new URL('../../components/map/CombatInitiativeConfirmationDialog.tsx', import.meta.url),
   'utf8',

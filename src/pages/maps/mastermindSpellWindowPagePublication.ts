@@ -1,15 +1,15 @@
 import type{BattleMap}from'../../store/maps'
 import type{Character}from'../../types/character'
 import type{SharedCombatState,SharedPlayerActionState,SharedPlayerActionAckState,SharedPlayerActionProcessedState}from'../../lib/sharedCombatTypes'
-import{loadSharedResource,saveSharedResourceWithResult,saveSharedResourcesAtomically,publishSharedEvent}from'../../lib/sharedApi'
+import{loadSharedResource,saveSharedResourceWithResult,saveSharedResourcesAtomically,publishSharedEvent}from"../../composition/browserSharedRoomResources"
 import{getRoomSession}from'../../lib/roomSession'
-import{requestSharedMastermindSpellWindow,requestSharedMastermindMisdirection}from'../../lib/sharedApi'
+import{requestSharedMastermindSpellWindow,requestSharedMastermindMisdirection}from"../../composition/browserSharedRoomResources"
 import{prepareMastermindSpellWindowPageQueuedAck,type MastermindSpellWindowGateway}from'./mastermindSpellWindowParent'
 import{prepareMastermindSpellWindowNativePagePublication,publishMastermindSpellWindowNative}from'./mastermindSpellWindowNativePublication'
 import{publishPlayerActionAckWithSnapshots}from'../../lib/playerActionAckPublish'
 import{buildPlayerActionAck,buildPlayerActionProcessedState}from'../../lib/playerActionAck'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 type Doc<T>=T&{_sync?:{revision?:number}}
 type Gateway=MastermindSpellWindowGateway&{saveResourcesAtomically:typeof saveSharedResourcesAtomically;publishAck:(ack:SharedPlayerActionAckState)=>Promise<void>}
 const gateway:Gateway={session:getRoomSession,loadResource:loadSharedResource,source:requestSharedMastermindSpellWindow,owner:requestSharedMastermindMisdirection,saveResourcesAtomically:saveSharedResourcesAtomically,publishAck:ack=>publishSharedEvent('player-action-dm-to-player',ack)}

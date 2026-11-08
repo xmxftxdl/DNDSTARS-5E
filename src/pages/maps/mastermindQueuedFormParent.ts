@@ -1,30 +1,30 @@
-import{requestSharedMastermindWardSavingChoice}from'../../lib/sharedApi'
+import{requestSharedMastermindWardSavingChoice}from"../../composition/browserSharedRoomResources"
 import type{MastermindWardSavingApi,MastermindWardSavingPrompt}from'./mastermindWardSavingChoice'
 import{canBonusDieChangeFailure}from'../../lib/d20InterruptPolicy'
-import{dnd5eHeldBardicInspirationDie}from'../../rulesets/dnd5e/headlessCombatEngine'
-import{dnd5eCombatantHasConcentrationEffect}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeldBardicInspirationDie}from"../../application/combat/dnd5eCombatRules"
+import{dnd5eCombatantHasConcentrationEffect}from"../../application/combat/dnd5eCombatRules"
 import{resolveDnd5eSavingThrowInterrupts}from'./dnd5eRollInterruptPipeline'
-import{requestSharedMastermindWardOriginal}from'../../lib/sharedApi'
+import{requestSharedMastermindWardOriginal}from"../../composition/browserSharedRoomResources"
 import type{MastermindWardOriginalApi,MastermindWardOriginalDiceRequest}from'./mastermindWardOriginalDiceTransport'
 import{defaultMastermindWardAttackChoicePort,type MastermindWardAttackChoicePort}from'./mastermindWardAttackChoice'
 import{createDnd5eParentEffectClock}from'../../rulesets/dnd5e/activeEffects'
-import{resolveDnd5eHeadlessAction,dnd5eAttackAttemptWardRequirements,resolveDnd5eCoverAttackRedirectPrefix,type Dnd5eCombatEvent,type Dnd5eSpellcastingSavingThrowRoll}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{resolveDnd5eHeadlessAction,dnd5eAttackAttemptWardRequirements,resolveDnd5eCoverAttackRedirectPrefix,type Dnd5eCombatEvent,type Dnd5eSpellcastingSavingThrowRoll}from"../../application/combat/dnd5eCombatRules"
 import{planDnd5eMapResultApplication}from'../../rulesets/dnd5e/mapBridge'
 import{readDnd5eCompletedCombatBase}from'./settleDnd5eCombatResult'
 import type{settleDnd5eConcentrationChecks}from'./settleDnd5eCombatResult'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 import{dnd5eSpellResolutionInitiativeOrder}from'./spellSettlementCoordinator'
 import{captureDnd5ePluginSubclassEnvelopeRegistrationV1}from'../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState,SharedPlayerActionRequestQueueState,SharedPlayerActionState} from '../../lib/sharedCombatTypes'
 import {normalizeSharedMapGeometry} from '../../lib/mapGeometry'
-import {loadSharedResource,requestSharedMastermindMisdirection} from '../../lib/sharedApi'
+import {loadSharedResource,requestSharedMastermindMisdirection} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import {dnd5ePluginFeatureDefinition} from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
-import {dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from "../../application/combat/dnd5eCombatRules"
 import {prepareDnd5eMonsterAttack,readDnd5eActualMonsterFacadeResult,resolvePreparedDnd5eMonsterAttack,type PreparedDnd5eMonsterAttack} from '../../rulesets/dnd5e/monsterAttackAction'
 import {getDnd5eSrdMonster} from '../../rulesets/dnd5e/monsters'
 import {dnd5eCreatureFormAttackSelection} from '../../rulesets/dnd5e/creatureFormMultiattackContinuation'

@@ -7,7 +7,7 @@ import{DND5E_LANGUAGE_CHOICES}from'../../rulesets/dnd5e/buildChoiceCatalogs'
 import{dnd5eCharacterKnownLanguagesV1}from'../../rulesets/dnd5e/buildChoices'
 import{mastermindObservationSourceSignature,type MastermindComparison,type MastermindObservationPurpose}from'../../rulesets/dnd5e/mastermindObservation'
 import{requestMastermindObservation,acceptMastermindObservation,confirmMastermindObservation,interruptMastermindObservation,discloseMastermindInformation,listMastermindObservations,recoverMastermindObservationKnowledge,readMastermindObservationKnowledge,type MastermindObservationSummary}from'../../rulesets/dnd5e/mastermindObservationRoom'
-import{subscribeSharedResourceInvalidation}from'../../lib/sharedApi'
+import{subscribeSharedResourceInvalidation}from"../../composition/browserSharedRoomResources"
 const attributeLabels:Record<MastermindComparison,string>={int:'智力',wis:'感知',cha:'魅力','class-levels':'职业等级'}
 const relativeLabels={equal:'相等',higher:'更高',lower:'更低'}
 const languageLabel=(id:string)=>DND5E_LANGUAGE_CHOICES.find(language=>language.id===id)?.label??id

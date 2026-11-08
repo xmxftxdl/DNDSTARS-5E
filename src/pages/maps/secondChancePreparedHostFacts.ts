@@ -2,7 +2,7 @@ import{captureDnd5eActivityWorldFactRecovery,restoreDnd5eActivityWorldFactRecove
 import type{SharedCombatInterrupt}from'../../lib/combatInterruptQueue'
 import {bountifulNativePreparedRecoveryFacts,stripBountifulNativePreparedCapability} from '../../rulesets/dnd5e/bountifulHostOperation'
 import {restoreBountifulNativePreparedRecovery} from '../../rulesets/dnd5e/bountifulNativePreparedRecovery'
-import {loadSharedResource,mutateSharedCombatInterrupt} from '../../lib/sharedApi'
+import {loadSharedResource,mutateSharedCombatInterrupt} from "../../composition/browserSharedRoomResources"
 import{dnd5ePreparedOrdinaryWeaponSceneFacts,stripDnd5ePreparedOrdinaryWeaponScene,restoreDnd5ePreparedOrdinaryWeaponSceneFacts,type OrdinaryWeaponSceneFacts}from'../../rulesets/dnd5e/ordinaryWeaponScene'
 import{getRoomSession}from'../../lib/roomSession'
 import{captureDnd5eCompletedRestCastingWitness,restoreDnd5eCompletedRestCastingWitness,type Dnd5eCompletedRestCastingWitness}from'../../rulesets/dnd5e/restActivityCastingWindow'

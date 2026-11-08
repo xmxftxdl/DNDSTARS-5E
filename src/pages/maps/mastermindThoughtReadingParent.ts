@@ -4,13 +4,13 @@ import{mastermindThoughtAuthorizedVersions}from'../../../shared/mastermind-thoug
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState,SharedPlayerActionRequestQueueState,SharedPlayerActionState} from '../../lib/sharedCombatTypes'
-import {loadSharedResource,requestSharedMastermindThoughtReading} from '../../lib/sharedApi'
+import {loadSharedResource,requestSharedMastermindThoughtReading} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import {normalizeSharedCampaignTime} from '../../lib/campaignTime'
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import {ensureDnd5eCoreSpellActivitiesRegisteredV1} from '../../rulesets/dnd5e/activities/dnd5eCoreSpellActivities'
 import {prepareDnd5ePluginSpellCast,resolvePreparedDnd5ePluginSpellCast} from '../../rulesets/dnd5e/pluginSpellTransaction'
-import {dnd5eCombatantSoulOfDeceitFeatureId} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eCombatantSoulOfDeceitFeatureId} from "../../application/combat/dnd5eCombatRules"
 import {dnd5ePluginFeatureDefinition} from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import {captureSoulOfDeceitReading,resolveSoulOfDeceitReading,withSoulOfDeceitReadingPermission,withSoulOfDeceitReadingPermissionAsync} from '../../rulesets/dnd5e/mastermindSoulOfDeceit'
 

@@ -1,4 +1,4 @@
-import {submitSharedActivityDeathInitiativeRaw} from '../../lib/sharedApi'
+import {submitSharedActivityDeathInitiativeRaw} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import {secondChanceCanonicalControllerMemberId} from '../../../shared/second-chance-controller.mjs'
 import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'

@@ -1,12 +1,12 @@
 import{completeMastermindThoughtBaseOriginal}from'./mastermindThoughtContestPrefix'
 import type{Character}from'../../types/character'
 import type{SharedCombatState}from'../../lib/sharedCombatTypes'
-import type{saveSharedResourcesAtomically,SharedResourceTransactionWrite}from'../../lib/sharedApi'
+import type{saveSharedResourcesAtomically,SharedResourceTransactionWrite}from"../../composition/browserSharedRoomResources"
 import type{MastermindThoughtGateway}from'./mastermindThoughtReadingParent'
 import type{BattleMap}from'../../store/maps'
 import{readMastermindThoughtResolvedOriginal}from'./mastermindThoughtContestPrefix'
 import{createDnd5eTurnEconomyCounts,projectDnd5eHeadlessTurnEconomy}from'../../rulesets/dnd5e/turnEconomy'
-import{dnd5eHeadlessTurnKey}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eHeadlessTurnKey}from"../../application/combat/dnd5eCombatRules"
 type Gateway=MastermindThoughtGateway&{saveResourcesAtomically:typeof saveSharedResourcesAtomically}
 type View=Awaited<ReturnType<typeof readMastermindThoughtResolvedOriginal>>
 const resource='mastermind-thought-readings',ordered=(v:unknown):unknown=>Array.isArray(v)?v.map(ordered):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,n])=>[k,ordered(n)])):v,sig=(v:unknown)=>JSON.stringify(ordered(v)),same=(a:unknown,b:unknown)=>sig(a)===sig(b)

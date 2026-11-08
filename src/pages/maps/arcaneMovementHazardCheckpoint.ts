@@ -1,9 +1,9 @@
 import{replayDnd5ePlayerMovePrefix}from'../../rulesets/dnd5e/playerMovePrefix'
-import{dnd5eEffectiveMovementPoolSpeed,type Dnd5eCombatant}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eEffectiveMovementPoolSpeed,type Dnd5eCombatant}from"../../application/combat/dnd5eCombatRules"
 import{tokenCenterForAnchorCell}from'../../lib/gridCombat'
 import{mapGeometryRuntimeForMap,mapGeometryTerrainElevationAtPoint}from'../../lib/mapGeometry'
 import type{SharedCombatState}from'../../lib/sharedCombatTypes'
-import type{Dnd5eActionResult}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eActionResult}from"../../application/combat/dnd5eCombatRules"
 import{resolveDnd5eActionWithMaterialDamageReactions}from'../../rulesets/dnd5e/damageReactionFlow'
 import{encodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
 import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'

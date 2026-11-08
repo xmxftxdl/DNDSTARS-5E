@@ -2,20 +2,20 @@ import{registerDnd5eHostReceipt,registerDnd5eHostReceiptSlot,cloneDnd5eHostTrans
 import{originalD20ReplaySourceKey,validateOriginalD20ReplayFacts,type OriginalD20ReplayFacts}from'../../rulesets/dnd5e/allyNaturalOneCheckpoint'
 import{assertNativeWardLedgerDelta}from'./mastermindNativeWardLedgerScope'
 import{getDnd5eSrdMonster}from'../../rulesets/dnd5e/monsters'
-import{resolveDnd5eCoverAttackRedirectPrefix}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{resolveDnd5eCoverAttackRedirectPrefix}from"../../application/combat/dnd5eCombatRules"
 import{createDnd5eParentEffectClock}from'../../rulesets/dnd5e/activeEffects'
-import{resolveDnd5eHeadlessAction,dnd5eAttackAttemptWardRequirements,dnd5eHeadlessTurnKey,type Dnd5eSpellcastingSavingThrowRoll,type Dnd5eCombatEvent}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{resolveDnd5eHeadlessAction,dnd5eAttackAttemptWardRequirements,dnd5eHeadlessTurnKey,type Dnd5eSpellcastingSavingThrowRoll,type Dnd5eCombatEvent}from"../../application/combat/dnd5eCombatRules"
 import{resolveDnd5eSavingThrowInterrupts}from'./dnd5eRollInterruptPipeline'
 import{mastermindExecutionParentId}from'../../../shared/mastermind-execution-id.mjs'
 import{createDnd5eMapCombatSnapshot}from'../../rulesets/dnd5e/mapBridge'
 import{normalizeSharedMapGeometry}from'../../lib/mapGeometry'
-import {loadSharedResource,requestSharedMastermindMisdirection} from '../../lib/sharedApi'
+import {loadSharedResource,requestSharedMastermindMisdirection} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import type {Character} from '../../types/character'
 import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState} from '../../lib/sharedCombatTypes'
 import {prepareDnd5eMonsterAttack,projectDnd5eMonsterAttackPreparation,refreshDnd5eMonsterAttackOccurrence,resolvePreparedDnd5eMonsterAttack,readDnd5eActualMonsterFacadeResult,type PreparedDnd5eMonsterAttack} from '../../rulesets/dnd5e/monsterAttackAction'
-import {dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from "../../application/combat/dnd5eCombatRules"
 import {dnd5ePluginFeatureDefinition,captureDnd5ePluginSubclassEnvelopeRegistrationV1} from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import type {MastermindMisdirectionGateway} from './mastermindMisdirectionParent'

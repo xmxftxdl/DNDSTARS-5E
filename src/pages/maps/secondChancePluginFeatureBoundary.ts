@@ -2,7 +2,7 @@ import{secondChanceRestAuthority}from'./secondChanceParentScope'
 import{resolvePreparedDnd5ePluginFeatureAction,resolvePreparedDnd5ePluginFeatureLanding}from'../../rulesets/dnd5e/pluginFeatureAction'
 import{dnd5ePluginHeadlessActionDefinition}from'../../rulesets/dnd5e/pluginApi'
 import{cloneDnd5eHostTransactionInput}from'../../rulesets/dnd5e/hostTransactionClone'
-import type{Dnd5eHeadlessCombatState}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eHeadlessCombatState}from"../../application/combat/dnd5eCombatRules"
 import type{Dnd5eReactionMaterialChange}from'../../rulesets/dnd5e/damageReactionMaterialLedger'
 type Input=Parameters<typeof resolvePreparedDnd5ePluginFeatureAction>[0]
 type Result=Awaited<ReturnType<typeof resolvePreparedDnd5ePluginFeatureAction>>

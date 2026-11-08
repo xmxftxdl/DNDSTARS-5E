@@ -160,7 +160,6 @@ import {
   mapCanvasTokenClickAction,
   syncMapCanvasViewportDataset,
 } from './mapCanvasInteraction'
-
 interface MapCanvasProps {
   map: BattleMap
   /** Campaign clock projection supplied by the page/controller boundary. */

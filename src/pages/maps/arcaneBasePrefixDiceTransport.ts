@@ -1,5 +1,5 @@
 import {getRoomSession} from '../../lib/roomSession'
-import {requestSharedArcaneBasePrefix} from '../../lib/sharedApi'
+import {requestSharedArcaneBasePrefix} from "../../composition/browserSharedRoomResources"
 import type {ArcaneBasePrefixTransport} from './arcaneBasePrefixRolls'
 
 export interface ArcaneBasePrefixDiceRequest {

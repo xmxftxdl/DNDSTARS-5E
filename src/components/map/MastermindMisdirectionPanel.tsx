@@ -1,7 +1,7 @@
 import DiceOverlayPortal from '../DiceOverlayPortal'
 import {useEffect,useState} from 'react'
 import type {Token} from '../../store/maps'
-import {subscribeSharedResourceInvalidation} from '../../lib/sharedApi'
+import {subscribeSharedResourceInvalidation} from "../../composition/browserSharedRoomResources"
 import {answerMastermindMisdirection,listMastermindMisdirectionPrompts,type MastermindMisdirectionPrompt} from '../../pages/maps/mastermindMisdirectionParent'
 
 /** This panel presents the server's single-owner decision, never a caller's

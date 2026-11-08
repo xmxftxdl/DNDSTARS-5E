@@ -77,7 +77,7 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
 
   const roster = dm.getByTestId('dm-room-player-roster')
   await expect(roster.getByText('爱丽丝', { exact: true })).toBeVisible()
-  await expect(roster.getByText('爱丽丝的战士', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' })).toBeVisible({ timeout: 20_000 })
   await roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' }).click()
   const detail = dm.getByRole('dialog', { name: '爱丽丝的战士的角色卡详情' })
   await expect(detail).toBeVisible()

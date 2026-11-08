@@ -5,16 +5,16 @@ import { browserSharedRoomService } from './browserSharedRoomService'
  * Stores depend on the Application service while HTTP/SSE details remain in
  * the adapter. New orchestration should prefer a dedicated Controller.
  */
-export const getSharedResourceRevisionWatermark = browserSharedRoomService.getSharedResourceRevisionWatermark
-export const loadSharedResource = browserSharedRoomService.loadSharedResource
-export const saveSharedResource = browserSharedRoomService.saveSharedResource
-export const saveSharedResourceWithResult = browserSharedRoomService.saveSharedResourceWithResult
-export const saveSharedResourcesAtomically = browserSharedRoomService.saveSharedResourcesAtomically
-export const mutateSharedRoomResource = browserSharedRoomService.mutateSharedRoomResource
-export const putSharedImage = browserSharedRoomService.putSharedImage
-export const getSharedImage = browserSharedRoomService.getSharedImage
-export const deleteSharedImage = browserSharedRoomService.deleteSharedImage
-export const sampleSharedServerClock = browserSharedRoomService.sampleSharedServerClock
+export const getSharedResourceRevisionWatermark = deferredRoomTransport('getSharedResourceRevisionWatermark')
+export const loadSharedResource = deferredRoomTransport('loadSharedResource')
+export const saveSharedResource = deferredRoomTransport('saveSharedResource')
+export const saveSharedResourceWithResult = deferredRoomTransport('saveSharedResourceWithResult')
+export const saveSharedResourcesAtomically = deferredRoomTransport('saveSharedResourcesAtomically')
+export const mutateSharedRoomResource = deferredRoomTransport('mutateSharedRoomResource')
+export const putSharedImage = deferredRoomTransport('putSharedImage')
+export const getSharedImage = deferredRoomTransport('getSharedImage')
+export const deleteSharedImage = deferredRoomTransport('deleteSharedImage')
+export const sampleSharedServerClock = deferredRoomTransport('sampleSharedServerClock')
 
 export type {
   SharedResourceSaveResult,
@@ -24,43 +24,73 @@ export type {
   SharedServerClockSample,
 } from '../ports/sharedRoomGateway'
 
-export const requestSharedMastermindWardAttack = browserSharedRoomService.requestSharedMastermindWardAttack
-export const requestSharedMastermindWardOriginal = browserSharedRoomService.requestSharedMastermindWardOriginal
-export const requestSharedMastermindWardSavingChoice = browserSharedRoomService.requestSharedMastermindWardSavingChoice
-export const loadBountifulActivityOriginalSource = browserSharedRoomService.loadBountifulActivityOriginalSource
-export const requestSharedStormFurySaving = browserSharedRoomService.requestSharedStormFurySaving
-export const requestSharedTempestuousLandingOriginal = browserSharedRoomService.requestSharedTempestuousLandingOriginal
-export const requestSharedTempestuousHostOriginal = browserSharedRoomService.requestSharedTempestuousHostOriginal
-export const loadDmUndoHistory = browserSharedRoomService.loadDmUndoHistory
-export const subscribeSharedResourceInvalidation = browserSharedRoomService.subscribeSharedResourceInvalidation
+export const requestSharedMastermindWardAttack = deferredRoomTransport('requestSharedMastermindWardAttack')
+export const requestSharedMastermindWardOriginal = deferredRoomTransport('requestSharedMastermindWardOriginal')
+export const requestSharedMastermindWardSavingChoice = deferredRoomTransport('requestSharedMastermindWardSavingChoice')
+export const loadBountifulActivityOriginalSource = deferredRoomTransport('loadBountifulActivityOriginalSource')
+export const requestSharedStormFurySaving = deferredRoomTransport('requestSharedStormFurySaving')
+export const requestSharedTempestuousLandingOriginal = deferredRoomTransport('requestSharedTempestuousLandingOriginal')
+export const requestSharedTempestuousHostOriginal = deferredRoomTransport('requestSharedTempestuousHostOriginal')
+export const loadDmUndoHistory = deferredRoomTransport('loadDmUndoHistory')
+export const subscribeSharedResourceInvalidation = deferredRoomTransport('subscribeSharedResourceInvalidation')
 export type{DmUndoTransactionSummary}from'../ports/sharedRoomGateway'
 
-export const requestSharedBountifulInitiativeOriginal = browserSharedRoomService.requestSharedBountifulInitiativeOriginal
-export const requestSharedMastermindSpellWindow = browserSharedRoomService.requestSharedMastermindSpellWindow
-export const requestSharedMastermindNativeWardOriginal = browserSharedRoomService.requestSharedMastermindNativeWardOriginal
-export const requestSharedMastermindNativeWardBountiful = browserSharedRoomService.requestSharedMastermindNativeWardBountiful
+export const requestSharedBountifulInitiativeOriginal = deferredRoomTransport('requestSharedBountifulInitiativeOriginal')
+export const requestSharedMastermindSpellWindow = deferredRoomTransport('requestSharedMastermindSpellWindow')
+export const requestSharedMastermindNativeWardOriginal = deferredRoomTransport('requestSharedMastermindNativeWardOriginal')
+export const requestSharedMastermindNativeWardBountiful = deferredRoomTransport('requestSharedMastermindNativeWardBountiful')
 
-export const requestSharedMastermindNativeWardOutcome = browserSharedRoomService.requestSharedMastermindNativeWardOutcome
+export const requestSharedMastermindNativeWardOutcome = deferredRoomTransport('requestSharedMastermindNativeWardOutcome')
 
-export const loadBountifulPluginSpellAbilityOriginalSource = browserSharedRoomService.loadBountifulPluginSpellAbilityOriginalSource
-export const loadBountifulPluginSpellSavingOriginalSource = browserSharedRoomService.loadBountifulPluginSpellSavingOriginalSource
-export const loadBountifulPluginSpellCompoundPrimarySource = browserSharedRoomService.loadBountifulPluginSpellCompoundPrimarySource
+export const loadBountifulPluginSpellAbilityOriginalSource = deferredRoomTransport('loadBountifulPluginSpellAbilityOriginalSource')
+export const loadBountifulPluginSpellSavingOriginalSource = deferredRoomTransport('loadBountifulPluginSpellSavingOriginalSource')
+export const loadBountifulPluginSpellCompoundPrimarySource = deferredRoomTransport('loadBountifulPluginSpellCompoundPrimarySource')
 
-export const loadSpellcastingOriginalPreparation=browserSharedRoomService.loadSpellcastingOriginalPreparation
-export const requestSharedSpellcastingOriginalSaving=browserSharedRoomService.requestSharedSpellcastingOriginalSaving
+export const loadSpellcastingOriginalPreparation = deferredRoomTransport("loadSpellcastingOriginalPreparation")
+export const requestSharedSpellcastingOriginalSaving = deferredRoomTransport("requestSharedSpellcastingOriginalSaving")
 
-export const loadBountifulDeathRepeatSavingSource=browserSharedRoomService.loadBountifulDeathRepeatSavingSource
+export const loadBountifulDeathRepeatSavingSource = deferredRoomTransport("loadBountifulDeathRepeatSavingSource")
 
 // Lazy calls preserve the existing composition cycle without eager API reads.
 export const requestSharedPluginTempestuousOriginal = (operation:'prepare'|'read'|'probe'|'publication'|'inputs-read'|'inputs-start'|'inputs-record'|'inputs-save-start'|'saving-read'|'saving-begin'|'saving-append'|'saving-answer'|'saving-complete'|'saving-material-read'|'saving-material',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousOriginal(operation,payload)
 export const requestSharedPluginTempestuousLandingOriginal = (operation:'prepare'|'inspect'|'read'|'dice',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousLandingOriginal(operation,payload)
 
-export const loadBountifulDeathFirstOriginalSource=browserSharedRoomService.loadBountifulDeathFirstOriginalSource
-export const inspectBountifulDeathFirstOriginal=browserSharedRoomService.inspectBountifulDeathFirstOriginal
-export const loadBountifulDeathFirstRepeatSavingSource=browserSharedRoomService.loadBountifulDeathFirstRepeatSavingSource
+export const loadBountifulDeathFirstOriginalSource = deferredRoomTransport("loadBountifulDeathFirstOriginalSource")
+export const inspectBountifulDeathFirstOriginal = deferredRoomTransport("inspectBountifulDeathFirstOriginal")
+export const loadBountifulDeathFirstRepeatSavingSource = deferredRoomTransport("loadBountifulDeathFirstRepeatSavingSource")
 
 export const requestSharedPluginTempestuousSavingOwned = (operation:'read'|'claim',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousSavingOwned(operation,payload)
 
 export const requestSharedBountifulMonsterSavingLate=<T>(input:{parentId:string;mapId:string;combatId:string}):Promise<T>=>browserSharedRoomService.requestSharedBountifulMonsterSavingLate<T>(input)
 
 export const loadBountifulDeathAreaOriginalSource:typeof browserSharedRoomService.loadBountifulDeathAreaOriginalSource=(input)=>browserSharedRoomService.loadBountifulDeathAreaOriginalSource(input)
+
+// Keep transport reads lazy across the browser composition graph.
+function deferredRoomTransport<K extends keyof typeof browserSharedRoomService>(name: K): (typeof browserSharedRoomService)[K] {
+  return ((...args: unknown[]) => Reflect.apply(browserSharedRoomService[name] as (...values: unknown[]) => unknown, browserSharedRoomService, args)) as (typeof browserSharedRoomService)[K]
+}
+export const submitSharedActivityDeathChoice = deferredRoomTransport('submitSharedActivityDeathChoice')
+export const submitSharedActivityDeathInitiativeRaw = deferredRoomTransport('submitSharedActivityDeathInitiativeRaw')
+export const requestSharedArcaneBasePrefix = deferredRoomTransport('requestSharedArcaneBasePrefix')
+export const requestSharedArcaneMovement = deferredRoomTransport('requestSharedArcaneMovement')
+export const requestSharedArcaneNative = deferredRoomTransport('requestSharedArcaneNative')
+export const requestSharedMastermindMagicTruth = deferredRoomTransport('requestSharedMastermindMagicTruth')
+export const requestSharedMastermindMisdirection = deferredRoomTransport('requestSharedMastermindMisdirection')
+export const readBountifulOpportunitySequenceBook = deferredRoomTransport('readBountifulOpportunitySequenceBook')
+export const publishSharedEvent = deferredRoomTransport('publishSharedEvent')
+export const requestSharedMastermindThoughtReading = deferredRoomTransport('requestSharedMastermindThoughtReading')
+export const requestSharedScBasePrefix = deferredRoomTransport('requestSharedScBasePrefix')
+export const mutateSharedCombatInterrupt = deferredRoomTransport('mutateSharedCombatInterrupt')
+export const requestSharedEffectEndConfirmedReceipt = deferredRoomTransport('requestSharedEffectEndConfirmedReceipt')
+export const loadBountifulMonsterDamageZeroOriginalSource = deferredRoomTransport('loadBountifulMonsterDamageZeroOriginalSource')
+export const probeBountifulMonsterDamageZeroOriginalParent = deferredRoomTransport('probeBountifulMonsterDamageZeroOriginalParent')
+export const loadBountifulMonsterDamageZeroOriginalParent = deferredRoomTransport('loadBountifulMonsterDamageZeroOriginalParent')
+export const currentBountifulMonsterDamageZeroOriginal = deferredRoomTransport('currentBountifulMonsterDamageZeroOriginal')
+export const readTempestuousBeforeOriginalPreparationBook = deferredRoomTransport('readTempestuousBeforeOriginalPreparationBook')
+export const inspectBountifulSpellDamageZeroOriginalParent = deferredRoomTransport('inspectBountifulSpellDamageZeroOriginalParent')
+export const readBountifulSpellDamageZeroOriginalBook = deferredRoomTransport('readBountifulSpellDamageZeroOriginalBook')
+export const readStormCastOriginalPreparationBook = deferredRoomTransport('readStormCastOriginalPreparationBook')
+export const inspectBountifulDamageZeroOriginalParent = deferredRoomTransport('inspectBountifulDamageZeroOriginalParent')
+export const readBountifulDamageZeroOriginalBook = deferredRoomTransport('readBountifulDamageZeroOriginalBook')
+export const submitSharedArmorNativeChoice = deferredRoomTransport('submitSharedArmorNativeChoice')
+export const submitSharedArmorNativeRaw = deferredRoomTransport('submitSharedArmorNativeRaw')

@@ -1,4 +1,4 @@
-import{dnd5eAbilityCheckRollMode}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eAbilityCheckRollMode}from"../../application/combat/dnd5eCombatRules"
 import{resolvePreparedDnd5ePluginSpellCast,type Dnd5ePluginSpellResolution,type PreparedDnd5ePluginSpellCast}from'../../rulesets/dnd5e/pluginSpellTransaction'
 import{captureSoulOfDeceitReading,resolveSoulOfDeceitReading,withSoulOfDeceitReadingPermissionAsync}from'../../rulesets/dnd5e/mastermindSoulOfDeceit'
 import{readMastermindThoughtContestOriginal,readMastermindThoughtAnsweredOriginal,type MastermindThoughtGateway,type MastermindThoughtOriginal}from'./mastermindThoughtReadingParent'

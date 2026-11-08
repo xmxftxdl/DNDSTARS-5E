@@ -1,9 +1,9 @@
 import{previewMastermindSpellWindowOwnerEligibility}from'./mastermindSpellWindowParent'
-import{dnd5eAvailableTempestuousSpellFlight}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eAvailableTempestuousSpellFlight}from"../../application/combat/dnd5eCombatRules"
 import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
 import{beginMastermindSpellWindowCollector,readMastermindSpellWindowCollector,type MastermindSpellWindowCollector}from'./mastermindSpellWindowCollector'
 import{readMastermindSpellWindowOriginal,prepareMastermindSpellWindowOwner,type MastermindSpellWindowGateway}from'./mastermindSpellWindowParent'
-import{dnd5eCombatantCoverRedirectFeatureIds}from'../../rulesets/dnd5e/headlessCombatEngine'
+import{dnd5eCombatantCoverRedirectFeatureIds}from"../../application/combat/dnd5eCombatRules"
 type Selection={parentTransactionId:string;mapId:string;actorTokenId:string;spellCast:NonNullable<SharedPlayerActionState['dnd5eSpellCast']>}
 type Issued={parentId:string;collector:MastermindSpellWindowCollector;signature:string}
 const issued=new WeakMap<SharedPlayerActionState,Issued>()

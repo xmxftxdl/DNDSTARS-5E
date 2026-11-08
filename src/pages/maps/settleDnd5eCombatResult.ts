@@ -11,7 +11,7 @@ import {getDnd5eSrdCombatSpell} from '../../rulesets/dnd5e/spells'
 import {resolveDnd5ePreparedWithDamageReactions,type Dnd5eDamageReactionFlowOptions} from '../../rulesets/dnd5e/damageReactionFlow'
 import { planDnd5eDisadvantageNegation, type DisadvantageNegationRoll } from '../../rulesets/dnd5e/disadvantageNegation'
 import type {Dnd5eSpellcastingSavingThrowRoll} from '../../application/combat/dnd5eCombatRules'
-import {dnd5eSpellcastingSaveRequirements,previewDnd5eSpellcastingSaves} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eSpellcastingSaveRequirements,previewDnd5eSpellcastingSaves} from "../../application/combat/dnd5eCombatRules"
 import type {
   BardicInspirationRollType,
   DmAdjudicationInterruptResponse,
@@ -20,7 +20,7 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type {Dnd5eUnsupportedAirborneFallPreview,Dnd5eAction,Dnd5eActionResult,Dnd5eCombatant,Dnd5eHeadlessCombatState,Dnd5eMapResultPlan,Dnd5eSpellTargetSavingThrowRoll} from '../../rulesets/dnd5e'
 import {dnd5eCombatantPairKey} from '../../rulesets/dnd5e/headlessCombatPrimitives'
-import {dnd5eHellishRebukeReactionOption,dnd5ePendingMonsterMechanicResolutions,dnd5ePendingMonsterDeathAreaEffects,dnd5ePostSpellRandomTablePlan,previewDnd5eUnsupportedAirborneFalls,previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,resolveDnd5eHeadlessAction,resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eHellishRebukeReactionOption,dnd5ePendingMonsterMechanicResolutions,dnd5ePendingMonsterDeathAreaEffects,dnd5ePostSpellRandomTablePlan,previewDnd5eUnsupportedAirborneFalls,previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,resolveDnd5eHeadlessAction,resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange} from "../../application/combat/dnd5eCombatRules"
 import {dnd5eSavingThrowMode} from '../../rulesets/dnd5e/passiveDefenses'
 import {getDnd5eSrdMonster} from '../../rulesets/dnd5e/monsters'
 import {markDnd5eSummonsDamaged} from '../../rulesets/dnd5e/summonedCreatures'

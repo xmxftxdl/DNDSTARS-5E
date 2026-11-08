@@ -13,6 +13,37 @@ import type {
 
 /** Application boundary for authoritative room transport and CAS persistence. */
 export class SharedRoomService {
+  private forwardTransport<K extends keyof SharedRoomGatewayPort>(name: K): NonNullable<SharedRoomGatewayPort[K]> {
+    return ((...args: unknown[]) => {
+      const handler = this.gateway[name]
+      if (typeof handler !== 'function') throw new Error(String(name) + ':transport-unavailable')
+      return Reflect.apply(handler, this.gateway, args)
+    }) as NonNullable<SharedRoomGatewayPort[K]>
+  }
+  readonly submitSharedActivityDeathChoice = this.forwardTransport('submitSharedActivityDeathChoice')
+  readonly submitSharedActivityDeathInitiativeRaw = this.forwardTransport('submitSharedActivityDeathInitiativeRaw')
+  readonly requestSharedArcaneBasePrefix = this.forwardTransport('requestSharedArcaneBasePrefix')
+  readonly requestSharedArcaneMovement = this.forwardTransport('requestSharedArcaneMovement')
+  readonly requestSharedArcaneNative = this.forwardTransport('requestSharedArcaneNative')
+  readonly requestSharedMastermindMagicTruth = this.forwardTransport('requestSharedMastermindMagicTruth')
+  readonly requestSharedMastermindMisdirection = this.forwardTransport('requestSharedMastermindMisdirection')
+  readonly readBountifulOpportunitySequenceBook = this.forwardTransport('readBountifulOpportunitySequenceBook')
+  readonly requestSharedMastermindThoughtReading = this.forwardTransport('requestSharedMastermindThoughtReading')
+  readonly requestSharedScBasePrefix = this.forwardTransport('requestSharedScBasePrefix')
+  readonly requestSharedEffectEndConfirmedReceipt = this.forwardTransport('requestSharedEffectEndConfirmedReceipt')
+  readonly loadBountifulMonsterDamageZeroOriginalSource = this.forwardTransport('loadBountifulMonsterDamageZeroOriginalSource')
+  readonly probeBountifulMonsterDamageZeroOriginalParent = this.forwardTransport('probeBountifulMonsterDamageZeroOriginalParent')
+  readonly loadBountifulMonsterDamageZeroOriginalParent = this.forwardTransport('loadBountifulMonsterDamageZeroOriginalParent')
+  readonly currentBountifulMonsterDamageZeroOriginal = this.forwardTransport('currentBountifulMonsterDamageZeroOriginal')
+  readonly readTempestuousBeforeOriginalPreparationBook = this.forwardTransport('readTempestuousBeforeOriginalPreparationBook')
+  readonly inspectBountifulSpellDamageZeroOriginalParent = this.forwardTransport('inspectBountifulSpellDamageZeroOriginalParent')
+  readonly readBountifulSpellDamageZeroOriginalBook = this.forwardTransport('readBountifulSpellDamageZeroOriginalBook')
+  readonly readStormCastOriginalPreparationBook = this.forwardTransport('readStormCastOriginalPreparationBook')
+  readonly inspectBountifulDamageZeroOriginalParent = this.forwardTransport('inspectBountifulDamageZeroOriginalParent')
+  readonly readBountifulDamageZeroOriginalBook = this.forwardTransport('readBountifulDamageZeroOriginalBook')
+  readonly submitSharedArmorNativeChoice = this.forwardTransport('submitSharedArmorNativeChoice')
+  readonly submitSharedArmorNativeRaw = this.forwardTransport('submitSharedArmorNativeRaw')
+
   private readonly gateway: SharedRoomGatewayPort
 
   constructor(gateway: SharedRoomGatewayPort) {

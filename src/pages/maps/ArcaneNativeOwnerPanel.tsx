@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react'
 import type {ArcaneNativeOwnerRequest} from '../../../shared/arcane-native-parent.mjs'
-import type {Dnd5eHeadlessCombatState} from '../../rulesets/dnd5e/headlessCombatEngine'
-import {requestSharedArcaneNative} from '../../lib/sharedApi'
+import type {Dnd5eHeadlessCombatState} from "../../application/combat/dnd5eCombatRules"
+import {requestSharedArcaneNative} from "../../composition/browserSharedRoomResources"
 import {getRoomSession,ROOM_SESSION_EVENT} from '../../lib/roomSession'
 import {arcaneOwnerChoice,arcaneOwnerTargetIds,arcaneOwnerRequestKey,sameArcaneOwnerRequest} from './arcaneNativeOwnerChoice'
 

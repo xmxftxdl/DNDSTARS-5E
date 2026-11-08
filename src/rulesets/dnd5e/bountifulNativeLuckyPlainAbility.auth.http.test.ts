@@ -1,4 +1,5 @@
-import pageText from'../../pages/MapsWorkspacePage.tsx?raw';import ts from'typescript';import{bountifulNativeLuckyPromptsForMember,submitCurrentBountifulNativeLuckyChoice}from'./bountifulNativeLuckyRoomChoice';
+import { mapsWorkspaceSource as pageText } from '../../__tests__/mapsWorkspaceSource'
+import ts from'typescript';import{bountifulNativeLuckyPromptsForMember,submitCurrentBountifulNativeLuckyChoice}from'./bountifulNativeLuckyRoomChoice';
 import{it,expect,vi}from'vitest'
 import{buildMonsterZeroScene}from'./damageZeroMonsterOriginal.scene.fixture'
 import{damageZeroNormalAckHttpFixture}from'./damageZeroNormalAck.http.support'

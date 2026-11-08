@@ -5,11 +5,11 @@ import type {BattleMap} from '../../store/maps'
 import type {SharedCombatState,SharedPlayerActionRequestQueueState,SharedPlayerActionState} from '../../lib/sharedCombatTypes'
 import {normalizeSharedMapGeometry} from '../../lib/mapGeometry'
 import {normalizeSharedCampaignTime} from '../../lib/campaignTime'
-import {loadSharedResource,requestSharedMastermindMisdirection} from '../../lib/sharedApi'
+import {loadSharedResource,requestSharedMastermindMisdirection} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import {dnd5eExecutionEventKey} from '../../rulesets/dnd5e/activities/dnd5eActivityIdentity'
 import {dnd5ePluginFeatureDefinition} from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
-import {resolveDnd5eHeadlessAction,dnd5eHeadlessTurnKey,dnd5eAttackAttemptWardRequirements,resolveDnd5eCoverAttackRedirectPrefix,dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from '../../rulesets/dnd5e/headlessCombatEngine'
+import {resolveDnd5eHeadlessAction,dnd5eHeadlessTurnKey,dnd5eAttackAttemptWardRequirements,resolveDnd5eCoverAttackRedirectPrefix,dnd5eCombatantCoverRedirectFeatureIds,dnd5eCoverAttackRedirectEligible,type Dnd5eCoverAttackRedirectUse} from "../../application/combat/dnd5eCombatRules"
 import {prepareDnd5eEquipmentAttack,type PreparedDnd5eEquipmentAttack} from '../../rulesets/dnd5e/equipmentAttackAction'
 
 type Operation='begin'|'answer'|'project'|'list'
@@ -105,7 +105,7 @@ export async function prepareMastermindMisdirectionAck(value:object,action:Share
 
 /** The actual Ward collector is replayed against this issued decision's native
  * new-target snapshot. Only its exact blocked result can supply a prefix. */
-export async function settleMastermindMisdirectionBlockedWard(value:{prepared:PreparedDnd5eEquipmentAttack;previewPrepared?:PreparedDnd5eEquipmentAttack;coverAttackRedirect?:Dnd5eCoverAttackRedirectUse},ward:{allowed:boolean;attempted:boolean;state:PreparedDnd5eEquipmentAttack['state'];events:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatEvent[];saves:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]}){
+export async function settleMastermindMisdirectionBlockedWard(value:{prepared:PreparedDnd5eEquipmentAttack;previewPrepared?:PreparedDnd5eEquipmentAttack;coverAttackRedirect?:Dnd5eCoverAttackRedirectUse},ward:{allowed:boolean;attempted:boolean;state:PreparedDnd5eEquipmentAttack['state'];events:import("../../application/combat/dnd5eCombatRules").Dnd5eCombatEvent[];saves:import("../../application/combat/dnd5eCombatRules").Dnd5eSpellcastingSavingThrowRoll[]}){
  const bound=decisions.get(value);if(!bound)throw Error('mastermind-misdirection:issued-decision-required');
  const actual=await readMastermindMisdirectionPreparedInput(bound.original,bound.gateway);
  if(!actual?.coverAttackRedirect||!actual.previewPrepared||ward.allowed)throw Error('mastermind-misdirection:blocked-redirect-required');

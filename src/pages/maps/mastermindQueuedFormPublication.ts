@@ -1,7 +1,7 @@
 import type {SharedPlayerActionAckState,SharedPlayerActionProcessedState} from '../../lib/sharedCombatTypes'
 import {buildPlayerActionAck,buildPlayerActionProcessedState} from '../../lib/playerActionAck'
 import {publishPlayerActionAckWithSnapshots} from '../../lib/playerActionAckPublish'
-import {loadSharedResource,saveSharedResourcesAtomically,publishSharedEvent} from '../../lib/sharedApi'
+import {loadSharedResource,saveSharedResourcesAtomically,publishSharedEvent} from "../../composition/browserSharedRoomResources"
 import {getRoomSession} from '../../lib/roomSession'
 import {readMastermindQueuedFormCompleted} from './mastermindQueuedFormParent'
 

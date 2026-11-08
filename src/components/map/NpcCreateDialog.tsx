@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ImagePlus, Search, User, X } from 'lucide-react'
 import { characterPortraitBlob, createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { getImage, putImage } from '../../lib/imageStore'
-import { getSharedImage } from '../../lib/sharedApi'
+import { getSharedImage } from "../../composition/browserSharedRoomResources"
 import { getAccountSession } from '../../lib/accountSession'
 import { getRoomSession } from '../../lib/roomSession'
 import { loadNpcLibrary, saveNpcLibraryEntry, type NpcLibraryEntry } from '../../lib/npcLibrary'

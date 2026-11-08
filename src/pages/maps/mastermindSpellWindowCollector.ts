@@ -2,8 +2,8 @@ import{completeMastermindSpellWardCollectedOutcome,type MastermindSpellWardPageC
 import{isMastermindSpellWindowReadOperationOpen,beginMastermindSpellWindowReadOperation,type MastermindSpellWindowReadOperation,closeMastermindSpellWindowReadOperation,withMastermindSpellWindowReadOperation,normalizeMastermindSpellWindowTempestuousInput}from'./mastermindSpellWindowParent'
 import{beginMastermindSpellWindowOriginal,readMastermindSpellWindowOriginal,prepareMastermindSpellWindowOwner,readMastermindSpellWindowOwnerDecision,prepareMastermindSpellWindowRaw,prepareMastermindSpellWindowRawForChoices,assertMastermindSpellWindowRaw,resolveMastermindSpellWindowWithReactions,prepareMastermindSpellWindowWardOriginal,type MastermindSpellWindowWardOriginal,type MastermindSpellWindowGateway}from'./mastermindSpellWindowParent'
 import{readCapturedDnd5ePreparedSpellAttackWindow}from'../../rulesets/dnd5e/spellAction'
-import type{Dnd5eSpellTargetAttackRoll}from'../../rulesets/dnd5e/headlessCombatEngine'
-import{requestSharedMastermindSpellWindow}from'../../lib/sharedApi'
+import type{Dnd5eSpellTargetAttackRoll}from"../../application/combat/dnd5eCombatRules"
+import{requestSharedMastermindSpellWindow}from"../../composition/browserSharedRoomResources"
 
 type Raw=Awaited<ReturnType<typeof prepareMastermindSpellWindowRaw>>
 type Extras=Omit<Dnd5eSpellTargetAttackRoll,'targetId'|'coverAttackRedirect'|'d20'|'d20Second'|'effectRolls'>

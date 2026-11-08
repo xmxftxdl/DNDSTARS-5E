@@ -7,6 +7,7 @@ describe('sidebar navigation visibility', () => {
       '/dm-tools/simulation',
       '/dm-tools/workshop',
       '/dm-tools/prep',
+      '/dm-tools/map-converter',
     ])
     expect(sidebarNavItems('player').map((item) => item.to)).not.toContain('/simulation')
     expect(sidebarNavItems('player').map((item) => item.to)).not.toContain('/shops')
@@ -33,6 +34,7 @@ describe('sidebar navigation visibility', () => {
       '/campaign/ABC234/dm-tools/simulation',
       '/campaign/ABC234/dm-tools/workshop',
       '/campaign/ABC234/dm-tools/prep',
+      '/campaign/ABC234/dm-tools/map-converter',
     ])
     expect(sidebarNavItems('player', 'spectator', '/campaign/ABC234').map((item) => item.to))
       .toEqual(['/campaign/ABC234/maps'])

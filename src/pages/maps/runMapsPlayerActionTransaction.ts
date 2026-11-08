@@ -23,19 +23,19 @@ export interface RunMapsPlayerActionTransactionInput {
   recover: (error: unknown) => Promise<void>
   rejectAfterRecovery?: (error: unknown) => Promise<void> | void
   arcaneMovementSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPublished:()=>Promise<void>}
-  arcaneNativeSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPublished:(result:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult)=>Promise<void>}
+  arcaneNativeSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>}
   armorNativeSettlement?:{
     gateway:Pick<SharedRoomGatewayPort,'loadResource'>
-    onPublished:(result:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult)=>Promise<void>
+    onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>
   }
-  bountifulSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPending?:()=>void;onPublished:(result:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult)=>Promise<void>}
+  bountifulSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPending?:()=>void;onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>}
   secondChanceSettlement?:{
     gateway:Pick<SharedRoomGatewayPort,'loadResource'>
-    onPublished:(result:import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult)=>Promise<void>
+    onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>
   }
   activityDeathSettlement?:{
     gateway:Pick<SharedRoomGatewayPort,'loadResource'>
-    onPublished:(result:Extract<import('../../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult,{ok:true}>)=>Promise<void>
+    onPublished:(result:Extract<import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult,{ok:true}>)=>Promise<void>
   }
   now?: number
 }

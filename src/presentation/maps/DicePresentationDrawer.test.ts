@@ -1,3 +1,4 @@
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -75,7 +76,7 @@ describe('right dice presentation drawer', () => {
   })
 
   const overlaysSource = readFileSync(new URL('./DicePresentationOverlays.tsx', import.meta.url), 'utf8')
-  const workspaceSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+  const workspaceSource = readMapsWorkspaceSource()
   const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
 
   it('presents local and shared dice rolls from the right-side tray', () => {

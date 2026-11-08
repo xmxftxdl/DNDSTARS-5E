@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 
-const workspaceSource = readFileSync(
+const workspaceControllerSource = readFileSync(
   new URL('../MapsWorkspacePage.tsx', import.meta.url),
   'utf8',
 ).replace(/\r\n/g, '\n')
@@ -24,6 +24,9 @@ const panelsLayerSource = readFileSync(
 )
 
 const movementHazardsSource = readFileSync(new URL('./movementHazardsProducer.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const workspaceViewSource = readFileSync(new URL('../../presentation/maps/MapsWorkspaceView.tsx', import.meta.url), 'utf8')
+const sceneMapOverlaysSource = readFileSync(new URL('./useSceneMapOverlays.ts', import.meta.url), 'utf8')
+const workspaceSource = workspaceControllerSource + '\n' + workspaceViewSource
 const workspaceAst = ts.createSourceFile('MapsWorkspacePage.tsx', workspaceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
 const movementHazardsAst = ts.createSourceFile('movementHazardsProducer.ts', movementHazardsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 function sourceDeclaration(source: ts.SourceFile, name: string, initializer?: string) {
@@ -71,8 +74,9 @@ describe('MapsWorkspacePage render isolation', () => {
 
   it('subscribes to the active map while isolating all-map UI and artwork scans', () => {
     expect(workspaceSource).toContain('activeMap, addMap, updateMap')
-    expect(workspaceSource).toContain('<MapWorkspaceMapSelect')
-    expect(workspaceSource).toContain('<EnemyTokenPortraitSyncBoundary')
+    expect(workspaceViewSource).toContain('<MapWorkspaceMapSelect')
+    expect(workspaceViewSource).toContain('<EnemyTokenPortraitSyncBoundary')
+    expect(workspaceSource).toContain('renderMapsWorkspaceView(model)')
     expect(workspaceSource).not.toContain('maps, selectedId, select, addMap')
     expect(workspaceSource).not.toContain('useEnemyTokenPortraitSync({')
   })
@@ -83,13 +87,14 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(workspaceSource).toContain('const optimisticTokenMoveIds = useMemo(')
     expect(workspaceSource).toContain('const playerMovableTokenIds = useMemo(')
     expect(workspaceSource).toContain('const lockDragTokenIds = useMemo(')
-    expect(workspaceSource).toContain('const sceneTriggerZones = useMemo(')
-    expect(workspaceSource).toContain('const sceneInteractionPoints = useMemo(')
+    expect(workspaceSource).toContain('useSceneMapOverlays(')
+    expect(sceneMapOverlaysSource).toContain('const sceneTriggerZones = useMemo(')
+    expect(sceneMapOverlaysSource).toContain('const sceneInteractionPoints = useMemo(')
     expect(workspaceSource).toContain('const mapEditingCoordinator = useMemo(')
-    expect(workspaceSource).toContain('targetSelectTokenIds={targetSelectTokenIds}')
-    expect(workspaceSource).toContain('lockDragTokenIds={lockDragTokenIds}')
-    expect(workspaceSource).not.toContain('targetSelectTokenIds={[\n')
-    expect(workspaceSource).not.toContain('lockDragTokenIds={[\n')
+    expect(workspaceViewSource).toContain('targetSelectTokenIds={targetSelectTokenIds}')
+    expect(workspaceViewSource).toContain('lockDragTokenIds={lockDragTokenIds}')
+    expect(workspaceViewSource).not.toContain('targetSelectTokenIds={[\n')
+    expect(workspaceViewSource).not.toContain('lockDragTokenIds={[\n')
   })
 
   it('stabilizes interaction handlers before they reach the memoized Konva canvas', () => {

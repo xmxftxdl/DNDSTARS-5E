@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomCommandEnvelope } from '../lib/roomCommandBus'
-import { saveSharedResourcesAtomically } from '../lib/sharedApi'
+import { browserSharedRoomService } from '../composition/browserSharedRoomService'
+const { saveSharedResourcesAtomically } = browserSharedRoomService
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from '../rulesets/dnd5e'
 import {
   appRoomCommandBus,
@@ -30,11 +31,11 @@ import {
   type BattleMap,
 } from './maps'
 
-vi.mock('../lib/sharedApi', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/sharedApi')>()
+vi.mock('../composition/browserSharedRoomService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../composition/browserSharedRoomService')>()
   return {
     ...actual,
-    saveSharedResourcesAtomically: vi.fn(),
+    browserSharedRoomService: { ...actual.browserSharedRoomService, saveSharedResourcesAtomically: vi.fn() },
   }
 })
 

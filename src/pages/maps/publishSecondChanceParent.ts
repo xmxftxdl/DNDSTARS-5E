@@ -18,7 +18,7 @@ import type {BattleMap}from'../../store/maps'
 import type {SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
 import{getRoomSession}from'../../lib/roomSession'
 import{planDnd5eMapResultApplication}from'../../rulesets/dnd5e/mapBridge'
-import type{Dnd5eActionResult}from'../../rulesets/dnd5e/headlessCombatEngine'
+import type{Dnd5eActionResult}from"../../application/combat/dnd5eCombatRules"
 import type{SecondChanceCombat,PersistedSecondChanceAttack}from'./secondChanceHostCommit'
 import{createDnd5eDamageCommitSession}from'../../rulesets/dnd5e/damageCommitSession'
 import{validateSecondChanceAttackReceipts}from'../../../shared/second-chance-state.mjs'

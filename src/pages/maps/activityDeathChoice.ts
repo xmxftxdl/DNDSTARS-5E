@@ -1,4 +1,4 @@
-import {submitSharedActivityDeathChoice} from '../../lib/sharedApi'
+import {submitSharedActivityDeathChoice} from "../../composition/browserSharedRoomResources"
 import {secondChanceCanonicalControllerMemberId} from '../../../shared/second-chance-controller.mjs'
 import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'
 import type {SharedCombatInterrupt} from '../../lib/combatInterruptQueue'
