@@ -75,7 +75,7 @@ import {validateSecondChanceAttackReceipts,validateSceneReactionSpent} from '../
 import {multipartServerSurfaces, redactMultipartHistory} from '../shared/multipart-token-surfaces.mjs'
 import {migrateLegacyApCombatLogText, normalizeDedicatedDnd5eSharedState} from '../shared/legacy-combat-state.mjs'
 export {migrateLegacyApCombatLogText, normalizeDedicatedDnd5eSharedState}
-import { validSceneSensoryDeceptionSurvey } from '../src/lib/sceneSensoryDeceptionSurvey.ts'
+import { validSceneSensoryDeceptionSurvey } from '../shared/scene-sensory-deception-survey.mjs'
 import { falseHydraSongConceals } from '../shared/false-hydra-song.mjs'
 import { recordSceneTransitionSightings } from './scene-transition-sightings.mjs'
 import { recordAcceptedMovementSightings } from './movement-sightings.mjs'
