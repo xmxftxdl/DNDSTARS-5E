@@ -46,7 +46,7 @@ export interface Dnd5eSpellTargetingSession {
   damageMaximizationFeatureId?: string
   empowered: boolean
   draconicResistance: boolean
-  repellingBlast: boolean
+  repellingBlast: boolean; graspOfHadar?: boolean
   canSculpt: boolean
   maximumSculptedTargets: number
   sculptedTargetIds: string[]

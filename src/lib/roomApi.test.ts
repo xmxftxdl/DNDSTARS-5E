@@ -190,3 +190,4 @@ describe('room roster payload migration', () => {
     })
   })
 })
+

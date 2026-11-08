@@ -795,3 +795,4 @@ export function roomApiErrorMessage(error: unknown): string {
   }
   return messages[code] ?? messages['request-failed']
 }
+

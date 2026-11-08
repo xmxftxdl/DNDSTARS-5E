@@ -1,6 +1,7 @@
-import { snapWallDrawingPoint } from './wallEndpointSnap'
-import type {MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay} from './mapCanvasOverlays'
-export type {MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay} from './mapCanvasOverlays'
+import { snapGeometryDrawingPoint } from './wallEndpointSnap'
+import { WallEndpointSnapMarkers } from './WallEndpointSnapMarkers'
+import type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
+export type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
 import { ControlledWaterSceneLayer } from './ControlledWaterSceneLayer'
 import { MultipartHeadLayer } from './MultipartHeadLayer'
 import type { MapSurfaceMaterial } from '../../lib/mapSurfaceMaterials'
@@ -1610,8 +1611,12 @@ export default function MapCanvas({
     }
   }
 
-  const snapGeometryPoint = (point: Point): Point => snapWallDrawingPoint(point, geometry, geometryTool, view.scale,
-    { enabled: geometrySnapToGrid, size: map.gridSize, x: map.gridOffsetX ?? 0, y: map.gridOffsetY ?? 0 })
+  const snapGeometryPoint = (point: Point): Point => snapGeometryDrawingPoint(point, {
+    geometry, tool: geometryTool, scale: stageRef.current?.scaleX() ?? view.scale,
+    snapToGrid: geometrySnapToGrid, gridSize: map.gridSize,
+    gridOffsetX: map.gridOffsetX, gridOffsetY: map.gridOffsetY,
+  })
+
   const geometryGridCellAtPoint = (point: Point): MapGeometryGridCell | null => {
     if (point.x < 0 || point.y < 0 || point.x >= map.width || point.y >= map.height) return null
     const gridSize = Math.max(1, map.gridSize)
@@ -3462,6 +3467,7 @@ export default function MapCanvas({
             onPointsChange={isDM ? onGeometryEntityPointsChange : undefined}
           />
           )}
+        {geometryOverlayVisible && <WallEndpointSnapMarkers draft={geometryDraft} geometry={geometry} inv={inv} />}
         <Group listening={false}>
           {visibleProjectiles.map((projectile) => (
             <CombatProjectileEffect

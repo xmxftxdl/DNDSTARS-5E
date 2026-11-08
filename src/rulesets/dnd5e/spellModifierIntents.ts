@@ -32,6 +32,7 @@ export type Dnd5eSpellModifierIntentId =
   | `metamagic-${Dnd5eMetamagicId}`
   | 'draconic-elemental-resistance'
   | 'repelling-blast'
+  | 'grasp-of-hadar'
   | `declarative-damage-maximization:${string}`
 
 export type Dnd5eSpellModifierOperationV1 =
@@ -41,6 +42,7 @@ export type Dnd5eSpellModifierOperationV1 =
   | { kind: 'empowered-spell' }
   | { kind: 'draconic-elemental-resistance' }
   | { kind: 'repelling-blast' }
+  | { kind: 'grasp-of-hadar' }
   | { kind: 'declarative-damage-maximization'; featureId: string }
 
 export interface Dnd5eSpellModifierIntentDefinitionV1 {
@@ -75,7 +77,7 @@ export interface Dnd5eResolvedSpellModifierOptionsV1 {
   metamagic?: Dnd5eSpellMetamagicPayload
   empowered?: boolean
   draconicResistance?: boolean
-  repellingBlast?: boolean
+  repellingBlast?: boolean; graspOfHadar?: boolean
   damageMaximizationFeatureId?: string
 }
 
@@ -262,6 +264,19 @@ const definitions: readonly Dnd5eSpellModifierIntentDefinitionV1[] = [
     },
     operation: { kind: 'repelling-blast' },
   },
+  {
+    schemaVersion: 1,
+    id: 'grasp-of-hadar',
+    label: '哈达之握',
+    description: '预激活后，自己的回合内，下一次魔能爆首次命中时将目标拉近至多 10 尺；每回合一次。',
+    iconMotif: 'force',
+    source: {
+      classId: 'warlock',
+      minimumLevel: 2,
+      selection: { groupId: 'eldritch-invocations', optionId: 'grasp-of-hadar' },
+    },
+    operation: { kind: 'grasp-of-hadar' },
+  },
 ] as const
 
 const definitionById = new Map<Dnd5eSpellModifierIntentId, Dnd5eSpellModifierIntentDefinitionV1>(
@@ -386,6 +401,7 @@ export function dnd5eSpellModifierIntentIdsFromOptions(
   if (options?.metamagic) ids.push(`metamagic-${options.metamagic.kind}`)
   if (options?.empowered) ids.push('metamagic-empowered')
   if (options?.draconicResistance) ids.push('draconic-elemental-resistance')
+  if (options?.graspOfHadar) ids.push('grasp-of-hadar')
   if (options?.repellingBlast) ids.push('repelling-blast')
   if (options?.damageMaximizationFeatureId) ids.push(`declarative-damage-maximization:${options.damageMaximizationFeatureId}`)
   return ids
@@ -528,10 +544,11 @@ export function resolveDnd5eSpellModifierIntents(input: {
       else options.overchannel = true
       continue
     }
-    if (operation.kind === 'repelling-blast') {
+    if (operation.kind === 'repelling-blast' || operation.kind === 'grasp-of-hadar') {
       if (!spell || input.castingClassId !== 'warlock' || spell.id !== 'eldritch-blast') {
         reasons.push(`${definition.label}只能用于以邪术师施法来源施放的魔能爆。`)
-      } else options.repellingBlast = true
+      } else if (operation.kind === 'grasp-of-hadar') options.graspOfHadar = true
+      else options.repellingBlast = true
       continue
     }
     if (operation.kind === 'draconic-elemental-resistance') {

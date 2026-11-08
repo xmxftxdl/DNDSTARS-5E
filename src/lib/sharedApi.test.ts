@@ -188,6 +188,19 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     expect(sharedEventApiCandidates(true)).toEqual(['http://127.0.0.1:6473/api'])
   })
 
+  it('opts into quiet empty reads and preserves tombstone revisions for the next write', async () => {
+    const resource = `quiet-tombstone-${Date.now()}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('null', { status: 200, headers: { 'X-Stars-State-Revision': '3' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 4 }), { status: 200, headers: { 'X-Stars-State-Revision': '4' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadSharedResource(resource)).resolves.toBeNull()
+    expect(String(fetchMock.mock.calls[0][0])).toContain('missing=null')
+    await expect(saveSharedResourceWithResult(resource, { updatedAt: 4 })).resolves.toEqual({ status: 'saved', revision: 4 })
+    expect(new Headers(fetchMock.mock.calls[1][1].headers).get('X-Stars-Expected-Revision')).toBe('3')
+    expect(String(fetchMock.mock.calls[1][0])).not.toContain('missing=null')
+  })
+
   it('returns a saved ACK only after the authoritative PUT succeeds', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('', {

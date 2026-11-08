@@ -3160,6 +3160,15 @@ describe('AC2 — DM 权威资源鉴权（flag ON）', () => {
 })
 
 describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
+  it('optional empty state returns successful null while legacy reads and unknown routes retain 404', async () => {
+    const route = `${offServer.base}/api/state/quiet-empty-state-test`
+    expect((await fetch(route)).status).toBe(404)
+    const empty = await fetch(`${route}?missing=null`)
+    expect(empty.status).toBe(200)
+    await expect(empty.json()).resolves.toBeNull()
+    expect((await fetch(`${offServer.base}/api/unknown-route?missing=null`)).status).toBe(404)
+  })
+
   it('公开服务协议版本、构建标识和启动时间', async () => {
     const response = await fetch(`${offServer.base}/api/meta`)
     expect(response.status).toBe(200)
@@ -3473,6 +3482,11 @@ describe('P1 房间管理与共享状态 CAS', () => {
     expect(deleted.headers.get('x-stars-state-revision')).toBe('3')
     const tombstone = await fetch(`${offServer.base}/api/state/p1-cas`)
     expect(tombstone.status).toBe(404)
+    const quietTombstone = await fetch(`${offServer.base}/api/state/p1-cas?missing=null`)
+    expect(quietTombstone.status).toBe(200)
+    expect(quietTombstone.headers.get('x-stars-state-revision')).toBe('3')
+    await expect(quietTombstone.json()).resolves.toBeNull()
+
     expect(tombstone.headers.get('x-stars-state-revision')).toBe('3')
     const staleRecreate = await fetch(`${offServer.base}/api/state/p1-cas`, {
       method: 'PUT',

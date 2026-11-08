@@ -267,6 +267,12 @@ export default function MapGeometryToolbar({
         <WandSparkles className="h-3.5 w-3.5" />AI 地图转换
       </Link>}
 
+      {campaignId && <Link to={`/campaign/${encodeURIComponent(campaignId)}/dm-tools/map-converter`}
+        title="上传地图图片，自动识别墙体并转换为 UVTT"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-500/15">
+        <WandSparkles className="h-3.5 w-3.5" />AI 地图转换
+      </Link>}
+
       {editMode && (
         <>
           <select

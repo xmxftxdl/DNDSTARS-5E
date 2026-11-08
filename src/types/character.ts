@@ -427,6 +427,7 @@ export interface Character {
     sneakAttackTurnKey?: string
     /** Host-recorded actual Sneak Attack targets, bounded to recent turn identities. */
     sneakAttackTargetsByTurnKey?: Record<string, string[]>
+    graspOfHadarTurnKey?: string
     colossusSlayerTurnKey?: string
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string
