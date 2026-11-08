@@ -5,6 +5,7 @@ import { createEmptyMapGeometry, type MapGeometryEntity, type MapGeometryPoint }
 
 declare global {
   interface Window {
+    wallGestureReject?: boolean
     wallGestureCommits: MapGeometryEntity[]
     wallGestureEdits: { id: string; points: MapGeometryPoint[] }[]
   }
@@ -24,6 +25,7 @@ function WallGestureFixture() {
       selectedGeometryEntityId={selected} onGeometryEntitySelect={setSelected}
       onGeometryEntityCommit={(entity) => {
         if (entity.kind !== 'wall') throw new Error('Expected a wall')
+        if (window.wallGestureReject) return false
         window.wallGestureCommits.push(entity)
         setGeometry((current) => ({ ...current, walls: [...current.walls, entity] }))
         setSelected(entity.id)

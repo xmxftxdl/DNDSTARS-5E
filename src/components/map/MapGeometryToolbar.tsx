@@ -1,3 +1,4 @@
+import{SceneWeatherFactsFields}from'./SceneWeatherFactsFields'
 import {ControlledWaterFields} from './ControlledWaterFields'
 import { isFlameLight, isFlameProtected } from '../../../shared/flame-light-concealment.mjs'
 import { MapGeometryDurabilityFields } from './MapGeometryDurabilityFields'
@@ -258,6 +259,13 @@ export default function MapGeometryToolbar({
         <BrickWall className="h-3.5 w-3.5" />
         几何
       </button>
+      {editMode&&<SceneWeatherFactsFields mapId={mapId} value={geometry.weatherFacts} onChange={facts=>{useMapGeometryStore.getState().setWeatherFacts(mapId,facts)}}/>}
+
+      {campaignId && <Link to={`/campaign/${encodeURIComponent(campaignId)}/dm-tools/map-converter`}
+        title="上传地图图片，自动识别墙体并转换为 UVTT"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-500/15">
+        <WandSparkles className="h-3.5 w-3.5" />AI 地图转换
+      </Link>}
 
       {campaignId && <Link to={`/campaign/${encodeURIComponent(campaignId)}/dm-tools/map-converter`}
         title="上传地图图片，自动识别墙体并转换为 UVTT"
@@ -435,9 +443,10 @@ export default function MapGeometryToolbar({
             type="button"
             onClick={() => onSnapToGridChange(!snapToGrid)}
             className={`rounded-md p-1 ${snapToGrid ? 'bg-violet-500/25 text-violet-100' : 'text-slate-300 hover:bg-white/10'}`}
-            title="绘制时吸附到地图网格"
+            aria-pressed={snapToGrid} aria-label="墙体绘制网格吸附" title="绘制时吸附到地图网格"
           >
             <Grid3X3 className="h-3.5 w-3.5" />
+            <span className="ml-1 text-[11px]">{snapToGrid ? '网格吸附：开' : '网格吸附：关'}{tool === 'wall' ? ' · 近端点自动连接' : ''}</span>
           </button>
           <button
             type="button"

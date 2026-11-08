@@ -102,7 +102,7 @@ function activityFormulas(activity: Dnd5eActivityDefinitionV1): readonly Dnd5eFo
           ? [check.sourceModifier]
         : check.kind === 'attack-roll'
           ? [check.attackBonus]
-          : [check.dc]),
+          : check.dc ? [check.dc] : []),
     ...activity.outcomes.flatMap((outcome) => outcome.operations.flatMap(operationFormulas)),
     ...(activity.effects ?? []).flatMap((effect) => [
       ...(effect.duration.kind === 'save-ends' ? [effect.duration.dc] : []),

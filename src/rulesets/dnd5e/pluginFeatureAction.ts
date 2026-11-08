@@ -1,3 +1,7 @@
+import{STORM_GUIDE_WIND_HANDLER}from'./stormGuideWindMechanic'
+import {dnd5ePluginFeatureCurrentEnvelopeFullV1} from './pluginApi'
+import{dnd5eAbilityTargetMaximum}from'./activities/dnd5eAbilityTargetLimit'
+import{wrapDnd5eMagicTruthPreparedFactory}from'./mastermindMagicTruthParent'
 import { dnd5eCreatureSeenRecently, dnd5eSightingWorldMinute } from './recentCreatureSightings'
 import { observeDnd5eLongCasting, invalidateDnd5eLongCasting, type Dnd5eLongCastingReceipt } from './longCastingContinuity'
 import { prepareDnd5eEquipmentAttackReplacement, resolvePreparedDnd5eEquipmentAttackReplacement } from './activities/dnd5eEquipmentAttackReplacement'
@@ -60,6 +64,7 @@ import type {
 } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token, Dnd5ePluginArea } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5eTurnMovementSpent } from './turnEconomy'
 import type { SharedCampaignTimeState } from '../../lib/campaignTime'
 import { getRegisteredDnd5eActivity, listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
 import { resolveDnd5eActivityInvocationV1 } from './activities/dnd5eActivityInvocation'
@@ -406,7 +411,7 @@ function persistentAreaDistanceFeet(input: {
   return dnd5eTokenToPointDistanceFeet({ geometry, token: input.target, pointElevationFeet, horizontalDistanceFeet })
 }
 
-export function prepareDnd5ePluginFeatureAction(input: {
+function prepareDnd5ePluginFeatureActionInternal(input: {
   roomMaps?: readonly BattleMap[]
   roomScenes?: readonly import('../../lib/sceneOrchestration').OrchestratedScene[]
   worldMinute?: number
@@ -696,7 +701,8 @@ export function prepareDnd5ePluginFeatureAction(input: {
     const uniqueIds = mandatorySplash
       ? input.map.tokens.filter(token => token.type !== 'obstacle' && (token.characterId ? input.characters.find(character => character.id === token.characterId)?.currentHp ?? token.hp ?? 0 : token.hp ?? token.maxHp ?? 0) > 0 && splashCenters.some(center => tokenFootprintDistanceCells(center, token, input.map) * Math.max(1, input.map.feetPerCell ?? 5) <= mandatorySplash.maximumDistanceFromPreviousTargetFeet!)).map(token => token.id)
       : [...new Set(action.targetTokenIds ?? [])]
-    if (uniqueIds.length < 1 || uniqueIds.length > targeting.maximumTargets) {
+    const minimumTargets=scaledFeatureActivity?.target.kind==='creature'?scaledFeatureActivity.target.minimumCount??1:1
+    if (uniqueIds.length < minimumTargets || uniqueIds.length > dnd5eAbilityTargetMaximum(targeting.maximumTargets,targeting.maximumTargetsAbilityModifier,linkedActor?.abilities)) {
       return { ok: false, reason: 'invalid-target' }
     }
     targetTokens = uniqueIds.flatMap((id) => {
@@ -731,7 +737,9 @@ export function prepareDnd5ePluginFeatureAction(input: {
       distanceFeetByTargetId[token.id] = targetDistanceFeet
       distanceFeet = Math.max(distanceFeet, targetDistanceFeet)
     }
-    targetToken = targetTokens[0]
+    // An empty optional creature set retains the actor only as a UI anchor.
+    // targetTokens and the actual Headless targetIds remain empty.
+    targetToken = targetTokens[0] ?? actorToken
   } else {
     const targeting = featureAction.targeting
     const geometry = mapGeometryRuntimeForMap(input.map.id)
@@ -1076,6 +1084,13 @@ export function prepareDnd5ePluginFeatureAction(input: {
     if (!dnd5eActivityRootRequirementsSatisfiedV1({
       activity: grantedActivityDefinition,
       combatActive: Boolean(action.combatId?.trim()),
+      combatRound: snapshot.state.round,
+      attackActionUsed: actorCombatant.classState.weaponAttackActionTurnKey === currentTurnKey,
+      actionEconomyAvailable: {
+        action: input.turnEconomy ? input.turnEconomy.action.current > 0 : actorCombatant.turn.actionAvailable,
+        'bonus-action': input.turnEconomy ? input.turnEconomy.bonusAction.current > 0 : actorCombatant.turn.bonusActionAvailable,
+        reaction: input.turnEconomy ? input.turnEconomy.reaction.current > 0 : actorCombatant.turn.reactionAvailable,
+      },
       currentTurnActorId: action.combatId?.trim() ? input.initiativeOrder[action.initiativeIndex]?.tokenId : undefined,
       actor: actorSnapshot,
       targets: targetSnapshots,
@@ -1120,6 +1135,8 @@ export function prepareDnd5ePluginFeatureAction(input: {
       actionAvailable: input.turnEconomy.action.current > 0,
       bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
       reactionAvailable: input.turnEconomy.reaction.current > 0,
+      movementRemaining: input.turnEconomy.movement.current,
+      movementSpent: dnd5eTurnMovementSpent(input.turnEconomy),
     }
   }
   if (movementContinuationAvailable) {
@@ -1173,7 +1190,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
-      state: { ...snapshot.state, initiativeIndex: actorIndex },
+      state: { ...snapshot.state, ...(scaledFeatureActivity?.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='mechanic'&&operation.handlerId===STORM_GUIDE_WIND_HANDLER))&&snapshot.state.companionScene?{companionScene:{...snapshot.state.companionScene,weatherControlCombatActive:Boolean(action.combatId?.trim())}}:{}), initiativeIndex: actorIndex },
       actor,
       actorToken,
       targetToken,
@@ -1361,7 +1378,7 @@ export function refreshDnd5ePluginRestFeatureCasting(input: {
       economy.reaction.current, economy.movement.current].every(value => Number.isFinite(value) && value >= 0)) return fail()
     actor.turn = { ...actor.turn, actionAvailable: economy.action.current > 0,
       bonusActionAvailable: economy.bonusAction.current > 0, reactionAvailable: economy.reaction.current > 0,
-      movementRemaining: economy.movement.current }
+      movementRemaining: economy.movement.current, movementSpent: dnd5eTurnMovementSpent(economy) }
   }
   if (!observeDnd5eLongCasting(input.castingReceipt, binding, snapshot.state.combatants[binding.actorTokenId])) return fail()
   return { ok: true, prepared: { ...prepared, map, characters, actor: actors[0], actorToken: actorTokens[0],
@@ -1466,7 +1483,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   /** Host-only material-aware boundary; never read from plugin/player payloads. */
   resolveMaterialDamageBoundary?: <Result>(state: Dnd5eHeadlessCombatState, resolve: (state: Dnd5eHeadlessCombatState) => Result,
     succeeded: (result: Result) => boolean) => Promise<{ result: Result; materialChanges: readonly Dnd5eReactionMaterialChange[] }>
-}): Promise<{
+}, hostExecution?: Readonly<{now:number}>): Promise<{
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   summonedInitiativeEntries?: InitiativeEntry[]
@@ -1476,7 +1493,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   const prelude = input.prepared.attackTeleportPrelude
   if (prelude) {
     const continuation = await resolvePreparedDnd5ePluginFeatureAction({ ...input,
-      prepared: { ...input.prepared, attackTeleportPrelude: undefined } })
+      prepared: { ...input.prepared, attackTeleportPrelude: undefined } }, hostExecution)
     if (!continuation.result.ok) return { ...continuation,
       result: { ...continuation.result, state: structuredClone(prelude.originalState), events: [] } }
     const events = [...prelude.events, ...continuation.result.events]
@@ -1491,7 +1508,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     const landing = resolvePreparedDnd5ePluginFeatureLanding(input)
     if (!landing.preparedAfterLanding) return landing
     if (landing.preparedAfterLanding !== input.prepared) return resolvePreparedDnd5ePluginFeatureAction({ ...input,
-      prepared: landing.preparedAfterLanding, airborneFallDamageRollsByCombatantId: landing.remainingRolls })
+      prepared: landing.preparedAfterLanding, airborneFallDamageRollsByCombatantId: landing.remainingRolls }, hostExecution)
   }
   let materialChanges: readonly Dnd5eReactionMaterialChange[] = []
   const damageBoundary = async <Result,>(resolve: (state: Dnd5eHeadlessCombatState) => Result, succeeded: (result: Result) => boolean): Promise<Result> => {
@@ -1604,15 +1621,16 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     const payload=headlessAction.payload && typeof headlessAction.payload==='object' && !Array.isArray(headlessAction.payload) ? headlessAction.payload : undefined
     if (!input.restAuthority || typeof payload?.restEventId!=='string') return {result:{ok:false,state:input.prepared.state,events:[],reason:'invalid-plugin-action'}}
     if (payload.restDecision != null && payload.restDecision !== 'use' && payload.restDecision !== 'decline') return {result:{ok:false,state:input.prepared.state,events:[],reason:'invalid-plugin-action'}}
-    const settled=settleDnd5eRestActivityV1({state:input.prepared.state,combatRevision:input.restAuthority.combatRevision,
-      actorCharacter:input.prepared.actor,clock:input.restAuthority.clock,restEventId:payload.restEventId,decision:payload.restDecision==='decline'?'decline':'use',confirmedBy:'actor',
-      restMapContext: input.restAuthority.maps ? {sourceMap:input.prepared.map,maps:input.restAuthority.maps} : undefined,
-      castingContinuation: input.restAuthority.castingContinuation,
+    const restAuthority=input.restAuthority,restEventId=payload.restEventId
+    const settled=await damageBoundary(state=>settleDnd5eRestActivityV1({state,combatRevision:restAuthority.combatRevision,
+      actorCharacter:input.prepared.actor,clock:restAuthority.clock,restEventId,decision:payload.restDecision==='decline'?'decline':'use',confirmedBy:'actor',
+      restMapContext: restAuthority.maps ? {sourceMap:input.prepared.map,maps:restAuthority.maps} : undefined,
+      castingContinuation: restAuthority.castingContinuation,
       inventoryOwner:input.prepared.actor,inventoryRoster:input.prepared.characters,authoritativeRolls:input.rolls??{},
       authoritativeEffectRollDice:input.effectRollDice,
       areaTargetIds: restActivity?.target.kind === 'area' ? headlessAction.targetIds : undefined,
       areaPlacementDistanceFeet: headlessAction.activityAreaPlacementDistanceFeet,
-      command:preparedRestFeatureCommand(input.prepared,input.restAuthority.combatRevision,headlessAction)})
+      command:preparedRestFeatureCommand(input.prepared,restAuthority.combatRevision,headlessAction)}),value=>value.ok)
     if (!settled.ok) return {result:{ok:false,state:input.prepared.state,events:[],reason:'invalid-plugin-action'}}
     if (settled.outcome==='declined') {
       result={ok:true,state:input.prepared.state,events:[]}
@@ -1669,6 +1687,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
       state,
       headlessAction,
       input.airborneFallDamageRollsByCombatantId,
+      hostExecution ? {transactionId:input.prepared.action.id,now:hostExecution.now} : undefined,
     )
     const resolved = await damageBoundary(commitAction, value => value.result.ok)
     result = resolved.result
@@ -1777,4 +1796,27 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
 }
 
 
+
+
+/** Keep the public factory signature; only its actual successful result acquires local preparation provenance. */
+type PreparedRestPublication={snapshot:string;featureId:string;featureSignature:string;action:SharedPlayerActionState;beforeCharacters:readonly Character[]}
+const preparedRestPublications=new WeakMap<PreparedDnd5ePluginFeatureAction,PreparedRestPublication>()
+const restPublicationSnapshot=(prepared:PreparedDnd5ePluginFeatureAction)=>JSON.stringify([prepared.action,prepared.actor,prepared.map,prepared.characters,prepared.state])
+export const prepareDnd5ePluginFeatureAction:typeof prepareDnd5ePluginFeatureActionInternal=wrapDnd5eMagicTruthPreparedFactory((input)=>{
+ const result=prepareDnd5ePluginFeatureActionInternal(input)
+ if(result.ok){
+  const prepared=result.prepared,activity=getRegisteredDnd5eActivity(prepared.headlessAction.pluginId,prepared.headlessAction.actionId),invocation=activity&&resolveDnd5eActivityInvocationV1(activity),payload=prepared.action.dnd5ePluginAction?.payload,envelope=dnd5ePluginFeatureCurrentEnvelopeFullV1(prepared.feature.id)
+  if(invocation?.kind==='triggered'&&['long-rest-complete','short-rest-complete','long-rest-started','short-rest-started'].includes(invocation.event)&&payload&&typeof payload==='object'&&!Array.isArray(payload)&&typeof payload.restEventId==='string'&&envelope){
+   const start=prepared.actor.dnd5eRestStartActivityWindow,complete=prepared.actor.dnd5eRestActivityWindow,matchingWindow=invocation.event.endsWith('-started')?Boolean(start&&`rest-start:${start.sessionId}`===payload.restEventId):Boolean(complete&&complete.eventId===payload.restEventId&&complete.event===invocation.event)
+   if(matchingWindow)preparedRestPublications.set(prepared,{snapshot:restPublicationSnapshot(prepared),featureId:prepared.feature.id,featureSignature:JSON.stringify(envelope),action:structuredClone(prepared.action),beforeCharacters:structuredClone(prepared.characters)})
+  }
+ }
+ return result
+})
+/** A deferral snapshot from the actual native preparer, never a world result or write permission. */
+export function readPreparedDnd5eRestCharacterPublication(prepared:PreparedDnd5ePluginFeatureAction){
+ const record=preparedRestPublications.get(prepared)
+ if(!record||record.snapshot!==restPublicationSnapshot(prepared)||record.featureSignature!==JSON.stringify(dnd5ePluginFeatureCurrentEnvelopeFullV1(record.featureId)))throw Error('rest-publication:exact-native-prepared-required')
+ return {action:structuredClone(record.action),beforeCharacters:structuredClone(record.beforeCharacters)}
+}
 

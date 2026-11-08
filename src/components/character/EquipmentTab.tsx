@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
-import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
+import { EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { showAppConfirm } from '../../lib/appDialog'
@@ -92,11 +92,6 @@ const RIGHT_EQUIPMENT_SLOTS: readonly EquipmentSlot[] = [
 
 function isHandEquipmentSlot(slot: EquipmentSlot | undefined): boolean {
   return slot === 'mainWeapon' || slot === 'offHand'
-}
-
-function equipmentCanBeHeldInHand(item: EquipmentItem | undefined): boolean {
-  if (!item) return false
-  return isHandEquipmentSlot(item.slot) || item.allowedSlots?.some(isHandEquipmentSlot) === true
 }
 
 const INVENTORY_CATEGORY_FILTERS: readonly [Dnd5eInventoryCategoryFilter, string][] = [
@@ -232,6 +227,9 @@ export default function EquipmentTab({
     sort,
   })
   const selected = inventory.entries.find((entry) => entry.instanceId === selectedId)
+  const equipDestinations = EQUIPMENT_SLOTS.filter((slot) =>
+    dnd5eInventoryDropDecision(selected, { kind: 'equipment', slot }).accepted,
+  )
   const selectedUseSpell = selected?.item.use?.effect.kind === 'spell-cast'
     ? getDnd5eSrdCombatSpell(selected.item.use.effect.spellId)
     : undefined
@@ -295,8 +293,8 @@ export default function EquipmentTab({
       setNotice(submitted === false ? '当前战斗中不能使用该物品。' : '已提交给 DM/Headless 进行战斗结算。')
       return
     }
-    if (entry.item.use?.effect.kind === 'spell-cast') {
-      setNotice('物品施法需要从地图操作栏发起，以便选择目标并由 Headless 完成权威结算。')
+    if (entry.item.use?.effect.kind === 'spell-cast' || entry.item.use?.effect.kind === 'tentacle-rod-2014') {
+      setNotice('此物品需要从地图操作栏发起，以便选择目标并完成自动结算。')
       return
     }
     const usePlan = planDnd5eInventoryUse(character, entry)
@@ -371,6 +369,9 @@ export default function EquipmentTab({
     const item = character.equipment?.[slot]
     const entry = inventory.entries.find((candidate) => candidate.equippedSlot === slot)
     const Icon = SLOT_ICONS[slot] ?? Shield
+    const selectedCanEquip = editable && !pending &&
+      (!combatManagementLocked || isHandEquipmentSlot(slot)) &&
+      dnd5eInventoryDropDecision(selected, { kind: 'equipment', slot }).accepted
     const decision = draggedInstanceId
       ? dnd5eInventoryDropDecision(
           inventory.entries.find((candidate) => candidate.instanceId === draggedInstanceId),
@@ -407,7 +408,17 @@ export default function EquipmentTab({
       >
         <button
           type="button"
-          onClick={() => entry && setSelectedId(entry.instanceId)}
+          draggable={!!entry && editable && !pending && !combatSlotLocked}
+          onDragStart={(event) => entry && beginInventoryDrag(event, entry)}
+          onDragEnd={() => { setDraggedInstanceId(null); setDragHoverTarget(null) }}
+          onClick={() => {
+            if (selectedCanEquip && selected) {
+              run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId, slot })
+            } else if (entry) {
+              setSelectedId(entry.instanceId)
+            }
+          }}
+          title={selectedCanEquip && selected ? `将${displayItemName(selected)}装备到${EQUIPMENT_SLOT_LABELS[slot]}` : undefined}
           className="flex w-full min-w-0 flex-col items-center text-center"
           aria-label={`${EQUIPMENT_SLOT_LABELS[slot]}：${item?.name ?? '空'}`}
         >
@@ -426,7 +437,7 @@ export default function EquipmentTab({
           <span className={`mt-0.5 block max-w-full truncate text-[9px] sm:text-[10px] ${isDragHoverTarget && canDrop
             ? 'font-bold text-emerald-200'
             : 'text-slate-300'}`}>
-            {isDragHoverTarget && canDrop ? '松开放入' : item?.name ?? '拖入装备'}
+            {isDragHoverTarget && canDrop ? '松开放入' : selectedCanEquip ? '点击装备所选物品' : item?.name ?? '拖入装备'}
           </span>
         </button>
         {editable && entry && (
@@ -724,13 +735,14 @@ export default function EquipmentTab({
                     instanceId: selected.instanceId, exposed: !selected.surfaceExposed })}
                 >{selected.surfaceExposed ? '收起展示物品' : '展示物品表面'}</ActionButton>
               )}
-              {selected.item.equipment && !selected.equippedSlot && selected.identified !== false && (
+              {equipDestinations.map((slot) => (
                 <ActionButton
+                  key={slot}
                   icon={Shield}
-                  disabled={pending || (combatManagementLocked && !equipmentCanBeHeldInHand(selected.item.equipment))}
-                  onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId })}
-                >装备</ActionButton>
-              )}
+                  disabled={pending || (combatManagementLocked && !isHandEquipmentSlot(slot))}
+                  onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId, slot })}
+                >{slot === 'mainWeapon' ? '装备到主手' : slot === 'offHand' ? '装备到副手' : `装备到${EQUIPMENT_SLOT_LABELS[slot]}`}</ActionButton>
+              ))}
               {selected.equippedSlot && (
                 <ActionButton
                   icon={Shield}

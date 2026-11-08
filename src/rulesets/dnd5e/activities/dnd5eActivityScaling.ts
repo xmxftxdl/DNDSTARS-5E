@@ -231,6 +231,7 @@ export function scaleDnd5eActivityDefinitionV1(
             }
           : undefined
         const modifiers = effect.modifiers?.map((modifier) => {
+          if(modifier.kind==='weapon-enchantment'&&modifier.bonusDamage&&(total.dice!==0||total.sides!==0))return{...modifier,bonusDamage:{...modifier.bonusDamage,count:Math.max(1,modifier.bonusDamage.count+total.dice),sides:scaledDieSides(modifier.bonusDamage.sides,total.sides)}}
           if (
             (modifier.kind === 'on-hit-bonus-damage' || modifier.kind === 'damage-reduction') &&
             (total.dice !== 0 || total.flat !== 0 || total.sides !== 0)

@@ -27,9 +27,14 @@ it('distinguishes unconsciousness, fatal damage and rejected actions, preserving
     expect(result.ok).toBe(true)
     expect(deaths[0]).toMatchObject({targetId:'victim',witnessIds:['killer','witness']})
     const contexts=dnd5eActivityTriggerContextsFromCombatEventV1(result.state,deaths[0],0,'batch')
-    expect(contexts.map(c=>c.eligibleActorIds)).toEqual([['killer'],['witness']])
-    expect(new Set(contexts.map(c=>c.eventId)).size).toBe(2)
-    expect(contexts.every(c=>c.event==='creature-died'&&c.eligibleTargetIds[0]==='victim')).toBe(true)
+    const witnesses=contexts.filter(c=>c.event==='creature-died')
+    expect(witnesses.map(c=>c.eligibleActorIds)).toEqual([['killer'],['witness']])
+    expect(new Set(witnesses.map(c=>c.eventId)).size).toBe(2)
+    expect(witnesses.every(c=>c.eligibleTargetIds[0]==='victim')).toBe(true)
+    const kills=contexts.filter(c=>c.event==='creature-killed')
+    expect(kills).toHaveLength(1)
+    expect(kills[0]).toMatchObject({eligibleActorIds:['killer'],eligibleTargetIds:['victim']})
+    expect(new Set(contexts.map(c=>c.eventId)).size).toBe(3)
   }
 })
 it('emits actual third failed death save, not every failed save',()=>{

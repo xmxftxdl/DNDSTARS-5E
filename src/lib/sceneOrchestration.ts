@@ -1,5 +1,6 @@
 import type { AbilityKey } from './dnd'
 import { validScenePortalSurvey, type ScenePortalSurvey } from './scenePortalSurvey'
+import { validSceneSensoryDeceptionSurvey, type SceneSensoryDeceptionSurvey } from './sceneSensoryDeceptionSurvey'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 import {
@@ -169,6 +170,7 @@ export interface OrchestratedScene {
   description: string
   environmentLabel: string
   planarPortalSurvey?: ScenePortalSurvey
+  sensoryDeceptionSurvey?: SceneSensoryDeceptionSurvey
   weather: SceneWeatherConfig
   backgroundCue: SceneAudioCue
   backgroundAudioMode: SceneBackgroundAudioMode
@@ -593,6 +595,8 @@ function normalizeScene(value: unknown): OrchestratedScene | null {
     environmentLabel: text(value.environmentLabel, 300),
     ...(validScenePortalSurvey(value.planarPortalSurvey)
       ? { planarPortalSurvey: structuredClone(value.planarPortalSurvey) } : {}),
+    ...(validSceneSensoryDeceptionSurvey(value.sensoryDeceptionSurvey)
+      ? { sensoryDeceptionSurvey: structuredClone(value.sensoryDeceptionSurvey) } : {}),
     weather: normalizeSceneWeather(value.weather),
     backgroundCue: cue,
     backgroundAudioMode: value.backgroundAudioMode === 'silent'
@@ -789,6 +793,7 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
       !object(raw) ||
       sceneIds.has(scene.id) ||
       (raw.planarPortalSurvey != null && !validScenePortalSurvey(raw.planarPortalSurvey)) ||
+      (raw.sensoryDeceptionSurvey != null && !validSceneSensoryDeceptionSurvey(raw.sensoryDeceptionSurvey)) ||
       (raw.weather != null && !validateSceneWeather(raw.weather)) ||
       (raw.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(String(raw.backgroundAudioMode))) ||
       (raw.backgroundAudioAutoPlay != null && typeof raw.backgroundAudioAutoPlay !== 'boolean') ||

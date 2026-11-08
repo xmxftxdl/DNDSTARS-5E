@@ -1,4 +1,7 @@
+import{cloneDnd5eSceneWeatherFacts,validDnd5eSceneWeatherFacts,type Dnd5eSceneWeatherFactsV1}from'../../shared/dnd5e-scene-weather-facts.mjs'
+import {multipartTokenHeadProjections,multipartTokenSurfaceProjections} from '../rulesets/dnd5e/multipartMapGeometry'
 import { gasExcludedAt, gasExclusionVisionSegments } from '../rulesets/dnd5e/gasExclusion'
+import { falseHydraSongConceals } from '../../shared/false-hydra-song.mjs'
 import {normalizeHeightPlane,planeHeight} from './heightPlane'
 import { rectangularLightOrigin, rectangularLightCandidateOrigins, refineRectangularLightOrigin } from './rectangularLightOrigin'
 import { MAP_SURFACE_MATERIALS, type MapSurfaceMaterial } from './mapSurfaceMaterials'
@@ -294,6 +297,8 @@ export interface MapGeometryVisionSettings {
 }
 
 export interface MapGeometryState {
+  /** Explicit Host-authored rain/wind game facts; absence is unknown. */
+  weatherFacts?:Dnd5eSceneWeatherFactsV1
   structureLifetimes?: StructureLifetime[]
   structureCastingHistory?: StructureCastingHistory[]
   /** Scene magical darkness uses the same ordered cover/reveal strokes as fog. */
@@ -655,6 +660,7 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
 export function normalizeMapGeometry(value: unknown): MapGeometryState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
+  if(raw.weatherFacts!==undefined&&!validDnd5eSceneWeatherFacts(raw.weatherFacts))return undefined
   if (raw.darknessFog != null && (!normalizeMapFog(raw.darknessFog) || (raw.darknessFog as MapFogState).mapId !== raw.mapId)) return undefined
   const structureLifetimes=raw.structureLifetimes==null?undefined:normalizeStructureLifetimes(raw.structureLifetimes)
   if(raw.structureLifetimes!=null&&!structureLifetimes)return undefined
@@ -708,6 +714,7 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
       ? raw.environment as Dnd5eMapEnvironment
       : 'normal',
     weather: raw.weather === 'storm' ? 'storm' : 'normal',
+    ...(raw.weatherFacts!==undefined?{weatherFacts:cloneDnd5eSceneWeatherFacts(raw.weatherFacts)!}:{}),
     ...(raw.darknessFog != null ? { darknessFog: normalizeMapFog(raw.darknessFog) } : {}),
     overheadSpace: raw.overheadSpace === 'confined' ? 'confined' : 'open',
     updatedAt: raw.updatedAt,
@@ -2574,6 +2581,14 @@ export function mapGeometryCoverBetween(
     targetHeightFeet?: number
   },
 ): MapGeometryCoverResult {
+  if(map && ((attacker.dnd5eCombatState?.monsterMultipart&&!attacker.multipartProjection)||(target.dnd5eCombatState?.monsterMultipart&&!target.multipartProjection))) {
+    const scale={gridSize:map.gridSize??50,feetPerCell:map.feetPerCell??5}
+    const heads=multipartTokenHeadProjections(attacker,scale),sources=heads.length?heads:[{...attacker,multipartProjection:true}]
+    const covers=sources.flatMap(source=>multipartTokenSurfaceProjections(target,scale).map(endpoint=>
+      mapGeometryCoverBetween(geometry,source,endpoint,map,{attackerHeightFeet:heads.length?5:entityHeights?.attackerHeightFeet,
+        targetHeightFeet:endpoint.multipartProjection&&endpoint.size===1?5:entityHeights?.targetHeightFeet})))
+    return covers.sort((a,b)=>Number(a.blocksLineOfEffect)-Number(b.blocksLineOfEffect)||a.armorClassBonus-b.armorClassBonus)[0]
+  }
   const radius = Math.max(1, (map?.gridSize ?? 50) * Math.max(1, target.size) * 0.4)
   const attackerHeightFeet = Math.max(
     0.1,
@@ -2718,6 +2733,11 @@ export function mapGeometryLineOfEffectBlocked(input: {
   fromEyeHeightFeet?: number
   toEyeHeightFeet?: number
 }): boolean {
+  const target=input.to as Partial<Token>
+  if(input.map && target.dnd5eCombatState?.monsterMultipart && !target.multipartProjection) {
+    return multipartTokenSurfaceProjections(target as Token,{gridSize:input.map.gridSize??50,feetPerCell:input.map.feetPerCell??5})
+      .every(part=>mapGeometryLineOfEffectBlocked({...input,to:part,toElevationFeet:part.elevationFeet,toEyeHeightFeet:2.5}))
+  }
   if (mapGeometryCoverFromPoint(input).blocksLineOfEffect) return true
   return input.map ? persistentAreaBlocksRay({
     geometry: input.geometry,
@@ -2859,6 +2879,27 @@ function persistentHeavyObscurationBlocksSight(input: {
   })
 }
 
+/** Core Darkness also obscures rays which start inside or cross its volume.
+ * Ordinary unlit space remains transparent. Existing special-sense target ranges remain in force; the actual SP creator exception applies only to its own area. */
+function coreDarknessBlocksSightRay(input:{map:BattleMap;geometry?:MapGeometryState;viewer:Token;to:MapGeometryPoint;fromEye:number;toEye:number;senseRangeFeet:number;worldMinute?:number}):boolean{
+ const ids=new Set((input.map.dnd5ePluginAreas??[]).filter(area=>area.sourceKind==='core-spell'&&area.coreSpellId==='darkness'&&area.lighting?.kind==='magical-darkness').map(area=>area.id))
+ if(!ids.size)return false
+ const sources=mapGeometrySpellLightingSources(input.map,input.geometry).filter(source=>source.kind==='magical-darkness'&&ids.has(source.areaId)&&!mapGeometrySourceCanSeeThroughDarkness(input.map,source.areaId,input.viewer))
+ if(!sources.length)return false
+ const grid=Math.max(1,input.map.gridSize),feet=Math.max(1,input.map.feetPerCell??5),distance=Math.hypot(Math.hypot(input.to.x-input.viewer.x,input.to.y-input.viewer.y)/grid*feet,input.toEye-input.fromEye),steps=Math.max(2,Math.ceil(distance/(feet/4)))
+ for(let i=0;i<=steps;i++){const ratio=i/steps;if(distance<=input.senseRangeFeet)return false;const point={x:input.viewer.x+(input.to.x-input.viewer.x)*ratio,y:input.viewer.y+(input.to.y-input.viewer.y)*ratio},elevation=input.fromEye+(input.toEye-input.fromEye)*ratio
+  if(sources.some(source=>spellLightingAffectsPoint(source,point,input.map,elevation))&&mapGeometryVisualIlluminationAtPoint({map:input.map,geometry:input.geometry,viewer:input.viewer,point,elevationFeet:elevation,worldMinute:input.worldMinute})==='magical-darkness')return true
+ }return false
+}
+
+/** Native pair projection must distinguish a real Darkness ray from ordinary
+ * target-point darkness, which darkvision alone can otherwise satisfy. */
+export function mapGeometryCoreDarknessBlocksSight(input:{map:BattleMap;geometry?:MapGeometryState;viewer:Token;target:Token;viewerHeightFeet?:number;targetHeightFeet?:number;worldMinute?:number}):boolean{
+ const grid=Math.max(1,input.map.gridSize),radius=grid*Math.max(1,input.target.size)*.4,profile=compileDnd5eEffectiveVisionProfile({token:input.viewer}),fromEye=mapGeometryTokenElevation(input.geometry,input.viewer)+(input.viewerHeightFeet??mapGeometryEntityBodyHeightFeet(input.viewer)??5)/2,toEye=mapGeometryTokenElevation(input.geometry,input.target)+(input.targetHeightFeet??mapGeometryEntityBodyHeightFeet(input.target)??5)/2
+ const samples=[{x:input.target.x,y:input.target.y},{x:input.target.x-radius,y:input.target.y-radius},{x:input.target.x+radius,y:input.target.y-radius},{x:input.target.x+radius,y:input.target.y+radius},{x:input.target.x-radius,y:input.target.y+radius}]
+ return samples.every(to=>coreDarknessBlocksSightRay({map:input.map,geometry:input.geometry,viewer:input.viewer,to,fromEye,toEye,senseRangeFeet:Math.max(profile.magicalDarknessSightRangeFeet,profile.blindsightRangeFeet,profile.truesightRangeFeet),worldMinute:input.worldMinute}))
+}
+
 function mapGeometryCanSeeTarget(input: {
   geometry?: MapGeometryState
   map: BattleMap
@@ -2875,6 +2916,17 @@ function mapGeometryCanSeeTarget(input: {
   viewerBlinded?: boolean
 }): boolean {
   const geometry = input.geometry
+  if (!input.pointTarget && input.viewer.id !== input.target.id && falseHydraSongConceals(
+    input.target.dnd5eCombatState?.monsterMultipart, input.viewer, input.viewer.dnd5eCombatState, input.character,
+  )) return false
+  if((input.viewer.dnd5eCombatState?.monsterMultipart&&!input.viewer.multipartProjection)||
+    (!input.pointTarget&&input.target.dnd5eCombatState?.monsterMultipart&&!input.target.multipartProjection)) {
+    const heads=multipartTokenHeadProjections(input.viewer,input.map)
+    const viewers=heads.length?heads:[{...input.viewer,multipartProjection:true}]
+    return viewers.some(viewer=>multipartTokenSurfaceProjections(input.target,input.map).some(target=>
+      mapGeometryCanSeeTarget({...input,viewer,target,viewerHeightFeet:heads.length?5:input.viewerHeightFeet,
+        targetHeightFeet:target.multipartProjection&&target.size===1?5:input.targetHeightFeet})))
+  }
   if (!dnd5eInitialSpaceAllowsPerception(input.viewer.dnd5eCombatState?.activeEffects, {
     mapId: input.map.id, x: input.target.x, y: input.target.y,
     elevationFeet: mapGeometryTokenElevation(geometry, input.target),
@@ -2911,7 +2963,7 @@ function mapGeometryCanSeeTarget(input: {
     Math.hypot(input.target.x - input.viewer.x, input.target.y - input.viewer.y) - targetRadiusPx,
   )
   if (distancePx > rangePx) return false
-  const illumination = mapGeometryIlluminationAtPoint({
+  const illumination = mapGeometryVisualIlluminationAtPoint({
     geometry,
     map: input.map,
     tokens: input.map.tokens,
@@ -2963,7 +3015,12 @@ function mapGeometryCanSeeTarget(input: {
   return targetSamples.some((sample) => {
     const fromElevationFeet = mapGeometryTokenElevation(geometry, input.viewer)
     const toElevationFeet = mapGeometryTokenElevation(geometry, input.target)
-    if (rayBlocked({
+    const solidSightDistanceFeet = Math.hypot((sample.x-input.viewer.x)/gridSize*feetPerCell,
+      (sample.y-input.viewer.y)/gridSize*feetPerCell,
+      toElevationFeet+targetHeightFeet/2-fromElevationFeet-viewerHeightFeet/2)
+    if(coreDarknessBlocksSightRay({map:input.map,geometry,viewer:input.viewer,to:sample,fromEye:fromElevationFeet+viewerHeightFeet/2,toEye:toElevationFeet+targetHeightFeet/2,senseRangeFeet:Math.max(profile.magicalDarknessSightRangeFeet,profile.blindsightRangeFeet,profile.truesightRangeFeet),worldMinute:input.worldMinute}))return false
+    const throughSolid = (profile.throughSolidObjectsRangeFeet ?? 0) > 0 && solidSightDistanceFeet <= profile.throughSolidObjectsRangeFeet!
+    if (!throughSolid && rayBlocked({
       geometry,
       map: input.map,
       from: input.viewer,
@@ -3331,7 +3388,19 @@ export function mapGeometryConcealedFlamePolygon(input: {
 }
 
 export function mapGeometryIlluminationAtPoint(input: Parameters<typeof mapGeometryBaseIlluminationAtPoint>[0]): MapGeometryIllumination {
-  const illumination = mapGeometryBaseIlluminationAtPoint(input)
+  return mapGeometryResolvedIlluminationAtPoint(input)
+}
+
+/** Physical illumination remains unchanged; only this viewer may ignore the
+ * original resource-cast darkness that the viewer actually created. */
+export function mapGeometryVisualIlluminationAtPoint(input:Parameters<typeof mapGeometryBaseIlluminationAtPoint>[0] & {viewer:Token}):MapGeometryIllumination{
+  return mapGeometryResolvedIlluminationAtPoint(input,input.viewer)
+}
+export function mapGeometrySourceCanSeeThroughDarkness(map:BattleMap,areaId:string,viewer:Token):boolean{
+  return (map.dnd5ePluginAreas??[]).some(area=>area.id===areaId&&area.sourceKind==='core-spell'&&area.coreSpellId==='darkness'&&area.lighting?.kind==='magical-darkness'&&area.lighting.sourceCanSeeThrough===true&&area.sourceTokenId===viewer.id&&area.sourceCharacterId===viewer.characterId)
+}
+function mapGeometryResolvedIlluminationAtPoint(input:Parameters<typeof mapGeometryBaseIlluminationAtPoint>[0],visionViewer?:Token):MapGeometryIllumination{
+  const illumination = mapGeometryBaseIlluminationAtPoint(input,visionViewer)
   if (illumination !== 'bright' && illumination !== 'dim') return illumination
   const elevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, input.point)
   const grid = Math.max(1, input.map.gridSize)
@@ -3365,10 +3434,11 @@ function mapGeometryBaseIlluminationAtPoint(input: {
   point: MapGeometryPoint
   elevationFeet?: number
   worldMinute?: number
-}): MapGeometryIllumination {
+},visionViewer?:Token): MapGeometryIllumination {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
   const pointElevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, input.point)
   const spellLighting = mapGeometrySpellLightingSources(input.map, input.geometry)
+    .filter(source=>source.kind!=='magical-darkness'||!visionViewer||!mapGeometrySourceCanSeeThroughDarkness(input.map,source.areaId,visionViewer))
     .map(source => mapGeometrySpellLightAtPoint(source, input.map, input.point, pointElevation, input.geometry))
   const localDarkness = spellLighting.filter((source) => source.kind === 'magical-darkness' &&
     spellLightingAffectsPoint(source, input.point, input.map, pointElevation))
@@ -3605,18 +3675,20 @@ export function mapGeometryVisibilityPolygon(input: {
   }
   // atan2 returns negative angles, while circular samples use [0, 2π).
   // Normalize before sorting so the boundary winds once without crossing itself.
+  const solidSightRadius = Math.min(radius, (profile.throughSolidObjectsRangeFeet ?? 0) / feetPerCell * Math.max(1,input.map.gridSize))
+  const nonSolidBlockers = [...persistentAreaVisionSegments(input.map,geometry,input.viewer),...bounds]
   const polygon = [...new Set([...angles].map(angle => (angle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)))]
     .sort((left, right) => left - right)
     .map((angle) => {
       const far = { x: origin.x + Math.cos(angle) * radius, y: origin.y + Math.sin(angle) * radius }
-      return nearestRayPoint(
-        origin,
-        angle,
-        radius,
-        [...blockers, ...bounds],
-        elevation,
-        mapGeometryTerrainElevationAtPoint(geometry, far),
-      )
+      const ordinary=nearestRayPoint(origin,angle,radius,[...blockers,...bounds],elevation,mapGeometryTerrainElevationAtPoint(geometry,far))
+      if(solidSightRadius<=0)return ordinary
+      const solidFar={x:origin.x+Math.cos(angle)*solidSightRadius,y:origin.y+Math.sin(angle)*solidSightRadius}
+      const verticalDifference=mapGeometryTerrainElevationAtPoint(geometry,solidFar)-elevation
+      const solidRadiusFeet=(profile.throughSolidObjectsRangeFeet??0)
+      const verticalRadius=Math.sqrt(Math.max(0,solidRadiusFeet*solidRadiusFeet-verticalDifference*verticalDifference))/feetPerCell*Math.max(1,input.map.gridSize)
+      const ghost=nearestRayPoint(origin,angle,Math.min(solidSightRadius,verticalRadius),nonSolidBlockers,elevation,mapGeometryTerrainElevationAtPoint(geometry,solidFar))
+      return Math.hypot(ghost.x-origin.x,ghost.y-origin.y)>Math.hypot(ordinary.x-origin.x,ordinary.y-origin.y)?ghost:ordinary
     })
   return clipDnd5eInitialSpaceVision(polygon, input.viewer.dnd5eCombatState?.activeEffects, input.map.id)
 }
@@ -3658,4 +3730,11 @@ export function setMapGeometryRuntime(maps: readonly MapGeometryState[]): void {
 
 export function mapGeometryRuntimeForMap(mapId: string): MapGeometryState | undefined {
   return runtimeGeometryByMapId.get(mapId)
+}
+
+/** Uses the same four target silhouette rays and physical elevation kernel as ordinary creature cover. */
+export function mapGeometryCreatureProvidesCover(geometry:MapGeometryState|undefined,attacker:Token,target:Token,creature:Token,map:PersistentAreaRayMap,heights?:{attackerHeightFeet?:number;targetHeightFeet?:number}):boolean {
+ if(creature.id===attacker.id||creature.id===target.id||creature.type==='obstacle')return false
+ const radius=Math.max(1,(map.gridSize??50)*Math.max(1,target.size)*.4),attackerEye=Math.max(.1,heights?.attackerHeightFeet??mapGeometryEntityBodyHeightFeet(attacker)??5)/2,targetEye=Math.max(.1,heights?.targetHeightFeet??mapGeometryEntityBodyHeightFeet(target)??5)/2
+ return [[-1,-1],[1,-1],[1,1],[-1,1]].some(([dx,dy])=>creatureIntersectsCoverRay(geometry,attacker,{x:target.x+dx*radius,y:target.y+dy*radius},creature,map.gridSize??50,mapGeometryTokenElevation(geometry,target),attackerEye,targetEye))
 }

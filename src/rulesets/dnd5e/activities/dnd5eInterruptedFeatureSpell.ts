@@ -1,4 +1,8 @@
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
+const interruptedOriginals=new WeakMap<Dnd5eActivityDefinitionV1,Dnd5eActivityDefinitionV1>()
+function freezeProjection<T>(value:T):T{if(value&&typeof value==='object'){for(const child of Object.values(value))freezeProjection(child);Object.freeze(value)}return value}
+/** A copied wire object never retains this actual projection identity. */
+export function dnd5eInterruptedFeatureSpellOriginal(activity:Dnd5eActivityDefinitionV1):Dnd5eActivityDefinitionV1|undefined{return interruptedOriginals.get(activity)}
 
 export function dnd5eInterruptedFeatureSpellRollIds(activity: Dnd5eActivityDefinitionV1): ReadonlySet<string> {
   const retained = new Set(dnd5eInterruptedFeatureSpellActivity(activity).checks?.map(check => check.id))
@@ -35,6 +39,8 @@ export function dnd5eInterruptedFeatureSpellActivity(activity: Dnd5eActivityDefi
     previousSize = retainedChecks.size
     for (const check of activity.checks ?? []) if (retainedChecks.has(check.id)) references(check, retainedChecks)
   }
-  return { ...activity, spellInvocation: undefined, outcomes,
-    checks: activity.checks?.filter(check => !removedChecks.has(check.id) || retainedChecks.has(check.id)) }
+  const projection=freezeProjection(structuredClone({ ...activity, spellInvocation: undefined, outcomes,
+    checks: activity.checks?.filter(check => !removedChecks.has(check.id) || retainedChecks.has(check.id)) }))
+  interruptedOriginals.set(projection,freezeProjection(structuredClone(activity)))
+  return projection
 }

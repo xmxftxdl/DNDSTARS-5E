@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const portBase = Math.max(1024, Number(process.env.STARS_E2E_PORT_BASE) || 6173)
+const DM = `http://127.0.0.1:${portBase}`
+const PLAYER = `http://127.0.0.1:${portBase + 1}`
 const SESSION_KEY = 'stars-room-session:v1'
 
 interface RoomMembershipResponse {
@@ -203,7 +204,7 @@ test('client-side entry from the public landing page initializes the campaign ru
   }
 })
 
-test('automated monster end turn hands the authoritative turn to the player UI', async ({ browser, request }) => {
+test('DM monster end turn hands the authoritative turn to the player UI', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const now = Date.now()
   const mapId = `player-turn-handoff-${now}`
@@ -312,6 +313,9 @@ test('automated monster end turn hands the authoritative turn to the player UI',
   await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   await expect(player.getByTestId('player-end-turn-top')).toBeDisabled({ timeout: 20_000 })
   await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
+  // Ordinary monsters are DM-controlled; the player cannot advance their slot.
+  await expect(dm.getByTestId('dm-next-turn')).toBeEnabled({ timeout: 20_000 })
+  await dm.getByTestId('dm-next-turn').click()
 
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/state/combat`)
@@ -329,7 +333,7 @@ test('automated monster end turn hands the authoritative turn to the player UI',
   await context.close()
 })
 
-test('room-owned character regains control after its prior end-turn command and one automated monster turn', async ({ browser, request }) => {
+test('room-owned character regains control after its prior end-turn command and one DM-controlled monster turn', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const createdResponse = await request.post(`${DM}/api/rooms`, {
     data: {
@@ -471,6 +475,10 @@ test('room-owned character regains control after its prior end-turn command and 
     await enterRoom(dm, DM, room)
     await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 20_000 })
     await player.getByTestId('player-end-turn-top').click()
+    await expect(dm.getByTestId(`initiative-token-${enemy.id}`)).toHaveAttribute('data-active-turn', 'true', { timeout: 20_000 })
+    await expect(player.getByTestId('player-end-turn-top')).toBeDisabled()
+    await expect(dm.getByTestId('dm-next-turn')).toBeEnabled({ timeout: 20_000 })
+    await dm.getByTestId('dm-next-turn').click()
 
     await expect.poll(async () => {
       const response = await request.get(`${DM}/api/state/combat?room=${room.roomId}`, {

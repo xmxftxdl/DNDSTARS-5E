@@ -11,7 +11,7 @@ export async function collectDnd5eActivityNegationDice(input: {
   state: Dnd5eHeadlessCombatState
   activityId: string
   actionId: string
-  parent?: { activity: Dnd5eActivityDefinitionV1; actorId: string; castLevel?: number }
+  parent?: { activity: Dnd5eActivityDefinitionV1; actorId: string; castLevel?: number; choices?: Readonly<Record<string, string>> }
   declarations: readonly Dnd5ePluginDiceRollDeclaration[]
   previous?: { declarations: readonly Dnd5ePluginDiceRollDeclaration[]; choices: Readonly<Record<string, Dnd5eActivityNegationChoice>> }
   choose: (declaration: Dnd5ePluginDiceRollDeclaration, availableState: Dnd5eHeadlessCombatState) => Promise<Dnd5eActivityNegationChoice | undefined>
@@ -27,6 +27,10 @@ export async function collectDnd5eActivityNegationDice(input: {
     const costs = new Map<string, number>()
     for (const cost of input.parent.activity.consumption ?? []) {
       if (cost.kind !== 'resource') continue
+      if (cost.whenChoice) {
+        const selected = input.parent.choices?.[cost.whenChoice.choiceId] ?? input.parent.activity.choices?.find(choice => choice.id === cost.whenChoice!.choiceId)?.defaultOptionId ?? input.parent.activity.choices?.find(choice => choice.id === cost.whenChoice!.choiceId)?.options[0]?.id
+        if (!selected || !cost.whenChoice.optionIds.includes(selected)) continue
+      }
       let amount: number
       try { amount = evaluateDnd5eFormulaV1(cost.amount, { actor: snapshot, rolls: {},
         castLevel: input.parent.castLevel }) }

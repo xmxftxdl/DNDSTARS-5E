@@ -1,0 +1,3 @@
+import type{ActivityAttackOriginalMissing}from'../rulesets/dnd5e/activities/activityAttackOriginalMissing'
+import type{SecondChanceParentWire}from'../lib/secondChanceParentWire'
+export interface BountifulPluginSpellCompoundPrimaryBook{ok:true;schemaVersion:1;sourceKind:'plugin-spell-compound-primary-v1';roomId:string;hostMemberId:string;parentId:string;mapId:string;combatId:string;source:SecondChanceParentWire;effectTimestamp:number;rows:(ActivityAttackOriginalMissing&{kind:'attack';index:0;request:ActivityAttackOriginalMissing;requestId:string;characterId:string;memberId:string;label:string;raw?:{memberId:string;values:number[]};confirmed?:{memberId:string;values:number[]}})[]}

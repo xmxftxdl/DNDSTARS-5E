@@ -97,7 +97,12 @@ export function useDnd5eActivityMapTargeting(onUnavailable?: (label: string) => 
     const placement = input.summonPlacement
     const resolveAllowedCells = input.resolveAllowedCells ?? (placement
       ? (map: BattleMap, selectedCells: readonly GridCell[]) => dnd5eActivitySummonPlacementCells({
-          ...placement, map, selectedCells, characters: useCharacterStore.getState().characters,
+          ...placement,
+          // The real kill is pending inside its original atomic parent. The public
+          // map still has a living victim until that parent commits. Preview this
+          // handoff against its staged result; final Host placement revalidates it.
+          map: placement.summons.some(summon => !!summon.killedCreatureOriginId) ? placement.map : map,
+          selectedCells, characters: useCharacterStore.getState().characters,
           sourceLimitMaps: useMapStore.getState().maps,
           worldMinute: readBrowserSceneWorldMinute(),
         }) : undefined)

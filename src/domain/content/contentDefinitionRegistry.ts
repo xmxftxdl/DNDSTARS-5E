@@ -20,7 +20,7 @@ export interface RegisteredContentExecutableContribution {
 const packages = new Map<string, { token: symbol; value: RegisteredContentPackage }>()
 let registryRevision = 0
 
-export function registerContentDefinitionPackage(value: RegisteredContentPackage): { dispose(): void } {
+export function registerContentDefinitionPackage(value: RegisteredContentPackage): { dispose(): void; isCurrent(): boolean } {
   if (packages.has(value.packageId)) throw new Error(`Content Definition package is already registered: ${value.packageId}`)
   const keys = new Set<string>()
   const activityIds = new Set<string>()
@@ -55,6 +55,7 @@ export function registerContentDefinitionPackage(value: RegisteredContentPackage
   packages.set(value.packageId, { token, value: structuredClone(value) })
   registryRevision += 1
   return {
+    isCurrent() { return packages.get(value.packageId)?.token === token },
     dispose() {
       if (packages.get(value.packageId)?.token === token && packages.delete(value.packageId)) registryRevision += 1
     },
@@ -116,4 +117,12 @@ export function contentDefinitionRegistryRevision(): number {
 export function clearContentDefinitionRegistryForTests(): void {
   if (packages.size > 0) registryRevision += 1
   packages.clear()
+}
+
+/** Fresh identity projection only. No package payload or mutable registry
+ * object escapes, and every call observes the current registration token. */
+export function listRegisteredContentDefinitionIdentitiesForActivity(packageId:string,activityId:string):readonly {kind:ContentDefinitionKind;id:string}[]{
+ return(packages.get(packageId)?.value.definitions??[])
+  .filter(definition=>definition.activities?.some(activity=>activity!=null&&typeof activity==='object'&&'id'in activity&&activity.id===activityId))
+  .map(definition=>({kind:definition.kind,id:definition.id}))
 }

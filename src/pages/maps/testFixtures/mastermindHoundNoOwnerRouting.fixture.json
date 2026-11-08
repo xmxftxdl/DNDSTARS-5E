@@ -1,0 +1,2605 @@
+{
+  "docs": {
+    "characters": {
+      "characters": [
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "foe",
+          "name": "Foe",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 1
+          },
+          "level": 1,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 10,
+            "con": 10,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [
+            "str",
+            "con"
+          ],
+          "skills": [
+            "athletics",
+            "perception"
+          ],
+          "maxHp": 10,
+          "currentHp": 8,
+          "tempHp": 0,
+          "hitDice": "1d10",
+          "ac": 13,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "subclass": "champion",
+              "fightingStyles": []
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-leather-armor",
+              "name": "皮甲",
+              "slot": "armor",
+              "ac": 11,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "light",
+                "baseArmorClass": 11,
+                "dexterityBonus": "full",
+                "material": "nonmetal"
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "roomId": "S9DMMM",
+          "roomMemberId": "caf48756-e0ca-40a1-ba68-270a942ebdfb",
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "human",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2,
+            "wardingBondMaterialEquipped": false,
+            "wardingBondParticipantCharacterId": "foe",
+            "recentCreatureSightings": {
+              "soul-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Soul"
+              },
+              "spare-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Spare"
+              },
+              "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "凶兆猎犬"
+              }
+            },
+            "deathSaveTurn": {
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:foe-token:normal",
+              "eligible": false,
+              "resolved": false
+            },
+            "firstOwnCombatTurn": {
+              "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:1:foe-token:normal"
+            },
+            "turnStartResolvedTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:foe-token:normal",
+            "monsterMechanicMovementTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:1:foe-token:normal",
+            "monsterMechanicMovementFeet": 30,
+            "monsterMechanicMovementOrigin": {
+              "x": 525,
+              "y": 375
+            },
+            "monsterMechanicMovementLast": {
+              "x": 325,
+              "y": 375
+            },
+            "monsterMechanicMovementStraight": false,
+            "hiddenCheckTotal": 20,
+            "activeEffects": [
+              {
+                "schemaVersion": 1,
+                "id": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:ill-omen-location:foe-token",
+                "definitionId": "ill-omen-hound-target-location",
+                "label": "凶兆猎犬：本回合起始所知位置",
+                "kind": "debuff",
+                "source": {
+                  "kind": "feature",
+                  "rulesId": "ill-omen-hound",
+                  "actorId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+                  "magical": true
+                },
+                "appliedAt": 1793066052703,
+                "duration": {
+                  "type": "permanent"
+                },
+                "breakOn": [
+                  "source-dies"
+                ],
+                "stackingKey": "ill-omen-hound-target-location",
+                "stackingPolicy": "refresh-duration",
+                "visibility": "public",
+                "modifiers": {
+                  "locationKnownToSource": true,
+                  "locationKnowledgeRetainsUnseenAttackBenefits": true
+                }
+              },
+              {
+                "schemaVersion": 1,
+                "id": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:ill-omen-save:foe-token",
+                "definitionId": "ill-omen-hound-spell-save",
+                "label": "凶兆猎犬：仅召唤者法术豁免劣势",
+                "kind": "debuff",
+                "source": {
+                  "kind": "feature",
+                  "rulesId": "ill-omen-hound",
+                  "actorId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+                  "magical": true
+                },
+                "appliedAt": 1793066055681,
+                "duration": {
+                  "type": "permanent"
+                },
+                "removal": {
+                  "sourceLink": {
+                    "maximumDistanceFeet": 5
+                  }
+                },
+                "breakOn": [
+                  "source-dies"
+                ],
+                "stackingKey": "ill-omen-hound-spell-save",
+                "stackingPolicy": "refresh-duration",
+                "visibility": "public",
+                "modifiers": {
+                  "spellSavingThrowDisadvantageFromActorIds": [
+                    "soul-token"
+                  ]
+                }
+              }
+            ]
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 4,
+            "entries": [
+              {
+                "instanceId": "equipped:foe:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "acquiredAt": 0,
+                "contaminants": []
+              },
+              {
+                "instanceId": "equipped:foe:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0,
+                "contaminants": []
+              },
+              {
+                "instanceId": "equipped:foe:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "acquiredAt": 0,
+                "contaminants": []
+              },
+              {
+                "instanceId": "5956727b-2406-45d1-8708-9971e493e967",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "acquiredAt": 1793065894281,
+                "contaminants": [],
+                "equippedSlot": "mainWeapon"
+              },
+              {
+                "instanceId": "8a970e30-b4ed-43f6-b751-e5b4c4e768ec",
+                "templateId": "srd-5.1:equipment:dnd5e-leather-armor",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-leather-armor",
+                  "name": "皮甲",
+                  "englishName": "Leather armor",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "轻甲。穿戴并生效时，你的护甲等级为 11，加上完整敏捷调整值。",
+                  "rulesText": "轻甲。穿戴并生效时，你的护甲等级为 11，加上完整敏捷调整值。",
+                  "weightLb": 10,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-leather-armor",
+                    "name": "皮甲",
+                    "slot": "armor",
+                    "ac": 11,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "light",
+                      "baseArmorClass": 11,
+                      "dexterityBonus": "full",
+                      "material": "nonmetal"
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "acquiredAt": 1793065894282,
+                "contaminants": [],
+                "equippedSlot": "armor"
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 1,
+              "max": 1
+            }
+          ],
+          "exhaustionLevel": 0,
+          "deathSaveSuccesses": 0,
+          "deathSaveFailures": 0,
+          "deathSaveStable": false,
+          "concentrating": false,
+          "dnd5eWorldTimeAppliedMinute": 480
+        },
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "soul",
+          "name": "Soul",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "术士",
+          "dnd5eClassLevels": {
+            "sorcerer": 6
+          },
+          "level": 6,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 10,
+            "con": 12,
+            "int": 10,
+            "wis": 10,
+            "cha": 18
+          },
+          "savingThrows": [
+            "con",
+            "cha"
+          ],
+          "skills": [
+            "arcana",
+            "persuasion"
+          ],
+          "maxHp": 32,
+          "currentHp": 32,
+          "tempHp": 0,
+          "hitDice": "6d6",
+          "ac": 10,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "classes": {
+              "sorcerer": {
+                "subclass": "local.xge.repaired.archer93:shadow-magic",
+                "selections": {
+                  "class-skills": [
+                    "arcana",
+                    "persuasion"
+                  ],
+                  "spell-cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message",
+                    "local.xge.repaired.archer93:create-bonfire"
+                  ],
+                  "spell-known": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife",
+                    "local.xge.repaired.archer93:catapult",
+                    "local.xge.repaired.archer93:earth-tremor",
+                    "local.xge.repaired.archer93:chaos-bolt",
+                    "expeditious-retreat"
+                  ],
+                  "metamagic": [
+                    "careful",
+                    "distant"
+                  ]
+                }
+              }
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-light-crossbow",
+              "name": "轻弩",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "simple",
+                "mode": "ranged",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "piercing"
+                },
+                "attackAbility": "dex",
+                "rangeFeet": {
+                  "normal": 80,
+                  "long": 320
+                },
+                "properties": [
+                  "弹药",
+                  "装填",
+                  "双手"
+                ]
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "roomId": "S9DMMM",
+          "roomMemberId": "caf48756-e0ca-40a1-ba68-270a942ebdfb",
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "human",
+          "classResources": {
+            "dnd5e-sorcery-points": {
+              "current": 3,
+              "max": 6
+            },
+            "local.xge.repaired.archer93:strength-of-the-grave-use": {
+              "current": 1,
+              "max": 1
+            },
+            "dnd5e-spell-slot-1": {
+              "current": 4,
+              "max": 4
+            },
+            "dnd5e-spell-slot-2": {
+              "current": 3,
+              "max": 3
+            },
+            "dnd5e-spell-slot-3": {
+              "current": 3,
+              "max": 3
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2,
+            "wardingBondMaterialEquipped": false,
+            "wardingBondParticipantCharacterId": "soul",
+            "recentCreatureSightings": {
+              "foe-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Foe"
+              },
+              "spare-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Spare"
+              },
+              "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "凶兆猎犬"
+              }
+            },
+            "deathSaveTurn": {
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:soul-token:normal",
+              "eligible": false,
+              "resolved": false
+            },
+            "firstOwnCombatTurn": {
+              "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:1:soul-token:normal"
+            },
+            "turnStartResolvedTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:soul-token:normal"
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:soul:mainWeapon:dnd5e-light-crossbow",
+                "templateId": "srd-5.1:equipment:dnd5e-light-crossbow",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-light-crossbow",
+                  "name": "轻弩",
+                  "englishName": "Crossbow, light",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "简易武器。命中造成 1d8 穿刺伤害，射程 80/320 尺。\n\n武器属性：\n• 弹药：每次攻击必须消耗一枚与武器匹配的弹药；弹药从箭袋、弩矢盒等容器中取出属于攻击的一部分。战斗结束后花费 1 分钟搜索战场，可以回收已用弹药的一半。\n• 装填：由于装填所需时间，无论角色通常能进行多少次攻击，每次使用一个动作、附赠动作或反应射击该武器时都只能发射一枚弹药。\n• 双手：进行攻击时必须用双手持用；仅仅拿着或携带该武器时不要求两只手持续占用。",
+                  "rulesText": "简易武器。命中造成 1d8 穿刺伤害，射程 80/320 尺。\n\n武器属性：\n• 弹药：每次攻击必须消耗一枚与武器匹配的弹药；弹药从箭袋、弩矢盒等容器中取出属于攻击的一部分。战斗结束后花费 1 分钟搜索战场，可以回收已用弹药的一半。\n• 装填：由于装填所需时间，无论角色通常能进行多少次攻击，每次使用一个动作、附赠动作或反应射击该武器时都只能发射一枚弹药。\n• 双手：进行攻击时必须用双手持用；仅仅拿着或携带该武器时不要求两只手持续占用。",
+                  "weightLb": 5,
+                  "cost": {
+                    "amount": 25,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-light-crossbow",
+                    "name": "轻弩",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "simple",
+                      "mode": "ranged",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "piercing"
+                      },
+                      "attackAbility": "dex",
+                      "rangeFeet": {
+                        "normal": 80,
+                        "long": 320
+                      },
+                      "properties": [
+                        "弹药",
+                        "装填",
+                        "双手"
+                      ]
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0,
+                "contaminants": []
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "dnd5eContentChoices": {
+            "local.xge.repaired.archer93:shadow-magic:level-3": {
+              "schemaVersion": 1,
+              "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+              "selections": {},
+              "resolvedGrants": [
+                {
+                  "kind": "feature",
+                  "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                }
+              ]
+            },
+            "local.xge.repaired.archer93:shadow-magic:level-6": {
+              "schemaVersion": 1,
+              "contentId": "local.xge.repaired.archer93:shadow-magic:level-6",
+              "selections": {},
+              "resolvedGrants": [
+                {
+                  "kind": "feature",
+                  "featureId": "local.xge.repaired.archer93:hound-native"
+                }
+              ]
+            }
+          },
+          "dnd5eFeatIds": [],
+          "hitPointDice": [
+            {
+              "sides": 6,
+              "current": 6,
+              "max": 6
+            }
+          ],
+          "dnd5eLevelAdvancements": [
+            {
+              "schemaVersion": 1,
+              "id": "adv-da935b0d-00f0-498d-bed7-e10b7e57e085",
+              "fromLevel": 1,
+              "toLevel": 2,
+              "classId": "sorcerer",
+              "fromClassLevel": 1,
+              "toClassLevel": 2,
+              "completedAt": 1793065894220,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "sorcerer",
+                "subclassId": "local.xge.repaired.archer93:shadow-magic",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "asiChoices": [],
+                "classChoiceSelections": {},
+                "contentChoiceSelections": {},
+                "spellSelections": {
+                  "cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message"
+                  ],
+                  "knownSpells": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife"
+                  ]
+                }
+              },
+              "grantedFeatureIds": [
+                "font-of-magic"
+              ],
+              "before": {
+                "level": 1,
+                "dnd5eClassLevels": {
+                  "sorcerer": 1
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 16
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "maxHp": 10,
+                "currentHp": 10
+              },
+              "after": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "sorcerer": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 16
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 12,
+                "currentHp": 12
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-e7c0ef97-76f3-4ccb-a52b-feafb5a18810",
+              "fromLevel": 2,
+              "toLevel": 3,
+              "classId": "sorcerer",
+              "fromClassLevel": 2,
+              "toClassLevel": 3,
+              "completedAt": 1793065894236,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "sorcerer",
+                "subclassId": "local.xge.repaired.archer93:shadow-magic",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "asiChoices": [],
+                "classChoiceSelections": {
+                  "metamagic": [
+                    "careful",
+                    "distant"
+                  ]
+                },
+                "contentChoiceSelections": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {}
+                },
+                "spellSelections": {
+                  "cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message"
+                  ],
+                  "knownSpells": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife",
+                    "local.xge.repaired.archer93:catapult"
+                  ]
+                }
+              },
+              "grantedFeatureIds": [
+                "metamagic",
+                "local.xge.repaired.archer93:shadow-magic:eyes-of-the-dark-darkness"
+              ],
+              "before": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "sorcerer": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 16
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 12,
+                "currentHp": 12
+              },
+              "after": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "sorcerer": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 16
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 17,
+                "currentHp": 17
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-35e36108-d4c7-4e5d-8574-c6852211cd45",
+              "fromLevel": 3,
+              "toLevel": 4,
+              "classId": "sorcerer",
+              "fromClassLevel": 3,
+              "toClassLevel": 4,
+              "completedAt": 1793065894250,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "sorcerer",
+                "subclassId": "local.xge.repaired.archer93:shadow-magic",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "asiChoices": [
+                  {
+                    "classLevel": 4,
+                    "choice": {
+                      "kind": "ability-score",
+                      "increases": {
+                        "cha": 2
+                      }
+                    }
+                  }
+                ],
+                "classChoiceSelections": {},
+                "contentChoiceSelections": {},
+                "spellSelections": {
+                  "cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message",
+                    "local.xge.repaired.archer93:create-bonfire"
+                  ],
+                  "knownSpells": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife",
+                    "local.xge.repaired.archer93:catapult",
+                    "local.xge.repaired.archer93:earth-tremor"
+                  ]
+                }
+              },
+              "grantedFeatureIds": [],
+              "before": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "sorcerer": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 16
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 17,
+                "currentHp": 17
+              },
+              "after": {
+                "level": 4,
+                "dnd5eClassLevels": {
+                  "sorcerer": 4
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 18
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message",
+                          "local.xge.repaired.archer93:create-bonfire"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult",
+                          "local.xge.repaired.archer93:earth-tremor"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 4,
+                    "max": 4
+                  }
+                ],
+                "maxHp": 22,
+                "currentHp": 22
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-b53cdfa0-6acd-4c5f-bbb6-9e8d7d45fa72",
+              "fromLevel": 4,
+              "toLevel": 5,
+              "classId": "sorcerer",
+              "fromClassLevel": 4,
+              "toClassLevel": 5,
+              "completedAt": 1793065894265,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "sorcerer",
+                "subclassId": "local.xge.repaired.archer93:shadow-magic",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "asiChoices": [],
+                "classChoiceSelections": {},
+                "contentChoiceSelections": {},
+                "spellSelections": {
+                  "cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message",
+                    "local.xge.repaired.archer93:create-bonfire"
+                  ],
+                  "knownSpells": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife",
+                    "local.xge.repaired.archer93:catapult",
+                    "local.xge.repaired.archer93:earth-tremor",
+                    "local.xge.repaired.archer93:chaos-bolt"
+                  ]
+                }
+              },
+              "grantedFeatureIds": [],
+              "before": {
+                "level": 4,
+                "dnd5eClassLevels": {
+                  "sorcerer": 4
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 18
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message",
+                          "local.xge.repaired.archer93:create-bonfire"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult",
+                          "local.xge.repaired.archer93:earth-tremor"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 4,
+                    "max": 4
+                  }
+                ],
+                "maxHp": 22,
+                "currentHp": 22
+              },
+              "after": {
+                "level": 5,
+                "dnd5eClassLevels": {
+                  "sorcerer": 5
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 18
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message",
+                          "local.xge.repaired.archer93:create-bonfire"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult",
+                          "local.xge.repaired.archer93:earth-tremor",
+                          "local.xge.repaired.archer93:chaos-bolt"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 5,
+                    "max": 5
+                  }
+                ],
+                "maxHp": 27,
+                "currentHp": 27
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-f9ef5e12-6d18-4c12-b53f-5aeff90cdb76",
+              "fromLevel": 5,
+              "toLevel": 6,
+              "classId": "sorcerer",
+              "fromClassLevel": 5,
+              "toClassLevel": 6,
+              "completedAt": 1793065894277,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "sorcerer",
+                "subclassId": "local.xge.repaired.archer93:shadow-magic",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "asiChoices": [],
+                "classChoiceSelections": {},
+                "contentChoiceSelections": {
+                  "local.xge.repaired.archer93:shadow-magic:level-6": {}
+                },
+                "spellSelections": {
+                  "cantrips": [
+                    "poison-spray",
+                    "local.xge.repaired.archer93:shape-water",
+                    "local.xge.repaired.archer93:infestation",
+                    "message",
+                    "local.xge.repaired.archer93:create-bonfire"
+                  ],
+                  "knownSpells": [
+                    "shield",
+                    "mage-armor",
+                    "local.xge.repaired.archer93:ice-knife",
+                    "local.xge.repaired.archer93:catapult",
+                    "local.xge.repaired.archer93:earth-tremor",
+                    "local.xge.repaired.archer93:chaos-bolt",
+                    "expeditious-retreat"
+                  ]
+                }
+              },
+              "grantedFeatureIds": [
+                "local.xge.repaired.archer93:shadow-magic:hound-of-ill-omen"
+              ],
+              "before": {
+                "level": 5,
+                "dnd5eClassLevels": {
+                  "sorcerer": 5
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 18
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message",
+                          "local.xge.repaired.archer93:create-bonfire"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult",
+                          "local.xge.repaired.archer93:earth-tremor",
+                          "local.xge.repaired.archer93:chaos-bolt"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 5,
+                    "max": 5
+                  }
+                ],
+                "maxHp": 27,
+                "currentHp": 27
+              },
+              "after": {
+                "level": 6,
+                "dnd5eClassLevels": {
+                  "sorcerer": 6
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 10,
+                  "con": 12,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 18
+                },
+                "skills": [
+                  "arcana",
+                  "persuasion"
+                ],
+                "savingThrows": [
+                  "con",
+                  "cha"
+                ],
+                "dnd5eClassChoices": {
+                  "classes": {
+                    "sorcerer": {
+                      "subclass": "local.xge.repaired.archer93:shadow-magic",
+                      "selections": {
+                        "class-skills": [
+                          "arcana",
+                          "persuasion"
+                        ],
+                        "spell-cantrips": [
+                          "poison-spray",
+                          "local.xge.repaired.archer93:shape-water",
+                          "local.xge.repaired.archer93:infestation",
+                          "message",
+                          "local.xge.repaired.archer93:create-bonfire"
+                        ],
+                        "spell-known": [
+                          "shield",
+                          "mage-armor",
+                          "local.xge.repaired.archer93:ice-knife",
+                          "local.xge.repaired.archer93:catapult",
+                          "local.xge.repaired.archer93:earth-tremor",
+                          "local.xge.repaired.archer93:chaos-bolt",
+                          "expeditious-retreat"
+                        ],
+                        "metamagic": [
+                          "careful",
+                          "distant"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "dnd5eContentChoices": {
+                  "local.xge.repaired.archer93:shadow-magic:level-3": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-3",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:eyes-darkness-casting"
+                      }
+                    ]
+                  },
+                  "local.xge.repaired.archer93:shadow-magic:level-6": {
+                    "schemaVersion": 1,
+                    "contentId": "local.xge.repaired.archer93:shadow-magic:level-6",
+                    "selections": {},
+                    "resolvedGrants": [
+                      {
+                        "kind": "feature",
+                        "featureId": "local.xge.repaired.archer93:hound-native"
+                      }
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 6,
+                    "current": 6,
+                    "max": 6
+                  }
+                ],
+                "maxHp": 32,
+                "currentHp": 32
+              }
+            }
+          ],
+          "exhaustionLevel": 0,
+          "deathSaveSuccesses": 0,
+          "deathSaveFailures": 0,
+          "deathSaveStable": false,
+          "concentrating": false,
+          "dnd5eWorldTimeAppliedMinute": 480
+        },
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "spare",
+          "name": "Spare",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 1
+          },
+          "level": 1,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 10,
+            "con": 10,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [
+            "str",
+            "con"
+          ],
+          "skills": [
+            "athletics",
+            "perception"
+          ],
+          "maxHp": 10,
+          "currentHp": 10,
+          "tempHp": 0,
+          "hitDice": "1d10",
+          "ac": 18,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "subclass": "champion",
+              "fightingStyles": []
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-chain-mail",
+              "name": "链甲",
+              "slot": "armor",
+              "ac": 16,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "heavy",
+                "baseArmorClass": 16,
+                "dexterityBonus": "none",
+                "material": "metal",
+                "strengthRequirement": 13,
+                "stealthDisadvantage": true
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "roomId": "S9DMMM",
+          "roomMemberId": "caf48756-e0ca-40a1-ba68-270a942ebdfb",
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "human",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2,
+            "wardingBondMaterialEquipped": false,
+            "wardingBondParticipantCharacterId": "spare",
+            "recentCreatureSightings": {
+              "foe-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Foe"
+              },
+              "soul-token": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "Soul"
+              },
+              "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1": {
+                "mapId": "shadow-grave-map",
+                "worldMinute": 480.1,
+                "label": "凶兆猎犬"
+              }
+            },
+            "deathSaveTurn": {
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:spare-token:normal",
+              "eligible": false,
+              "resolved": false
+            },
+            "firstOwnCombatTurn": {
+              "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+              "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:1:spare-token:normal"
+            },
+            "turnStartResolvedTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:spare-token:normal"
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:spare:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0,
+                "contaminants": []
+              },
+              {
+                "instanceId": "equipped:spare:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0,
+                "contaminants": []
+              },
+              {
+                "instanceId": "equipped:spare:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "armor",
+                "acquiredAt": 0,
+                "contaminants": []
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 1,
+              "max": 1
+            }
+          ],
+          "exhaustionLevel": 0,
+          "deathSaveSuccesses": 0,
+          "deathSaveFailures": 0,
+          "deathSaveStable": false,
+          "concentrating": false,
+          "dnd5eWorldTimeAppliedMinute": 480
+        }
+      ],
+      "selectedId": "soul",
+      "updatedAt": 1793066056000,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 24,
+        "writerId": "dm:ee9fa491-b6dd-4d85-9724-c3abd64007d0:bl-seq-host-fd5a0904-afe1-4462-95e4-ebaf18ade6bd",
+        "writtenAt": 1793066056451
+      }
+    },
+    "maps": {
+      "maps": [
+        {
+          "id": "shadow-grave-map",
+          "name": "Actual Shadow final zero",
+          "width": 1500,
+          "height": 1500,
+          "gridSize": 50,
+          "feetPerCell": 5,
+          "gridOffsetX": 0,
+          "gridOffsetY": 0,
+          "showGrid": true,
+          "tokens": [
+            {
+              "id": "foe-token",
+              "characterId": "foe",
+              "type": "player",
+              "dnd5eSide": "enemy",
+              "label": "Foe",
+              "x": 325,
+              "y": 375,
+              "size": 1,
+              "color": "#c96",
+              "emoji": "F",
+              "hp": 8,
+              "maxHp": 10,
+              "dnd5eTraversalMode": "walk",
+              "movementAnimation": {
+                "id": "player-move:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065981924:4:segment:2:foe-token",
+                "points": [
+                  {
+                    "x": 475,
+                    "y": 325
+                  },
+                  {
+                    "x": 475,
+                    "y": 275
+                  },
+                  {
+                    "x": 425,
+                    "y": 275
+                  },
+                  {
+                    "x": 375,
+                    "y": 275
+                  },
+                  {
+                    "x": 325,
+                    "y": 325
+                  },
+                  {
+                    "x": 325,
+                    "y": 375
+                  }
+                ],
+                "durationMs": 947,
+                "issuedAt": 1793065994477
+              }
+            },
+            {
+              "id": "soul-token",
+              "characterId": "soul",
+              "type": "player",
+              "dnd5eSide": "player",
+              "label": "Soul",
+              "x": 575,
+              "y": 375,
+              "size": 1,
+              "color": "#6ac",
+              "emoji": "S",
+              "hp": 32,
+              "maxHp": 32,
+              "dnd5eCharacterDarkvisionRangeFeet": 120,
+              "dnd5eCharacterInvisibleToDarkvision": false
+            },
+            {
+              "id": "spare-token",
+              "characterId": "spare",
+              "type": "player",
+              "dnd5eSide": "enemy",
+              "label": "Spare",
+              "x": 1125,
+              "y": 925,
+              "size": 1,
+              "color": "#6ac",
+              "emoji": "S",
+              "hp": 10,
+              "maxHp": 10
+            },
+            {
+              "id": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+              "label": "凶兆猎犬",
+              "x": 375,
+              "y": 375,
+              "color": "#374151",
+              "emoji": "🐺",
+              "size": 1,
+              "type": "enemy",
+              "hp": 35,
+              "maxHp": 37,
+              "dnd5eCombatState": {
+                "schemaVersion": 2,
+                "activeEffects": [
+                  {
+                    "schemaVersion": 1,
+                    "id": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:ill-omen-body",
+                    "definitionId": "ill-omen-hound-body",
+                    "label": "凶兆猎犬：幽影躯体",
+                    "kind": "debuff",
+                    "source": {
+                      "kind": "feature",
+                      "rulesId": "ill-omen-hound",
+                      "actorId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+                      "magical": true
+                    },
+                    "appliedAt": 1793065923777,
+                    "duration": {
+                      "type": "permanent"
+                    },
+                    "stackingKey": "ill-omen-hound-body",
+                    "stackingPolicy": "refresh-duration",
+                    "visibility": "public",
+                    "modifiers": {
+                      "objectCreatureTraversal": {
+                        "difficultTerrain": true,
+                        "endOwnTurnInsideObjectDamage": {
+                          "amount": 5,
+                          "type": "force"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "firstOwnCombatTurn": {
+                  "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+                  "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:1:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal"
+                },
+                "turnStartResolvedTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+                "deathSaveTurn": {
+                  "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+                  "eligible": false,
+                  "resolved": false
+                },
+                "runningJumpApproachFeet": 5,
+                "monsterMechanicMovementTurnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+                "monsterMechanicMovementFeet": 5,
+                "monsterMechanicMovementOrigin": {
+                  "x": 425,
+                  "y": 375
+                },
+                "monsterMechanicMovementLast": {
+                  "x": 375,
+                  "y": 375
+                },
+                "monsterMechanicMovementStraight": true,
+                "recentCreatureSightings": {
+                  "foe-token": {
+                    "mapId": "shadow-grave-map",
+                    "worldMinute": 480.1,
+                    "label": "Foe"
+                  },
+                  "soul-token": {
+                    "mapId": "shadow-grave-map",
+                    "worldMinute": 480.1,
+                    "label": "Soul"
+                  },
+                  "spare-token": {
+                    "mapId": "shadow-grave-map",
+                    "worldMinute": 480.1,
+                    "label": "Spare"
+                  }
+                },
+                "knownCreatureLocations": {
+                  "foe-token": {
+                    "mapId": "shadow-grave-map",
+                    "targetId": "foe-token",
+                    "label": "Foe",
+                    "x": 325,
+                    "y": 375,
+                    "elevationFeet": 0,
+                    "round": 3,
+                    "sourceActivityId": "ill-omen-hound"
+                  }
+                },
+                "monsterActionUsesByActionId": {}
+              },
+              "poolId": "srd-5.1:dire-wolf",
+              "visualVariantId": "snow-cedar-stalk",
+              "creatureTypes": [
+                "monstrosity"
+              ],
+              "creatureSize": "中型",
+              "showHpOnToken": true,
+              "showDetailOnToken": true,
+              "dnd5eSummon": {
+                "schemaVersion": 1,
+                "pluginId": "local.xge.repaired.archer93",
+                "featureId": "hound-of-ill-omen",
+                "sourceCharacterId": "soul",
+                "sourceTokenId": "soul-token",
+                "createdRound": 1,
+                "expiresAfterRound": 50,
+                "side": "player",
+                "createdWorldMinute": 480,
+                "creatureTypeOverride": "monstrosity",
+                "illOmenTarget": {
+                  "targetTokenId": "foe-token",
+                  "targetCharacterId": "foe"
+                }
+              },
+              "dnd5eWorldTimeAppliedMinute": 480,
+              "dnd5eTraversalMode": "walk",
+              "movementAnimation": {
+                "id": "monster-move:shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3~8972a43d86190427",
+                "points": [
+                  {
+                    "x": 425,
+                    "y": 375
+                  },
+                  {
+                    "x": 375,
+                    "y": 375
+                  }
+                ],
+                "durationMs": 240,
+                "issuedAt": 1793066056085
+              }
+            }
+          ],
+          "dnd5ePluginAreas": [],
+          "dnd5eActivityTurnClock": {
+            "schemaVersion": 1,
+            "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+            "sequence": 9,
+            "turnKey": "3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+            "previousTurnKey": "3:soul-token:normal",
+            "cursor": {
+              "tokenId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+              "slotId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+              "round": 3,
+              "initiativeIndex": 1
+            }
+          },
+          "dnd5eSkillCheckMovement": {
+            "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:soul-token:normal",
+            "distanceByActor": {
+              "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1": 5
+            }
+          }
+        }
+      ],
+      "selectedId": "shadow-grave-map",
+      "updatedAt": 1793066056000,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 23,
+        "writerId": "dm:ee9fa491-b6dd-4d85-9724-c3abd64007d0:bl-seq-host-fd5a0904-afe1-4462-95e4-ebaf18ade6bd",
+        "writtenAt": 1793066056451
+      }
+    },
+    "combat": {
+      "mapId": "shadow-grave-map",
+      "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+      "active": true,
+      "round": 3,
+      "initiativeIndex": 1,
+      "initiativeOrder": [
+        {
+          "slotId": "soul-token:normal",
+          "tokenId": "soul-token",
+          "label": "Soul",
+          "emoji": "🧝",
+          "color": "#6ac",
+          "accent": "from-arcane-500 to-arcane-600",
+          "roll": 19,
+          "initiativeCalculation": {
+            "rolls": [
+              8
+            ],
+            "d20": 8,
+            "modifier": 0,
+            "mode": "normal"
+          },
+          "initiativeRollReceipt": {
+            "id": "6137389e-fd3e-4a40-a808-db7dd9ecfac0",
+            "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+            "phase": "combat-start"
+          }
+        },
+        {
+          "slotId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+          "tokenId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+          "label": "凶兆猎犬",
+          "emoji": "🐺",
+          "color": "#374151",
+          "roll": 9,
+          "initiativeCalculation": {
+            "rolls": [
+              7
+            ],
+            "d20": 7,
+            "modifier": 2,
+            "mode": "normal"
+          }
+        },
+        {
+          "slotId": "foe-token:normal",
+          "tokenId": "foe-token",
+          "label": "Foe",
+          "emoji": "🧝",
+          "color": "#c96",
+          "accent": "from-arcane-500 to-arcane-600",
+          "roll": 8,
+          "initiativeCalculation": {
+            "rolls": [
+              5
+            ],
+            "d20": 5,
+            "modifier": 0,
+            "mode": "normal"
+          },
+          "initiativeRollReceipt": {
+            "id": "749d77be-3bf2-48fd-b300-264dc2f24296",
+            "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+            "phase": "combat-start"
+          }
+        },
+        {
+          "slotId": "spare-token:normal",
+          "tokenId": "spare-token",
+          "label": "Spare",
+          "emoji": "🧝",
+          "color": "#6ac",
+          "accent": "from-arcane-500 to-arcane-600",
+          "roll": 5,
+          "initiativeCalculation": {
+            "rolls": [
+              19
+            ],
+            "d20": 19,
+            "modifier": 0,
+            "mode": "normal"
+          },
+          "initiativeRollReceipt": {
+            "id": "a72b23da-c581-4807-b391-c88599e6caca",
+            "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+            "phase": "combat-start"
+          }
+        }
+      ],
+      "settlementMode": "automatic",
+      "monsterControl": {
+        "schemaVersion": 1,
+        "mode": "manual",
+        "pauseRequested": false,
+        "updatedAt": 1793065905016
+      },
+      "dnd5eTurnEconomyByToken": {
+        "soul-token": {
+          "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:soul-token:normal",
+          "attacksUsed": 0,
+          "action": {
+            "current": 1,
+            "max": 1
+          },
+          "bonusAction": {
+            "current": 1,
+            "max": 1
+          },
+          "reaction": {
+            "current": 1,
+            "max": 1
+          },
+          "objectInteraction": {
+            "current": 1,
+            "max": 1
+          },
+          "movement": {
+            "current": 30,
+            "max": 30,
+            "spent": 0
+          }
+        },
+        "foe-token": {
+          "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:foe-token:normal",
+          "attacksUsed": 0,
+          "action": {
+            "current": 1,
+            "max": 1
+          },
+          "bonusAction": {
+            "current": 1,
+            "max": 1
+          },
+          "reaction": {
+            "current": 1,
+            "max": 1
+          },
+          "objectInteraction": {
+            "current": 1,
+            "max": 1
+          },
+          "movement": {
+            "current": 30,
+            "max": 30,
+            "spent": 0
+          }
+        },
+        "spare-token": {
+          "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:2:spare-token:normal",
+          "attacksUsed": 0,
+          "action": {
+            "current": 1,
+            "max": 1
+          },
+          "bonusAction": {
+            "current": 1,
+            "max": 1
+          },
+          "reaction": {
+            "current": 1,
+            "max": 1
+          },
+          "objectInteraction": {
+            "current": 1,
+            "max": 1
+          },
+          "movement": {
+            "current": 20,
+            "max": 20,
+            "spent": 0
+          }
+        },
+        "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1": {
+          "turnKey": "shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:normal",
+          "attacksUsed": 0,
+          "action": {
+            "current": 1,
+            "max": 1
+          },
+          "bonusAction": {
+            "current": 1,
+            "max": 1
+          },
+          "reaction": {
+            "current": 1,
+            "max": 1
+          },
+          "objectInteraction": {
+            "current": 1,
+            "max": 1
+          },
+          "movement": {
+            "current": 40,
+            "max": 50,
+            "spent": 0
+          }
+        }
+      },
+      "effectiveRules": {
+        "schemaVersion": 1,
+        "revision": 2,
+        "hash": "sha256-XzeIGbnG5uX7cPaTAC+IDG7DLW5ZafnUe/NEAyPO4Bg=",
+        "sourceOrder": [
+          "srd",
+          "house-rules",
+          "character-options",
+          "temporary-effects",
+          "final-settlement"
+        ],
+        "houseRules": {
+          "declarativeAbilityDamageMultiplier": 1,
+          "criticalHitMode": "double-dice",
+          "advantageMode": "standard",
+          "shortRestMinutes": 60,
+          "longRestHours": 8,
+          "combatBannersEnabled": true,
+          "spellAnimationsEnabled": true,
+          "spellcastingPrerequisitesEnabled": true,
+          "encumbranceEnabled": true
+        },
+        "requiredPlugins": [
+          {
+            "id": "local.xge.repaired.archer93",
+            "version": "0.99.0",
+            "integrity": "sha256-8EhgVNtIu8NsaSNDs8rVFMINIq5x4upRgMxdwSOHJn0=",
+            "stateSchemaVersion": 1
+          }
+        ]
+      },
+      "updatedAt": 1793066056820,
+      "campaignRoundClock": {
+        "combatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+        "round": 3,
+        "pendingRounds": 2,
+        "pendingRoundCredits": {
+          "[\"token\",\"shadow-grave-map\",\"foe-token\"]": 2,
+          "[\"character\",\"foe\"]": 2,
+          "[\"token\",\"shadow-grave-map\",\"soul-token\"]": 2,
+          "[\"character\",\"soul\"]": 2,
+          "[\"token\",\"shadow-grave-map\",\"spare-token\"]": 2,
+          "[\"character\",\"spare\"]": 2,
+          "[\"token\",\"shadow-grave-map\",\"plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1\"]": 2
+        }
+      },
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 25,
+        "writerId": "dm:ee9fa491-b6dd-4d85-9724-c3abd64007d0:bl-seq-host-fd5a0904-afe1-4462-95e4-ebaf18ade6bd",
+        "writtenAt": 1793066057829
+      }
+    },
+    "map-geometry": {
+      "schemaVersion": 3,
+      "maps": [
+        {
+          "mapId": "shadow-grave-map",
+          "walls": [
+            {
+              "id": "actual-wood-cover",
+              "label": "Actual wooden hiding cover",
+              "blocksVision": true,
+              "blocksMovement": true,
+              "blocksLineOfEffect": true,
+              "baseHeightFeet": 0,
+              "heightFeet": 20,
+              "createdAt": 1,
+              "kind": "wall",
+              "points": [
+                {
+                  "x": 425,
+                  "y": 325
+                },
+                {
+                  "x": 425,
+                  "y": 425
+                }
+              ],
+              "material": "stone",
+              "edgeIds": [
+                "edge:actual-wood-cover:0"
+              ]
+            }
+          ],
+          "doors": [],
+          "windows": [],
+          "obstacles": [],
+          "lights": [],
+          "vision": {
+            "enabled": false,
+            "defaultRangeFeet": 120,
+            "sharePartyVision": true,
+            "ambientLight": "bright"
+          },
+          "environment": "normal",
+          "weather": "normal",
+          "overheadSpace": "open",
+          "updatedAt": 1793065895888
+        }
+      ],
+      "updatedAt": 1793065895888,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 2,
+        "writerId": "dm:ee9fa491-b6dd-4d85-9724-c3abd64007d0:bl-seq-host-fd5a0904-afe1-4462-95e4-ebaf18ade6bd",
+        "writtenAt": 1793065896054
+      }
+    },
+    "campaign-time": {
+      "schemaVersion": 2,
+      "worldMinute": 480,
+      "displayMode": "campaign-day",
+      "displayMinuteOffset": 0,
+      "timers": [],
+      "advances": [],
+      "updatedAt": 1793065901987,
+      "worldSecondRemainder": 6,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "ee9fa491-b6dd-4d85-9724-c3abd64007d0",
+        "writtenAt": 1793065901996
+      }
+    }
+  },
+  "lengthProof": {
+    "actualRoom": "S9DMMM",
+    "actualCombatId": "shadow-grave-map:combat-1793065903902-31zqgkyezjv",
+    "actualActorId": "plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1",
+    "minimumLength": 224,
+    "minimum": "monster-strike:shadow-grave-map:combat-1793065903902-31zqgkyezjv:3:plugin-summon:shadow-grave-map:player-action:caf48756-e0ca-40a1-ba68-270a942ebdfb:94db5ebd-25a2-40d8-a36b-d2e112da0ee3:1793065916233:1:call:1:0:x:interrupt:x",
+    "unknownRuntimeIds": "Only a one-character lower bound is substituted; the real runtime IDs are not claimed recovered.",
+    "sourceLines": "RootR199 MapsWorkspacePage finishEnemyAttack strikeId and interruptTransactionId at23656-23664",
+    "originalMMParentMaximum": 180,
+    "certainlyExceedsOldParentBound": true
+  }
+}

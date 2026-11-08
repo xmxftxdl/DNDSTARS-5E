@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { createCoreFighter } from './support/characterCreation'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const portBase = Math.max(1024, Number(process.env.STARS_E2E_PORT_BASE) || 6173)
+const DM = `http://127.0.0.1:${portBase}`
+const PLAYER = `http://127.0.0.1:${portBase + 1}`
 const SESSION_KEY = 'stars-room-session:v1'
 
 interface RoomMembershipResponse {
@@ -76,7 +77,7 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
 
   const roster = dm.getByTestId('dm-room-player-roster')
   await expect(roster.getByText('爱丽丝', { exact: true })).toBeVisible()
-  await expect(roster.getByText('爱丽丝的战士', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' })).toBeVisible({ timeout: 20_000 })
   await roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' }).click()
   const detail = dm.getByRole('dialog', { name: '爱丽丝的战士的角色卡详情' })
   await expect(detail).toBeVisible()

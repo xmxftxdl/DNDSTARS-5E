@@ -1,3 +1,8 @@
+import {bountifulEquipmentCostCharacter} from './bountifulEquipmentReplay'
+import{bindDnd5ePreparedOrdinaryWeaponScene,restoreDnd5ePreparedOrdinaryWeaponScene,type OrdinaryWeaponSceneAuthority}from'./ordinaryWeaponScene'
+import{normalizeDnd5eInventory}from'./items'
+import{pactWeaponPendingSeparationInstance}from'./pactWeaponSeparation'
+import {derivePactWeaponCombatView} from './pactWeaponCombatView'
 import { dnd5eAttackActionSlot } from './attackActionSlot'
 import { dnd5eOrdinaryAttacksUsed } from './attackActionHistory'
 import { prepareDnd5eAttackTeleportDestination } from './attackTeleportDestination'
@@ -81,6 +86,7 @@ import {
   type Dnd5ePostD20AdjustmentUse,
   type Dnd5eDamageMitigationInterruptUse,
   type Dnd5eAttackRetargetInterruptUse,
+  type Dnd5eCoverAttackRedirectUse,
   type Dnd5eMountedAttackRedirectUse,
   type Dnd5eWholeWeaponDamageRerollUse,
 } from './headlessCombatEngine'
@@ -226,7 +232,43 @@ export function dnd5eVisibleEquipmentAttackTargets(input: Parameters<typeof prep
   })
 }
 
-export function prepareDnd5eEquipmentAttack(input: {
+type ActualFuryEquipmentPreparationInput=Parameters<typeof prepareDnd5eEquipmentAttack>[0]
+const actualFuryEquipmentPreparations=new WeakMap<object,{preparedSignature:string;inputSignature:string;input:ActualFuryEquipmentPreparationInput;parent?:object}>()
+function rememberActualFuryEquipmentPreparation(prepared:PreparedDnd5eEquipmentAttack,input:ActualFuryEquipmentPreparationInput){actualFuryEquipmentPreparations.set(prepared,{preparedSignature:JSON.stringify(prepared),inputSignature:JSON.stringify(input),input});return prepared}
+/** Mechanical provenance only. No setter, clone inheritance, Room or world grant. */
+export function dnd5eActualEquipmentAttackPreparationCurrent(prepared:object):boolean{let current:object|undefined=prepared;const seen=new Set<object>();for(let depth=0;current&&depth<32;depth++){if(seen.has(current))return false;seen.add(current);const row=actualFuryEquipmentPreparations.get(current);if(!row||row.preparedSignature!==JSON.stringify(current)||row.inputSignature!==JSON.stringify(row.input))return false;if(!row.parent)return true;current=row.parent}return false}
+/** Final Page intent filtering is a specific mechanical projection, not a
+ * general registration/refresh API. Only an unchanged issued original can
+ * pass its private lineage to an ordered subset; external DTOs stay data. */
+export function projectDnd5eEquipmentAttackIntentPreparation(prepared:PreparedDnd5eEquipmentAttack,selected:readonly string[]):PreparedDnd5eEquipmentAttack{
+ const row=actualFuryEquipmentPreparations.get(prepared),next={...prepared,declarativeIntentFeatureIds:selected}
+ if(!row)return next
+ if(!dnd5eActualEquipmentAttackPreparationCurrent(prepared))throw Error('equipment-intent-preparation:actual-current-original-required')
+ if(!Array.isArray(selected)||selected.some(id=>typeof id!=='string')||new Set(selected).size!==selected.length||JSON.stringify(selected)!==JSON.stringify(prepared.declarativeIntentFeatureIds.filter(id=>selected.includes(id))))throw Error('equipment-intent-preparation:exact-original-ordered-subset-required')
+ actualFuryEquipmentPreparations.set(next,{input:row.input,inputSignature:row.inputSignature,preparedSignature:JSON.stringify(next),parent:prepared});return next
+}
+
+/** Pact facts are ephemeral rules reads. All final inventory/HP applications,
+ * including teleport landing continuations, retain the original Host roster. */
+export function prepareDnd5eEquipmentAttack(input: Parameters<typeof prepareDnd5eEquipmentAttackUnprojected>[0]): ReturnType<typeof prepareDnd5eEquipmentAttackUnprojected> {
+  const view=derivePactWeaponCombatView(input.characters)
+  const result=prepareDnd5eEquipmentAttackUnprojected({...input,characters:view.characters})
+  if(!result.ok)return result
+  const prepared=result.prepared,actor=input.characters.find(row=>row.id===prepared.actor.id)
+  if(!actor)return{ok:false,reason:'invalid-actor'}
+  const expired=new Set(input.characters.map(pactWeaponPendingSeparationInstance).filter(Boolean))
+  if(normalizeDnd5eInventory(actor).entries.some(entry=>expired.has(entry.instanceId)&&entry.item.equipment?.id===prepared.profile.weaponId))return{ok:false,reason:'invalid-action'}
+
+  const fact=view.facts.find(row=>row.wielderId===actor.id&&row.equipmentId===prepared.profile.weaponId)
+  return{ok:true,prepared:rememberActualFuryEquipmentPreparation(bindDnd5ePreparedOrdinaryWeaponScene({...prepared,actor,characters:input.characters,
+    damageSource:fact?.damageSource??prepared.damageSource,
+    ...(prepared.attackActionTeleport?{attackActionTeleport:{...prepared.attackActionTeleport,preparationInput:{...prepared.attackActionTeleport.preparationInput,characters:input.characters}}}:{})},input.ordinarySceneAuthority),input)}
+}
+
+function prepareDnd5eEquipmentAttackUnprojected(input: {
+  ordinarySceneAuthority?:OrdinaryWeaponSceneAuthority
+  /** Host snapshot override for an in-flight reaction after geometry changed. */
+  geometry?:import('../../lib/mapGeometry').MapGeometryState|null
   /** Host-only parent save checkpoint; absent from the player request schema. */
   savingThrowCounterattack?: { state: Dnd5eHeadlessCombatState; featureId: string }
   /** Host scene clock, never taken from the player action. */
@@ -329,6 +371,8 @@ export function prepareDnd5eEquipmentAttack(input: {
   const selectedWeaponSlot = activityWeaponAttackGrantId != null && activityWeaponAttackWeaponSlot === 'off-hand'
     ? 'offHand' as const
     : 'mainWeapon' as const
+  const boundWeaponAbility=action.dnd5eWeaponAttackOptions?.boundWeaponAbility
+  if(boundWeaponAbility!=null&&boundWeaponAbility!=='normal'&&boundWeaponAbility!=='bound')return{ok:false,reason:'invalid-action'}
   const shillelaghAbility = action.dnd5eWeaponAttackOptions?.shillelaghAbility
   const shillelagh = dnd5eShillelaghAttackChoice(actor)
   if (
@@ -340,6 +384,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     return { ok: false, reason: 'invalid-action' }
   }
   const handSnapshot = createDnd5eMapCombatSnapshot({
+    geometry:input.geometry,
     worldMinute: input.worldMinute,
     worldSecondRemainder: input.worldSecondRemainder,
     combatId: action.combatId ?? `map-${input.map.id}`,
@@ -358,7 +403,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     actorToken.id,
     'free-hand',
   ).length
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const geometry = input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry??undefined
   const tokenDistanceFeet = (left: Token, right: Token): number => {
     const leftCombatant = handSnapshot.state.combatants[left.id]
     const rightCombatant = handSnapshot.state.combatants[right.id]
@@ -377,13 +422,15 @@ export function prepareDnd5eEquipmentAttack(input: {
   const naturalWeaponId = action.dnd5eWeaponAttackOptions?.naturalWeaponId
   const naturalProfile = naturalWeaponId == null ? undefined : dnd5eUnarmedAttackProfiles(actor,
     handSnapshot.state.combatants[actorToken.id]?.pluginFeatureIds ?? []).find(profile => profile.weaponId === naturalWeaponId)
-  if (naturalWeaponId != null && (!naturalProfile || offHandAttack || shillelaghAbility != null || activityWeaponAttackGrantId != null)) {
+  if (naturalWeaponId != null && (!naturalProfile || offHandAttack || shillelaghAbility != null || (activityWeaponAttackGrantId != null && !(activityWeaponAttackGrant?.allowUnarmedStrikes === true || (activityWeaponAttackGrant?.immediate && activityWeaponAttackGrant.consumesReaction))))) {
     return { ok: false, reason: 'no-weapon' }
   }
+  if(boundWeaponAbility==='bound'&&(handActor.magicSuppressed||naturalWeaponId!=null||shillelaghAbility!=null))return{ok:false,reason:'invalid-action'}
   const baseProfile = naturalProfile ?? (offHandAttack
-    ? dnd5eOffHandWeaponAttackProfile(actor)
+    ? dnd5eOffHandWeaponAttackProfile(actor,{boundWeaponAbility})
     : dnd5eWeaponAttackProfile(actor, {
         shillelaghAbility,
+        boundWeaponAbility,
         forceOneHanded: maintainedGrapples > 0,
         weaponSlot: selectedWeaponSlot,
       }))
@@ -542,6 +589,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   if (
     activityWeaponAttackGrantId != null && (
       featureBonusWeaponAttack || frenzyAttack || offHandAttack || !activityWeaponAttackGranted ||
+      (activityWeaponAttackGrant?.consumesReaction && (input.turnEconomy?.reaction.current ?? 1) < 1) ||
       (activityWeaponAttackGrant?.economy === 'bonus-action' && (input.turnEconomy?.bonusAction.current ?? 1) < 1)
     )
   ) return { ok: false, reason: 'attack-action-spent' }
@@ -1028,6 +1076,7 @@ export function dnd5eEquipmentClassDamageDefinitions(
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
     context: prepared.classDamageContext,
+    additionalSneakAttackDifferentTarget: prepared.state.combatants[prepared.actorToken.id]?.classState.activityWeaponAttackGrants?.[prepared.action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId ?? ""]?.additionalSneakAttackDifferentTarget === true,
     effectiveMode: dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack),
     critical,
   })
@@ -1128,6 +1177,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   attackRetargetInterrupt?: Dnd5eAttackRetargetInterruptUse
+  coverAttackRedirect?:Dnd5eCoverAttackRedirectUse
   mountedAttackRedirect?: Dnd5eMountedAttackRedirectUse
   areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
   protectionReactionActorId?: string
@@ -1158,19 +1208,22 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   transaction?: CombatTransaction
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
   attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
-}): {
+}, hostExecution?:Readonly<{now:number}>): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 } {
   const { prepared } = input
+  if(hostExecution&&(!Number.isSafeInteger(hostExecution.now)||hostExecution.now<0))throw Error('equipment-parent:invalid-host-execution-clock')
+  if(input.coverAttackRedirect&&input.coverAttackRedirect.originalTargetId!==prepared.targetToken.id)return{result:{ok:false,reason:'invalid-target',state:prepared.state,events:[]}}
+  restoreDnd5ePreparedOrdinaryWeaponScene(prepared)
   const prelude = prepared.attackTeleportPrelude
   if (prepared.savingThrowCounterattackFeatureId) return {
     result: { ok: false, state: prepared.state, events: [], reason: 'invalid-plugin-action' },
   }
   if (prelude) {
     const continuation = resolvePreparedDnd5eEquipmentAttack({ ...input,
-      prepared: { ...prepared, attackTeleportPrelude: undefined } })
+      prepared: { ...prepared, attackTeleportPrelude: undefined } },hostExecution)
     if (!continuation.result.ok) return { ...continuation,
       result: { ...continuation.result, state: structuredClone(prelude.originalState), events: [] } }
     const events = [...prelude.events, ...continuation.result.events]
@@ -1193,10 +1246,10 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
       const remaining = input.airborneFallDamageRollsByCombatantId && Object.fromEntries(
         Object.entries(input.airborneFallDamageRollsByCombatantId).filter(([id]) => !fallIds.has(id)))
       return resolvePreparedDnd5eEquipmentAttack({ ...input, prepared: landing.preparedAfterLanding,
-        airborneFallDamageRollsByCombatantId: remaining && Object.keys(remaining).length ? remaining : undefined })
+        airborneFallDamageRollsByCombatantId: remaining && Object.keys(remaining).length ? remaining : undefined },hostExecution)
     }
   }
-  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, buildPreparedDnd5eEquipmentAttackAction(input), input.airborneFallDamageRollsByCombatantId, { transaction: input.transaction,transactionId:prepared.action.id })
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, buildPreparedDnd5eEquipmentAttackAction(input), input.airborneFallDamageRollsByCombatantId, { transaction: input.transaction,transactionId:prepared.action.id,...(hostExecution?{now:hostExecution.now}:{}) })
   if (!result.ok) return { result: teleport ? { ...result, state: structuredClone(teleport.originalState), events: [] } : result, airborneFalls }
   if (teleport) {
     // This is the pre-attack destination, before any resulting fall or reaction.
@@ -1208,8 +1261,9 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   }
   const grantId = prepared.action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId
   const reusesProjectile = grantId && prepared.state.combatants[prepared.actorToken.id].classState.activityWeaponAttackGrants?.[grantId]?.reusedProjectileWeaponId === prepared.profile.weaponId
-  const ammunition = reusesProjectile ? {ok: true as const, character: prepared.actor, instanceId: undefined}
-    : consumeDnd5eWeaponAmmunition(prepared.actor, prepared.profile.weaponId)
+  const materialActor=bountifulEquipmentCostCharacter(prepared)
+  const ammunition = reusesProjectile ? {ok: true as const, character: materialActor, instanceId: undefined}
+    : consumeDnd5eWeaponAmmunition(materialActor, prepared.profile.weaponId)
   const released = ammunition.ok && prepared.profile.mode === 'ranged' && prepared.profile.properties.some(property => property === 'thrown' || property.includes('投掷'))
     ? releaseDnd5eTemporaryWeapon(ammunition.character,prepared.profile.weaponId) : ammunition.character
   const characters = ammunition.ok
@@ -1250,7 +1304,7 @@ export function buildPreparedDnd5eEquipmentAttackAction(
     effectRollDice:input.effectRollDice,
     attackDecoyRolls: input.attackDecoyRolls,
     actorId: prepared.actorToken.id,
-    targetId: prepared.targetToken.id,
+    targetId: input.coverAttackRedirect?.replacementTargetId ?? prepared.targetToken.id,
     attackModifier: prepared.profile.attackModifier,
     criticalThreshold: prepared.profile.criticalThreshold,
     spendAction: prepared.spendsAction,
@@ -1281,6 +1335,7 @@ export function buildPreparedDnd5eEquipmentAttackAction(
     postD20Adjustment: input.postD20Adjustment,
     attackRetargetInterrupt: input.attackRetargetInterrupt,
     mountedAttackRedirect: input.mountedAttackRedirect,
+    coverAttackRedirect:input.coverAttackRedirect,
     areaAttackAdvantageReaction: input.areaAttackAdvantageReaction ?? prepared.areaAttackAdvantageReaction,
     protectionReactionActorId: input.protectionReactionActorId,
     tranquilitySave: input.tranquilitySave,

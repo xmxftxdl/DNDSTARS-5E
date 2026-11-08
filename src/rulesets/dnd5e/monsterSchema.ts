@@ -467,6 +467,7 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     'kind',
     'relation',
     'escapeDc',
+    'escapeSavingThrow',
     'savingThrow',
     'conditions',
     'dependentLegacyConditions',
@@ -603,6 +604,13 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
   ) return false
 
   const relation = raw.relation
+  if (raw.escapeSavingThrow != null) {
+    const save = raw.escapeSavingThrow
+    if (!isRecord(save) || !ABILITY_KEYS.includes(save.ability as typeof ABILITY_KEYS[number]) ||
+      (save.alternativeAbility != null && !ABILITY_KEYS.includes(save.alternativeAbility as typeof ABILITY_KEYS[number])) ||
+      !finiteInteger(save.dc,1,100) || save.economy !== 'action' || raw.escapeDc != null ||
+      Object.keys(save).some(key=>!['ability','alternativeAbility','dc','economy'].includes(key))) return false
+  }
   const allowedRelationKeys = new Set([
     'kind',
     'slotGroup',
@@ -624,7 +632,7 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     ) ||
     !requiredText(relation.slotGroup, 96) ||
     !/^[a-z][a-z0-9-]*$/.test(String(relation.slotGroup)) ||
-    !finiteInteger(relation.capacity, 1, 20) ||
+    !finiteInteger(relation.capacity, 1, 1000) ||
     !finiteInteger(relation.maxDistanceFeet, 1, 1_000) ||
     !finiteInteger(relation.targetMaxSizeRank, 0, 5) ||
     (
@@ -1972,11 +1980,11 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         !effect ||
         !sourceLinkedConditionEffectIsValid(effect) ||
         !relation ||
-        relation.kind !== 'engulfed' ||
+        !['engulfed','swallowed'].includes(String(relation.kind)) ||
         Number(relation.targetMaxSizeRank) !==
           Number(action.rule.targetMaxSizeRank) ||
         relation.movement !== 'carry-target' ||
-        relation.capacity !== 1
+        (relation.kind === 'engulfed' && relation.capacity !== 1)
       ) return false
     } else if (action.rule.kind === 'throw-linked-target') {
       if (
@@ -2872,6 +2880,9 @@ function validateActionList(
       })
       continue
     }
+    if(action.multipartHeadId!=null && (monster.multipartRule!=='false-hydra-v1'||!/^head-[1-9]$/.test(action.multipartHeadId))) {
+      issues.push({monsterId:monster.id,actionId:action.id,code:'invalid-stat-block',message:'头部动作必须属于伪海德拉，头部编号为1至9。'})
+    }
     const previousSection = actionSectionById.get(action.id)
     if (previousSection != null) {
       issues.push({
@@ -2961,6 +2972,7 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (!SIZE_VALUES.has(String(raw.size)) || !requiredText(raw.creatureType, 120) || !requiredText(raw.alignment, 240)) issues.push(issue(monsterId, '体型、类型或阵营无效'))
   if (raw.subtypes != null && (!Array.isArray(raw.subtypes) || raw.subtypes.length > 32 || raw.subtypes.some((entry) => !requiredText(entry, 240)))) issues.push(issue(monsterId, '生物亚型无效'))
   if (raw.bodyPartPresence != null && !isDnd5eBodyPartPresence(raw.bodyPartPresence)) issues.push(issue(monsterId, '身体结构事实无效'))
+  if (raw.multipartRule != null && raw.multipartRule !== 'false-hydra-v1') issues.push(issue(monsterId, '多部位生物规则无效'))
   if (!isRecord(raw.armorClass) || !finiteInteger(raw.armorClass.value, 1, 100)) issues.push(issue(monsterId, '护甲等级无效'))
   if (!isRecord(raw.hitPoints) || !finiteInteger(raw.hitPoints.average, 1, 1_000_000) ||
     typeof raw.hitPoints.dice !== 'string' || !DICE_PATTERN.test(raw.hitPoints.dice)) issues.push(issue(monsterId, '生命值或生命骰无效'))

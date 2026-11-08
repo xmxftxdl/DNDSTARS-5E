@@ -1,0 +1,1995 @@
+{
+  "actor": {
+    "maps": {
+      "maps": [
+        {
+          "id": "actual-initiative-map",
+          "name": "Actual pre-combat initiative",
+          "width": 1500,
+          "height": 1500,
+          "gridSize": 50,
+          "feetPerCell": 5,
+          "gridOffsetX": 0,
+          "gridOffsetY": 0,
+          "showGrid": true,
+          "tokens": [
+            {
+              "id": "init-actor-token",
+              "type": "player",
+              "characterId": "init-actor",
+              "label": "init-actor",
+              "x": 525,
+              "y": 325,
+              "size": 1,
+              "color": "",
+              "emoji": "I",
+              "hp": 12,
+              "maxHp": 12
+            },
+            {
+              "id": "init-helper-token",
+              "type": "player",
+              "characterId": "init-helper",
+              "label": "init-helper",
+              "x": 575,
+              "y": 325,
+              "size": 1,
+              "color": "",
+              "emoji": "I",
+              "hp": 36,
+              "maxHp": 36
+            }
+          ]
+        }
+      ],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "characters": {
+      "characters": [
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "init-actor",
+          "name": "init-actor",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 1
+          },
+          "level": 1,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 12,
+            "con": 14,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [],
+          "skills": [],
+          "maxHp": 12,
+          "currentHp": 12,
+          "tempHp": 0,
+          "hitDice": "1d10",
+          "ac": 10,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "fightingStyles": [
+                "archery"
+              ]
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-chain-mail",
+              "name": "链甲",
+              "slot": "armor",
+              "ac": 16,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "heavy",
+                "baseArmorClass": 16,
+                "dexterityBonus": "none",
+                "material": "metal",
+                "strengthRequirement": 13,
+                "stealthDisadvantage": true
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "human",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:init-actor:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-actor:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-actor:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "armor",
+                "acquiredAt": 0
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 1,
+              "max": 1
+            }
+          ],
+          "roomId": "foreign-room",
+          "roomMemberId": "player"
+        },
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "init-helper",
+          "name": "init-helper",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 4
+          },
+          "level": 4,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 12,
+            "con": 14,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [],
+          "skills": [],
+          "maxHp": 36,
+          "currentHp": 36,
+          "tempHp": 0,
+          "hitDice": "4d10",
+          "ac": 10,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "fightingStyles": [
+                "archery"
+              ],
+              "subclass": "champion",
+              "extensionChoices": {}
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-chain-mail",
+              "name": "链甲",
+              "slot": "armor",
+              "ac": 16,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "heavy",
+                "baseArmorClass": 16,
+                "dexterityBonus": "none",
+                "material": "metal",
+                "strengthRequirement": 13,
+                "stealthDisadvantage": true
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "halfling",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            },
+            "fighterActionSurge": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:init-helper:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-helper:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-helper:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "armor",
+                "acquiredAt": 0
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 4,
+              "max": 4
+            }
+          ],
+          "dnd5eFeatIds": [
+            "local.xge.repaired.archer93:bountiful-luck"
+          ],
+          "dnd5eLevelAdvancements": [
+            {
+              "schemaVersion": 1,
+              "id": "adv-ae5ee80b-000c-47f6-9bf1-0a456f009cea",
+              "fromLevel": 1,
+              "toLevel": 2,
+              "classId": "fighter",
+              "fromClassLevel": 1,
+              "toClassLevel": 2,
+              "completedAt": 1793209480260,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": []
+              },
+              "grantedFeatureIds": [
+                "action-surge-1"
+              ],
+              "before": {
+                "level": 1,
+                "dnd5eClassLevels": {
+                  "fighter": 1
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 1,
+                    "max": 1
+                  }
+                ],
+                "maxHp": 12,
+                "currentHp": 12
+              },
+              "after": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "fighter": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 20,
+                "currentHp": 20
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-4f1b98ee-4106-405e-84a3-f80b35585796",
+              "fromLevel": 2,
+              "toLevel": 3,
+              "classId": "fighter",
+              "fromClassLevel": 2,
+              "toClassLevel": 3,
+              "completedAt": 1793209480262,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "subclassId": "champion",
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": []
+              },
+              "grantedFeatureIds": [
+                "martial-archetype",
+                "champion-improved-critical"
+              ],
+              "before": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "fighter": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 20,
+                "currentHp": 20
+              },
+              "after": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "fighter": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 28,
+                "currentHp": 28
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-b0499d46-1777-4ef7-b572-137e0f20ef81",
+              "fromLevel": 3,
+              "toLevel": 4,
+              "classId": "fighter",
+              "fromClassLevel": 3,
+              "toClassLevel": 4,
+              "completedAt": 1793209480265,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "subclassId": "champion",
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": [
+                  {
+                    "classLevel": 4,
+                    "choice": {
+                      "kind": "feat",
+                      "featId": "local.xge.repaired.archer93:bountiful-luck"
+                    }
+                  }
+                ]
+              },
+              "grantedFeatureIds": [],
+              "before": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "fighter": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 28,
+                "currentHp": 28
+              },
+              "after": {
+                "level": 4,
+                "dnd5eClassLevels": {
+                  "fighter": 4
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [
+                  "local.xge.repaired.archer93:bountiful-luck"
+                ],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 4,
+                    "max": 4
+                  }
+                ],
+                "maxHp": 36,
+                "currentHp": 36
+              }
+            }
+          ],
+          "roomId": "room",
+          "roomMemberId": "reader"
+        }
+      ],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "combat": {
+      "mapId": "actual-initiative-map",
+      "combatId": "actual-old-inactive",
+      "active": false,
+      "round": 7,
+      "initiativeIndex": 0,
+      "initiativeOrder": [],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "map-geometry": null,
+    "campaign-time": null,
+    "bountiful-initiative-originals": {
+      "schemaVersion": 1,
+      "parents": {
+        "bountiful-initiative:e09163922583dd668efe89634e10de57b466c9a0a37b1993ce01e306f027c2a2": {
+          "id": "bountiful-initiative:e09163922583dd668efe89634e10de57b466c9a0a37b1993ce01e306f027c2a2",
+          "preparationId": "actual-initiative-map:combat:preparation-1",
+          "mapId": "actual-initiative-map",
+          "roomId": "room",
+          "hostMemberId": "dm",
+          "versions": {
+            "characters": 1,
+            "maps": 1,
+            "combat": 1,
+            "map-geometry": 0,
+            "campaign-time": 0
+          },
+          "scope": "1e3b90227e28114364640a61199414f5fb73223cceb888c58bb5820e3adccdac",
+          "roster": [
+            {
+              "tokenId": "init-actor-token",
+              "characterId": "init-actor"
+            },
+            {
+              "tokenId": "init-helper-token",
+              "characterId": "init-helper"
+            }
+          ],
+          "createdAt": 1793209480329,
+          "originals": [
+            {
+              "id": "bountiful-initiative-pool:6d7bd067d4cdf7143b94183b3553b206cb225be9e52fb526ccd5254c5b437e8e",
+              "actorTokenId": "init-actor-token",
+              "characterId": "init-actor",
+              "memberId": "player",
+              "mode": "normal",
+              "count": 1,
+              "revision": 1,
+              "decisions": [],
+              "complete": false
+            }
+          ]
+        }
+      },
+      "updatedAt": 1793209480338,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 2,
+        "writerId": "atomic-server-mutation",
+        "writtenAt": 1793209480341
+      }
+    }
+  },
+  "helper": {
+    "maps": {
+      "maps": [
+        {
+          "id": "actual-initiative-map",
+          "name": "Actual pre-combat initiative",
+          "width": 1500,
+          "height": 1500,
+          "gridSize": 50,
+          "feetPerCell": 5,
+          "gridOffsetX": 0,
+          "gridOffsetY": 0,
+          "showGrid": true,
+          "tokens": [
+            {
+              "id": "init-actor-token",
+              "type": "player",
+              "characterId": "init-actor",
+              "label": "init-actor",
+              "x": 525,
+              "y": 325,
+              "size": 1,
+              "color": "",
+              "emoji": "I",
+              "hp": 12,
+              "maxHp": 12
+            },
+            {
+              "id": "init-helper-token",
+              "type": "player",
+              "characterId": "init-helper",
+              "label": "init-helper",
+              "x": 575,
+              "y": 325,
+              "size": 1,
+              "color": "",
+              "emoji": "I",
+              "hp": 36,
+              "maxHp": 36
+            }
+          ]
+        }
+      ],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "characters": {
+      "characters": [
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "init-actor",
+          "name": "init-actor",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 1
+          },
+          "level": 1,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 12,
+            "con": 14,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [],
+          "skills": [],
+          "maxHp": 12,
+          "currentHp": 12,
+          "tempHp": 0,
+          "hitDice": "1d10",
+          "ac": 10,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "fightingStyles": [
+                "archery"
+              ]
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-chain-mail",
+              "name": "链甲",
+              "slot": "armor",
+              "ac": 16,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "heavy",
+                "baseArmorClass": 16,
+                "dexterityBonus": "none",
+                "material": "metal",
+                "strengthRequirement": 13,
+                "stealthDisadvantage": true
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "human",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:init-actor:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-actor:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-actor:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "armor",
+                "acquiredAt": 0
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 1,
+              "max": 1
+            }
+          ],
+          "roomId": "room",
+          "roomMemberId": "player"
+        },
+        {
+          "rulesetId": "dnd5e-2014-srd-5.1",
+          "id": "init-helper",
+          "name": "init-helper",
+          "player": "",
+          "avatar": "🧝",
+          "accent": "from-arcane-500 to-arcane-600",
+          "race": "人类",
+          "charClass": "战士",
+          "dnd5eClassLevels": {
+            "fighter": 4
+          },
+          "level": 4,
+          "background": "侍僧",
+          "experience": 0,
+          "reputation": 0,
+          "abilities": {
+            "str": 10,
+            "dex": 12,
+            "con": 14,
+            "int": 10,
+            "wis": 10,
+            "cha": 10
+          },
+          "savingThrows": [],
+          "skills": [],
+          "maxHp": 36,
+          "currentHp": 36,
+          "tempHp": 0,
+          "hitDice": "4d10",
+          "ac": 10,
+          "speed": 30,
+          "initiativeBonus": 0,
+          "saveDC": 12,
+          "passivePerception": 10,
+          "inspiration": 0,
+          "dnd5eClassChoices": {
+            "fighter": {
+              "fightingStyles": [
+                "archery"
+              ],
+              "subclass": "champion",
+              "extensionChoices": {}
+            }
+          },
+          "equipment": {
+            "mainWeapon": {
+              "id": "dnd5e-longsword",
+              "name": "长剑",
+              "slot": "mainWeapon",
+              "dnd5e": {
+                "kind": "weapon",
+                "category": "martial",
+                "mode": "melee",
+                "damage": {
+                  "count": 1,
+                  "sides": 8,
+                  "type": "slashing"
+                },
+                "attackAbility": "str",
+                "reachFeet": 5,
+                "properties": [
+                  "多才多艺（1d10）"
+                ]
+              }
+            },
+            "offHand": {
+              "id": "dnd5e-shield",
+              "name": "盾牌",
+              "slot": "offHand",
+              "ac": 2,
+              "dnd5e": {
+                "kind": "shield",
+                "armorClassBonus": 2
+              }
+            },
+            "armor": {
+              "id": "dnd5e-chain-mail",
+              "name": "链甲",
+              "slot": "armor",
+              "ac": 16,
+              "dnd5e": {
+                "kind": "armor",
+                "magical": false,
+                "category": "heavy",
+                "baseArmorClass": 16,
+                "dexterityBonus": "none",
+                "material": "metal",
+                "strengthRequirement": 13,
+                "stealthDisadvantage": true
+              }
+            }
+          },
+          "conditions": [],
+          "backstory": "",
+          "notes": "",
+          "dmNotes": "",
+          "visibleToPlayers": true,
+          "hitPointMaximumMode": "fixed",
+          "dnd5eRaceId": "halfling",
+          "classResources": {
+            "fighterSecondWind": {
+              "current": 1,
+              "max": 1
+            },
+            "fighterActionSurge": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "dnd5eCombatState": {
+            "schemaVersion": 2
+          },
+          "dnd5eInventory": {
+            "schemaVersion": 3,
+            "revision": 0,
+            "entries": [
+              {
+                "instanceId": "equipped:init-helper:mainWeapon:dnd5e-longsword",
+                "templateId": "srd-5.1:equipment:dnd5e-longsword",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-longsword",
+                  "name": "长剑",
+                  "englishName": "Longsword",
+                  "category": "equipment",
+                  "icon": "weapon",
+                  "description": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "rulesText": "军用武器。命中造成 1d8 挥砍伤害，触及 5 尺。\n\n武器属性：\n• 多才多艺：单手攻击使用 1d8 伤害骰；双手攻击改用 1d10。系统会根据副手占用、强制单手和擒抱状态自动选择。",
+                  "weightLb": 3,
+                  "cost": {
+                    "amount": 15,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-longsword",
+                    "name": "长剑",
+                    "slot": "mainWeapon",
+                    "dnd5e": {
+                      "kind": "weapon",
+                      "category": "martial",
+                      "mode": "melee",
+                      "damage": {
+                        "count": 1,
+                        "sides": 8,
+                        "type": "slashing"
+                      },
+                      "attackAbility": "str",
+                      "reachFeet": 5,
+                      "properties": [
+                        "多才多艺（1d10）"
+                      ]
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "mainWeapon",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-helper:offHand:dnd5e-shield",
+                "templateId": "srd-5.1:equipment:dnd5e-shield",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-shield",
+                  "name": "盾牌",
+                  "englishName": "Shield",
+                  "category": "equipment",
+                  "icon": "shield",
+                  "description": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "rulesText": "盾牌。持用时护甲等级 +2。同一时间只能从一面盾牌获得该加值。",
+                  "weightLb": 6,
+                  "cost": {
+                    "amount": 10,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-shield",
+                    "name": "盾牌",
+                    "slot": "offHand",
+                    "ac": 2,
+                    "dnd5e": {
+                      "kind": "shield",
+                      "armorClassBonus": 2
+                    }
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "offHand",
+                "acquiredAt": 0
+              },
+              {
+                "instanceId": "equipped:init-helper:armor:dnd5e-chain-mail",
+                "templateId": "srd-5.1:equipment:dnd5e-chain-mail",
+                "item": {
+                  "id": "srd-5.1:equipment:dnd5e-chain-mail",
+                  "name": "链甲",
+                  "englishName": "Chain mail",
+                  "category": "equipment",
+                  "icon": "armor",
+                  "description": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "rulesText": "重甲。穿戴并生效时，你的护甲等级为 16，不加敏捷调整值；力量需求 13；进行隐匿检定时具有劣势。",
+                  "weightLb": 55,
+                  "cost": {
+                    "amount": 75,
+                    "currency": "gp"
+                  },
+                  "stackable": false,
+                  "equipment": {
+                    "id": "dnd5e-chain-mail",
+                    "name": "链甲",
+                    "slot": "armor",
+                    "ac": 16,
+                    "dnd5e": {
+                      "kind": "armor",
+                      "magical": false,
+                      "category": "heavy",
+                      "baseArmorClass": 16,
+                      "dexterityBonus": "none",
+                      "material": "metal",
+                      "strengthRequirement": 13,
+                      "stealthDisadvantage": true
+                    }
+                  },
+                  "spellcastingMaterial": {
+                    "tags": [
+                      "material:contains-metal"
+                    ]
+                  },
+                  "source": {
+                    "book": "SRD 5.1",
+                    "license": "CC BY 4.0"
+                  }
+                },
+                "quantity": 1,
+                "identified": true,
+                "equippedSlot": "armor",
+                "acquiredAt": 0
+              }
+            ],
+            "currency": {
+              "cp": 0,
+              "sp": 0,
+              "ep": 0,
+              "gp": 0,
+              "pp": 0
+            },
+            "authorityGrantReceipts": [],
+            "authorityUseReceipts": []
+          },
+          "hitPointDice": [
+            {
+              "sides": 10,
+              "current": 4,
+              "max": 4
+            }
+          ],
+          "dnd5eFeatIds": [
+            "local.xge.repaired.archer93:bountiful-luck"
+          ],
+          "dnd5eLevelAdvancements": [
+            {
+              "schemaVersion": 1,
+              "id": "adv-0f7ee099-a181-4c35-a0c7-2a1b8b428f8d",
+              "fromLevel": 1,
+              "toLevel": 2,
+              "classId": "fighter",
+              "fromClassLevel": 1,
+              "toClassLevel": 2,
+              "completedAt": 1793209481726,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": []
+              },
+              "grantedFeatureIds": [
+                "action-surge-1"
+              ],
+              "before": {
+                "level": 1,
+                "dnd5eClassLevels": {
+                  "fighter": 1
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ]
+                  }
+                },
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 1,
+                    "max": 1
+                  }
+                ],
+                "maxHp": 12,
+                "currentHp": 12
+              },
+              "after": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "fighter": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 20,
+                "currentHp": 20
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-e7552566-a852-4097-8d08-0258733ac6a9",
+              "fromLevel": 2,
+              "toLevel": 3,
+              "classId": "fighter",
+              "fromClassLevel": 2,
+              "toClassLevel": 3,
+              "completedAt": 1793209481730,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "subclassId": "champion",
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": []
+              },
+              "grantedFeatureIds": [
+                "martial-archetype",
+                "champion-improved-critical"
+              ],
+              "before": {
+                "level": 2,
+                "dnd5eClassLevels": {
+                  "fighter": 2
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 2,
+                    "max": 2
+                  }
+                ],
+                "maxHp": 20,
+                "currentHp": 20
+              },
+              "after": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "fighter": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 28,
+                "currentHp": 28
+              }
+            },
+            {
+              "schemaVersion": 1,
+              "id": "adv-56d8b052-3226-4d4a-b306-34725a4bafcf",
+              "fromLevel": 3,
+              "toLevel": 4,
+              "classId": "fighter",
+              "fromClassLevel": 3,
+              "toClassLevel": 4,
+              "completedAt": 1793209481732,
+              "completedBy": "player",
+              "decision": {
+                "schemaVersion": 1,
+                "classId": "fighter",
+                "levelsGained": 1,
+                "hitPointMethod": "fixed",
+                "hitPointRolls": [],
+                "subclassId": "champion",
+                "fighterFightingStyles": [
+                  "archery"
+                ],
+                "asiChoices": [
+                  {
+                    "classLevel": 4,
+                    "choice": {
+                      "kind": "feat",
+                      "featId": "local.xge.repaired.archer93:bountiful-luck"
+                    }
+                  }
+                ]
+              },
+              "grantedFeatureIds": [],
+              "before": {
+                "level": 3,
+                "dnd5eClassLevels": {
+                  "fighter": 3
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 3,
+                    "max": 3
+                  }
+                ],
+                "maxHp": 28,
+                "currentHp": 28
+              },
+              "after": {
+                "level": 4,
+                "dnd5eClassLevels": {
+                  "fighter": 4
+                },
+                "abilities": {
+                  "str": 10,
+                  "dex": 12,
+                  "con": 14,
+                  "int": 10,
+                  "wis": 10,
+                  "cha": 10
+                },
+                "skills": [],
+                "savingThrows": [],
+                "dnd5eClassChoices": {
+                  "fighter": {
+                    "fightingStyles": [
+                      "archery"
+                    ],
+                    "subclass": "champion",
+                    "extensionChoices": {}
+                  }
+                },
+                "dnd5eFeatIds": [
+                  "local.xge.repaired.archer93:bountiful-luck"
+                ],
+                "hitPointMaximumMode": "fixed",
+                "hitPointDice": [
+                  {
+                    "sides": 10,
+                    "current": 4,
+                    "max": 4
+                  }
+                ],
+                "maxHp": 36,
+                "currentHp": 36
+              }
+            }
+          ],
+          "roomId": "foreign-room",
+          "roomMemberId": "reader"
+        }
+      ],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "combat": {
+      "mapId": "actual-initiative-map",
+      "combatId": "actual-old-inactive",
+      "active": false,
+      "round": 7,
+      "initiativeIndex": 0,
+      "initiativeOrder": [],
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 1,
+        "writerId": "fixture-dm",
+        "writtenAt": 1
+      }
+    },
+    "map-geometry": null,
+    "campaign-time": null,
+    "bountiful-initiative-originals": {
+      "schemaVersion": 1,
+      "parents": {
+        "bountiful-initiative:e09163922583dd668efe89634e10de57b466c9a0a37b1993ce01e306f027c2a2": {
+          "id": "bountiful-initiative:e09163922583dd668efe89634e10de57b466c9a0a37b1993ce01e306f027c2a2",
+          "mapId": "actual-initiative-map",
+          "preparationId": "actual-initiative-map:combat:preparation-1",
+          "roomId": "room",
+          "hostMemberId": "dm",
+          "versions": {
+            "characters": 1,
+            "maps": 1,
+            "combat": 1,
+            "map-geometry": 0,
+            "campaign-time": 0
+          },
+          "scope": "6c079f0b5a2e17c7ee7950d5540c63b568a1fb30221aace9bfd0837fd01b02c3",
+          "roster": [
+            {
+              "tokenId": "init-actor-token",
+              "characterId": "init-actor"
+            },
+            {
+              "tokenId": "init-helper-token",
+              "characterId": "init-helper"
+            }
+          ],
+          "createdAt": 1793209481799,
+          "originals": [
+            {
+              "id": "bountiful-initiative-pool:6d7bd067d4cdf7143b94183b3553b206cb225be9e52fb526ccd5254c5b437e8e",
+              "actorTokenId": "init-actor-token",
+              "characterId": "init-actor",
+              "memberId": "player",
+              "mode": "normal",
+              "count": 1,
+              "revision": 6,
+              "decisions": [
+                {
+                  "ownerId": "init-helper-token",
+                  "featureId": "local.xge.repaired.archer93:feat-bountiful-luck",
+                  "memberId": "reader",
+                  "decision": "decline",
+                  "at": 1793209481964
+                }
+              ],
+              "complete": true,
+              "raw": {
+                "memberId": "player",
+                "values": [
+                  7
+                ],
+                "at": 1793209481840
+              },
+              "confirmed": {
+                "memberId": "dm",
+                "values": [
+                  1
+                ],
+                "at": 1793209481845
+              },
+              "request": {
+                "actorId": "init-actor-token",
+                "kind": "ability-check",
+                "originalRolls": [
+                  1
+                ],
+                "dieIndex": 0,
+                "options": [
+                  {
+                    "ownerId": "init-helper-token",
+                    "featureId": "local.xge.repaired.archer93:feat-bountiful-luck"
+                  }
+                ]
+              },
+              "featureSources": {
+                "local.xge.repaired.archer93:feat-bountiful-luck": "e912913f30f0346be85c086d56320375a335df63b042d808894f1bc0ea3bebed"
+              },
+              "controllers": {
+                "init-helper-token": {
+                  "characterId": "init-helper",
+                  "memberId": "reader"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "updatedAt": 1793209482052,
+      "_sync": {
+        "schemaVersion": 1,
+        "revision": 7,
+        "writerId": "atomic-server-mutation",
+        "writtenAt": 1793209482055
+      }
+    }
+  }
+}

@@ -6,6 +6,9 @@ const languageAliases: Readonly<Record<string, string>> = {
   '深渊语': 'abyssal', '天界语': 'celestial', '龙语': 'draconic', '深潜语': 'deep-speech',
   'deep speech': 'deep-speech', '炼狱语': 'infernal', '原初语': 'primordial',
   '木族语': 'sylvan', '地下通用语': 'undercommon',
+  // Primordial dialects are mutually intelligible; these remain concrete known languages.
+  aquan: 'primordial', auran: 'primordial', ignan: 'primordial', terran: 'primordial',
+  '水族语': 'primordial', '气族语': 'primordial', '火族语': 'primordial', '土族语': 'primordial',
 }
 
 function concreteLanguages(languages: readonly string[] | undefined): Set<string> {

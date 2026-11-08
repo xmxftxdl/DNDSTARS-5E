@@ -1,0 +1,36 @@
+import{captureDnd5ePluginSubclassEnvelopeRegistrationV1}from'./plugins/pluginContentCatalog'
+import{dnd5ePluginFeatureDefinition}from'./plugins/pluginContentCatalog'
+import type{Dnd5eHeadlessCombatState,Dnd5eAction}from'./headlessCombatEngine'
+import{dnd5eCombatantSoulOfDeceitFeatureId,resolveDnd5eHeadlessAction}from'./headlessCombatEngine'
+export interface SoulOfDeceitReading {readonly kind:'soul-of-deceit-reading'}
+type Row={state:Dnd5eHeadlessCombatState;parentId:string;ownerId:string;readerId:string;featureId:string;sourceCurrent:()=>boolean;sourceSignature:string}
+const readings=new WeakMap<SoulOfDeceitReading,Row>()
+export interface SoulOfDeceitReadingPermission{readonly soulThoughtPermission:unique symbol}
+const permissions=new WeakMap<object,{row:Row;policy:'real'|'false'}>(),active:SoulOfDeceitReadingPermission[]=[],asynchronous=new Map<string,SoulOfDeceitReadingPermission>()
+const scopeKey=(state:Dnd5eHeadlessCombatState,input:{parentId:string;ownerId:string;readerId:string})=>JSON.stringify([state.mapId??null,state.combatId,input.parentId,input.ownerId,input.readerId])
+function permission(row:Row,policy:'real'|'false'){const token=Object.freeze({})as SoulOfDeceitReadingPermission;permissions.set(token,{row,policy});return token}
+/** Host-only context. A room adapter must obtain its choice and dice from the real owner transport before issuing this permission. */
+export function withSoulOfDeceitReadingPermission<T>(token:SoulOfDeceitReadingPermission,operation:()=>T):T{if(!permissions.has(token))throw Error('soul-of-deceit:issued-permission-required');active.push(token);try{return operation()}finally{if(active.pop()!==token)throw Error('soul-of-deceit:permission-scope-corrupt')}}
+export function currentSoulOfDeceitReadingPolicy(state:Dnd5eHeadlessCombatState,input:{parentId:string;ownerId:string;readerId:string}):'blocked'|'real'|'false'|undefined{const owner=state.combatants[input.ownerId];if(!owner||!dnd5eCombatantSoulOfDeceitFeatureId(owner))return undefined;const token=active.length?active[active.length-1]:asynchronous.get(scopeKey(state,input)),entry=token?permissions.get(token):undefined;if(!entry)return'blocked';const row=entry.row;if(row.parentId!==input.parentId||row.ownerId!==input.ownerId||row.readerId!==input.readerId||row.state.mapId!==state.mapId||row.state.combatId!==state.combatId||!row.sourceCurrent()||JSON.stringify(dnd5ePluginFeatureDefinition(row.featureId))!==row.sourceSignature)throw Error('soul-of-deceit:permission-parent-or-source-changed');return entry.policy}
+
+/** Mechanical pre-reading policy. A room caller must bind this to a real reading occurrence and authenticated owner choice, never a guessed spell name or public boolean. */
+export function captureSoulOfDeceitReading(state:Dnd5eHeadlessCombatState,input:{parentId:string;ownerId:string;readerId:string;scopeCurrent?:()=>boolean}):SoulOfDeceitReading|undefined {const owner=state.combatants[input.ownerId],reader=state.combatants[input.readerId],featureId=owner&&dnd5eCombatantSoulOfDeceitFeatureId(owner);if(!featureId)return undefined;if(!input.parentId||!reader||owner.id===reader.id)throw Error('soul-of-deceit:actual-reader-required');const handle=Object.freeze({kind:'soul-of-deceit-reading' as const});readings.set(handle,{state,parentId:input.parentId,ownerId:owner.id,readerId:reader.id,featureId,sourceSignature:JSON.stringify(dnd5ePluginFeatureDefinition(featureId)),sourceCurrent:(()=>{const feature=dnd5ePluginFeatureDefinition(featureId)!,id=feature.sourceSubclassId!,capture=captureDnd5ePluginSubclassEnvelopeRegistrationV1(feature.ownerPluginId,id);if(!capture)throw Error('soul-of-deceit:current-native-source-required');return()=>capture()?.level==='full'&&(!input.scopeCurrent||input.scopeCurrent())})()});return handle}
+export type SoulOfDeceitOwnerChoice='deny'|'allow-real-thoughts'|'present-false-thoughts'
+export function resolveSoulOfDeceitReading(handle:SoulOfDeceitReading,input:{parentId:string;choice:SoulOfDeceitOwnerChoice;ownerCheck?:Pick<Extract<Dnd5eAction,{type:'ability-check'}>,'d20'|'d20Second'|'halflingLuckyD20'|'halflingLuckyD20Second'>;readerCheck?:Pick<Extract<Dnd5eAction,{type:'ability-check'}>,'d20'|'d20Second'|'halflingLuckyD20'|'halflingLuckyD20Second'>}){
+ const row=readings.get(handle);if(!row||row.parentId!==input.parentId)throw Error('soul-of-deceit:issued-reading-required');if(!row.sourceCurrent()||JSON.stringify(dnd5ePluginFeatureDefinition(row.featureId))!==row.sourceSignature||dnd5eCombatantSoulOfDeceitFeatureId(row.state.combatants[row.ownerId])!==row.featureId)throw Error('soul-of-deceit:current-native-source-required')
+ if(input.choice==='deny'){if(input.ownerCheck||input.readerCheck)throw Error('soul-of-deceit:unexpected-check');return{kind:'blocked' as const,state:row.state,events:[]}}
+ if(input.choice==='allow-real-thoughts'){if(input.ownerCheck||input.readerCheck)throw Error('soul-of-deceit:unexpected-check');return{kind:'real-thoughts-permitted' as const,state:row.state,events:[],permission:permission(row,'real')}}
+ if(input.choice!=='present-false-thoughts'||!input.ownerCheck||!input.readerCheck)throw Error('soul-of-deceit:two-actual-checks-required')
+ const contest=resolveDnd5eHeadlessAction(row.state,{type:'soul-of-deceit-contest',actorId:row.ownerId,readerId:row.readerId,ownerRoll:input.ownerCheck,readerRoll:input.readerCheck},{transactionId:row.parentId+':soul-contest'})
+ if(!contest.ok)throw Error('soul-of-deceit:invalid-contest')
+ const checks=contest.events.filter(e=>e.type==='ability-check-resolved'),left=checks.find(e=>e.actorId===row.ownerId),right=checks.find(e=>e.actorId===row.readerId);if(!left||!right)throw Error('soul-of-deceit:actual-contest-required')
+ // A failed attempt never grants consent to the underlying true thoughts.
+ return{kind:left.total>right.total?'false-thoughts-permitted' as const:'blocked' as const,state:contest.state,events:contest.events,ownerTotal:left.total,readerTotal:right.total,...(left.total>right.total?{permission:permission({...row,state:contest.state},'false')}:{})}
+}
+/** Owner's explicit appearance choice does not imply truthful words, a charm immunity, or consent to thought reading. */
+export function soulOfDeceitMagicalTruthAppearance(state:Dnd5eHeadlessCombatState,ownerId:string,chosen:boolean){const owner=state.combatants[ownerId];if(!owner||!dnd5eCombatantSoulOfDeceitFeatureId(owner))throw Error('soul-of-deceit:current-native-source-required');return chosen?{detectedAsTruthful:true as const,signs:'truthful' as const}:undefined}
+
+/** No mutable global current-parent slot: concurrent asynchronous originals are
+ * separated by their exact map/combat/original/owner/reader identity. The token
+ * still comes only from the actual mechanical owner-consent issuer. */
+export async function withSoulOfDeceitReadingPermissionAsync<T>(token:SoulOfDeceitReadingPermission,operation:()=>Promise<T>):Promise<T>{const record=permissions.get(token);if(!record)throw Error('soul-of-deceit:issued-permission-required');const key=scopeKey(record.row.state,record.row);if(asynchronous.has(key))throw Error('soul-of-deceit:reading-already-active');asynchronous.set(key,token);try{return await operation()}finally{if(asynchronous.get(key)!==token)throw Error('soul-of-deceit:permission-scope-corrupt');asynchronous.delete(key)}}

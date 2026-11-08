@@ -158,6 +158,7 @@ export function preflightPlayerActionAuthority(
 
   const explorationRulesAction =
     (action.type === 'dnd5e-basic-action' && action.dnd5eBasicAction?.kind === 'dismiss-effect') ||
+    action.type === 'dnd5e-weapon-attack' ||
     action.type === 'dnd5e-ability-check' ||
     action.type === 'dnd5e-spell-cast' ||
     action.type === 'dnd5e-adjudicated-spell' ||

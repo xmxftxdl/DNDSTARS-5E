@@ -1,3 +1,4 @@
+import{dnd5eAbilityTargetMaximum}from'../../rulesets/dnd5e/activities/dnd5eAbilityTargetLimit'
 import { dnd5eSightingWorldMinute } from '../../rulesets/dnd5e/recentCreatureSightings'
 import { PlanarPortalReports } from './PlanarPortalReports'
 import { DamageTraitReports } from './DamageTraitReports'
@@ -133,7 +134,9 @@ export default function Dnd5ePluginCombatPanel({
     .filter(receipt => receipt.mapId === map.id)
   const damageReports = Object.values(character.dnd5eCombatState?.damageTraitReports ?? {})
     .filter(receipt => !receipt.mapId || receipt.mapId === map.id)
-  if (features.length === 0 && attackIntents.length === 0 && portalReports.length === 0 && damageReports.length === 0) return null
+  const sensoryReports = Object.values(character.dnd5eCombatState?.sensoryDeceptionReports ?? {})
+    .filter(receipt => !receipt.mapId || receipt.mapId === map.id)
+  if (features.length === 0 && attackIntents.length === 0 && portalReports.length === 0 && damageReports.length === 0 && sensoryReports.length === 0) return null
 
   return (
     <section data-testid="dnd5e-plugin-combat-panel" className="rounded-xl border border-violet-400/15 bg-violet-500/5 p-3">
@@ -147,6 +150,12 @@ export default function Dnd5ePluginCombatPanel({
       <div className="space-y-3">
         <PlanarPortalReports reports={portalReports} />
         <DamageTraitReports reports={damageReports} />
+        {sensoryReports.map(receipt => <div key={receipt.sourceActivityId} data-testid="sensory-deception-report"
+          className="rounded-lg border border-violet-300/20 bg-violet-500/5 p-2 text-xs text-violet-100">
+          <div className="font-semibold">明察秋毫 · 上次感知结果</div>
+          <div className="mt-1">{receipt.present ? '30 尺范围内存在幻术、非原形变形生物或欺骗感官的魔法。' : '30 尺范围内未感知到这些现象。'}</div>
+          <div className="mt-1 text-slate-400">第 {receipt.round} 回合的记录，移动后不会自动更新。</div>
+        </div>)}
         {Object.values(character.dnd5eCombatState?.knownCreatureLocations ?? {}).filter(location => location.mapId === map.id).map(location => (
           <div key={location.targetId} data-testid={`known-creature-location-${location.targetId}`} className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2 text-xs text-cyan-100">
             <div>{location.label} · 第 {location.round} 回合获知的位置</div>
@@ -231,7 +240,7 @@ export default function Dnd5ePluginCombatPanel({
             ?? controls[0]
           const featureAction = selectedControl?.action ?? feature.action!
           const activity = getRegisteredDnd5eActivity(feature.ownerPluginId, featureAction.id)
-          const unavailableReason = activity && dnd5eActivityControlUnavailableReason(activity, character)
+
           const activeEffectGrant = activity?.requiresEffectGrant
             ? character.dnd5eCombatState?.activeEffects?.find(effect =>
               !effect.suspendedBy?.length &&
@@ -253,6 +262,7 @@ export default function Dnd5ePluginCombatPanel({
                 }))).choices![0]
               : choice) ?? (activity ? [] : feature.declarativeAbility?.choices ?? [])
           const selectedChoices = Object.fromEntries(activityChoices.map(choice => [choice.id, activityChoicesByFeature[feature.id]?.[choice.id] ?? choice.defaultOptionId ?? choice.options[0]?.id ?? '']))
+          const unavailableReason = activity && dnd5eActivityControlUnavailableReason(activity, character, selectedChoices)
           const creatureSensor = activity && dnd5eCreatureSensorActivity(activity)
           const targeting = creatureSensor ? {kind:'self' as const} : featureAction.targeting
           const featureDamageTypes = new Set((feature.declarativeAbility?.rolls ?? []).flatMap((roll) =>
@@ -323,6 +333,8 @@ export default function Dnd5ePluginCombatPanel({
               : targeting.kind === 'multiple-creatures'
                 ? selectedMultipleTargetIds[0] ?? ''
               : (targetsByFeature[feature.id] && (!recentTargetOptions || recentTargetOptions.has(targetsByFeature[feature.id])) ? targetsByFeature[feature.id] : targetOptions[0]?.id) ?? ''
+          const multipleMaximum=targeting.kind==='multiple-creatures'?dnd5eAbilityTargetMaximum(targeting.maximumTargets,targeting.maximumTargetsAbilityModifier,character.abilities):0
+          const optionalEmptyTargets=targeting.kind==='multiple-creatures'&&targeting.minimumTargets===0
           const selectedTargetToken = map.tokens.find((token) => token.id === selectedTargetId)
           const helpKey = `${feature.id}:${featureAction.id}`
           const helpOperationIds = companionHelpOperationIds(activity, selectedChoices)
@@ -351,8 +363,8 @@ export default function Dnd5ePluginCombatPanel({
             (activity?.requiresEffectGrant === true && !activeEffectGrant) ||
             (requiresRest && !restAvailable) ||
             (inventoryRequired && !selectedInventory) ||
-            (!explorationActive && !economyAvailable(featureAction.economy, turnEconomy)) || !selectedTargetId ||
-            (targeting.kind === 'multiple-creatures' && (selectedMultipleTargetIds.length < 1 || selectedMultipleTargetIds.length > targeting.maximumTargets)) ||
+            (!explorationActive && !economyAvailable(featureAction.economy, turnEconomy)) || (!selectedTargetId && !optionalEmptyTargets) ||
+            (targeting.kind === 'multiple-creatures' && (selectedMultipleTargetIds.length < (targeting.minimumTargets??1) || selectedMultipleTargetIds.length > multipleMaximum)) ||
             (isAllyReactionAttack && !selectedReactionAttackEnemyId)
           return (
             <article key={feature.id} className="rounded-lg border border-white/8 bg-black/15 p-3">
@@ -428,13 +440,13 @@ export default function Dnd5ePluginCombatPanel({
               {targeting.kind === 'multiple-creatures' && (
                 <fieldset className="mt-3 rounded-lg border border-white/8 bg-black/10 p-2">
                   <legend className="px-1 text-[11px] font-semibold text-slate-500">
-                    选择目标（最多 {targeting.maximumTargets} 个）
+                    选择目标（最多 {multipleMaximum} 个）
                   </legend>
                   <div className="mt-1 max-h-40 space-y-1 overflow-y-auto pr-1">
                     {targetOptions.length === 0 && <p className="px-2 py-1 text-xs text-slate-500">没有符合条件的目标</p>}
                     {targetOptions.map((token) => {
                       const selected = selectedMultipleTargetIds.includes(token.id)
-                      const atLimit = !selected && selectedMultipleTargetIds.length >= targeting.maximumTargets
+                      const atLimit = !selected && selectedMultipleTargetIds.length >= multipleMaximum
                       const distanceFeet = tokenFootprintDistanceCells(actorToken, token, map) *
                         Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
                       return <label key={token.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-300 hover:bg-white/5">
@@ -477,8 +489,21 @@ export default function Dnd5ePluginCombatPanel({
               {activityChoices.filter(choice => !activity || dnd5eActivityChoiceIsRelevantV1(activity, choice, selectedChoices)).map((choice) => {
                 const selected = activityChoicesByFeature[feature.id]?.[choice.id] ??
                   choice.defaultOptionId ?? choice.options[0]?.id ?? ''
+                const textInput = activity?.choices?.find(definition => definition.id === choice.id)?.textInput
                 return <label key={choice.id} className="mt-3 block">
                   <span className="mb-1 block text-[11px] font-semibold text-slate-500">{choice.label}</span>
+                  {textInput && !textInput.format ? <input
+                    data-testid={`dnd5e-plugin-choice-${feature.id}-${choice.id}`}
+                    aria-label={choice.label}
+                    type="text"
+                    maxLength={textInput.maximumLength}
+                    value={selected}
+                    onChange={event => setActivityChoicesByFeature(current => ({
+                      ...current,
+                      [feature.id]: { ...current[feature.id], [choice.id]: event.target.value },
+                    }))}
+                    className="w-full rounded-lg border border-white/10 bg-void-950/80 px-2 py-1.5 text-xs text-slate-200"
+                  /> : (
                   <select
                     data-testid={`dnd5e-plugin-choice-${feature.id}-${choice.id}`}
                     value={selected}
@@ -492,6 +517,7 @@ export default function Dnd5ePluginCombatPanel({
                       <option key={option.id} value={option.id}>{option.label}</option>
                     ))}
                   </select>
+                  )}
                 </label>
               })}
               {helpOperationIds.map(operationId => {

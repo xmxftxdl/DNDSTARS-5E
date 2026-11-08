@@ -388,6 +388,7 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   bardicInspirationRoll?: number
   darkOnesOwnLuckRoll?: number
   optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
+  spellDamageDieRerolls?:Parameters<typeof resolveDnd5ePersistentAreaTrigger>[1]['spellDamageDieRerolls']
   damageRolls?: readonly number[]
   healingRolls?: readonly number[]
   sourceConsent?: boolean
@@ -417,6 +418,8 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
     areaSourceKind: prepared.candidate.area.sourceKind,
     coreSpellId: prepared.candidate.area.coreSpellId,
     castingClassId: prepared.candidate.area.castingClassId,
+    sourceCharacterId:prepared.candidate.area.sourceCharacterId,
+    slotLevel:prepared.candidate.area.slotLevel,
     sourceId: prepared.candidate.area.sourceTokenId,
     targetId: prepared.candidate.targetToken.id,
     trigger: prepared.candidate.trigger,
@@ -434,6 +437,7 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
     darkOnesOwnLuckRoll: input.darkOnesOwnLuckRoll,
     optionalBonusDice: input.optionalBonusDice,
     damageRolls: input.damageRolls,
+    spellDamageDieRerolls:input.spellDamageDieRerolls,
     healingRolls: input.healingRolls,
     sourceConsent: input.sourceConsent,
     willingFailure: input.willingFailure,

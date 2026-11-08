@@ -1,3 +1,5 @@
+import type{StormCastOriginalPreparationBook,StormCastPreparationIdentity}from'../rulesets/dnd5e/stormCastOriginalPreparation'
+import type{BountifulDamageZeroOriginalParent}from'../rulesets/dnd5e/bountifulDamageZeroOriginalParentTypes'
 import { canWriteSharedState } from './appMode'
 import { getRoomClientId, getRoomSession } from './roomSession'
 import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
@@ -13,7 +15,8 @@ import {
   recordSharedEventGap,
   recordSharedRevision,
   recordSharedWrite,
-  settleSharedRecovery,
+  recordSharedReadFailure,
+  recordSharedReadSuccess,
 } from './sharedSyncHealth'
 import type { RoomJournalMutation } from './roomCommunications'
 
@@ -665,6 +668,24 @@ export function saveSharedResourcesAtomically(
     performSharedResourcesAtomicSave(writes, options))
 }
 
+/** Dedicated authenticated transport; its server routes validate the original
+ * prefix/controller. No generic shared-state upload can mint these facts. */
+export async function requestSharedScBasePrefix<T>(operation:'begin'|'issue'|'raw'|'confirm'|'request',input:unknown):Promise<T>{
+  const candidates=sharedApiCandidates()
+  if(!candidates.length)throw Error('sc-base-prefix-unavailable')
+  let lastError:unknown
+  for(const api of candidates){
+    let response:Response
+    try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/sc-base-prefix/${operation}${operation==='request'?`?requestId=${encodeURIComponent((input as {requestId:string}).requestId)}`:''}`),{
+      method:operation==='request'?'GET':'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},...(operation==='request'?{}:{body:JSON.stringify(input)}),
+    })}catch(error){lastError=error;continue}
+    const body=await response.json() as T&{error?:string}
+    if(!response.ok)throw Error(body.error??`sc-base-prefix-${response.status}`)
+    return body
+  }
+  throw lastError??Error('sc-base-prefix-unavailable')
+}
+
 export async function appendSharedPlayerActionRequest<T>(action: T): Promise<void> {
   let lastError: unknown = new Error('player-action-append-unavailable')
   for (const api of sharedApiCandidates()) {
@@ -1129,6 +1150,9 @@ export function subscribeSharedResourceInvalidation(
   let disposed = false
   let running = false
   let pending = false
+  const healthKey = `${name}:${Math.random().toString(36).slice(2)}`
+  let failures = 0
+  let retryAfter = 0
 
   const run = async () => {
     if (disposed) return
@@ -1142,11 +1166,18 @@ export function subscribeSharedResourceInvalidation(
         pending = false
         await refresh()
       } while (!disposed && pending)
+      failures = 0
+      retryAfter = 0
+      recordSharedReadSuccess(healthKey)
     } catch (error) {
-      console.error(`[shared-state] refresh failed for ${name}`, error)
+      if (!disposed) {
+        if (failures === 0) console.error(`[shared-state] refresh failed for ${name}`, error)
+        failures += 1
+        retryAfter = Date.now() + Math.min(60_000, 1_000 * 2 ** Math.min(failures, 6))
+        recordSharedReadFailure(healthKey)
+      }
     } finally {
       running = false
-      settleSharedRecovery()
     }
   }
 
@@ -1158,6 +1189,7 @@ export function subscribeSharedResourceInvalidation(
   if (options.immediate !== false) void run()
   const recoveryMs = Math.max(1_000, options.recoveryMs ?? SHARED_RESOURCE_RECOVERY_MS)
   const timer = globalThis.setInterval(() => {
+    if (Date.now() < retryAfter) return
     if (
       !options.recoverWhenHidden &&
       typeof document !== 'undefined' &&
@@ -1175,6 +1207,7 @@ export function subscribeSharedResourceInvalidation(
 
   return () => {
     disposed = true
+    recordSharedReadSuccess(healthKey)
     globalThis.clearInterval(timer)
     visibilityDocument?.removeEventListener('visibilitychange', handleVisibilityChange)
     unsubscribe()
@@ -1311,4 +1344,400 @@ export async function deleteSharedImage(id: string): Promise<void> {
       }),
     ),
   )
+}
+
+/** Idempotent by the private Host-issued request identity. This endpoint cannot
+ * issue a request, replace its locked raw, or confirm any result. */
+export async function submitSharedActivityDeathInitiativeRaw(input:{requestId:string;rollerTokenId:string;sides:number;values:readonly number[]}):Promise<void>{
+ if(!input.requestId.startsWith('host-death-init:'))return
+ let failure:unknown=new Error('death-initiative-raw-unavailable')
+ for(const api of sharedApiCandidates()){
+  try{
+   const response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/activity-death-initiative/raw`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})
+   const result=await response.json().catch(()=>({})) as {error?:string;requestId?:string}
+   if(!response.ok)throw Error(result.error??`death-initiative-raw-${response.status}`)
+   if(result.requestId!==input.requestId)throw Error('death-initiative-raw-identity-mismatch')
+   return
+  }catch(error){failure=error}
+ }
+ throw failure
+}
+
+/** Collects only a genuine server-stamped original-owner answer. */
+export async function submitSharedActivityDeathChoice(input:{parentId:string;receiptId:string}):Promise<void>{
+ let failure:unknown=new Error('death-choice-accept-unavailable')
+ for(const api of sharedApiCandidates()){
+  try{
+   const response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/activity-death-choice/accept`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})
+   const result=await response.json().catch(()=>({})) as {error?:string;receiptId?:string;parentId?:string}
+   if(!response.ok)throw Error(result.error??`death-choice-accept-${response.status}`)
+   if(result.receiptId!==input.receiptId||result.parentId!==input.parentId)throw Error('death-choice-accept-identity-mismatch')
+   return
+  }catch(error){failure=error}
+ }
+ throw failure
+}
+
+/** Authenticated original Armor controller raw, never a Host proxy for a PC. */
+export async function submitSharedArmorNativeRaw(input:{requestId:string;rollerTokenId:string;sides:number;values:readonly number[]}):Promise<void>{
+ if(!input.requestId.startsWith('host-armor-d6:'))throw Error('armor-native-raw-issued-request-required')
+ let failure:unknown=Error('armor-native-raw-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/armor-native/raw`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)});const result=await response.json().catch(()=>({})) as{error?:string;requestId?:string};if(!response.ok)throw Error(result.error??`armor-native-raw-${response.status}`);if(result.requestId!==input.requestId)throw Error('armor-native-raw-identity-mismatch');return}catch(error){failure=error}}throw failure
+}
+export async function submitSharedArmorNativeChoice(parentId:string):Promise<void>{
+ let failure:unknown=Error('armor-native-choice-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/armor-native/accept-choice`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify({parentId})});const result=await response.json().catch(()=>({})) as{error?:string;requestId?:string};if(!response.ok)throw Error(result.error??`armor-native-choice-${response.status}`);if(result.requestId!==parentId)throw Error('armor-native-choice-identity-mismatch');return}catch(error){failure=error}}throw failure
+}
+
+/** One authenticated request. A failed/lost POST is re-read, never silently re-sent. */
+export async function requestSharedArcaneNative<T>(operation:'requests'|'choice',input?:unknown):Promise<T>{
+  const session=getRoomSession(),api=sharedApiCandidates()[0]
+  if(!session||!['dm','player'].includes(session.role)||!api)throw Error('arcane-native-room-required')
+  const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/arcane-native/'+operation),{
+    method:operation==='requests'?'GET':'POST',cache:'no-store',
+    headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},
+    ...(operation==='choice'?{body:JSON.stringify(input)}:{}),
+  })
+  if(!response.ok)throw Error('arcane-native-transport:'+response.status)
+  if(operation==='choice')invalidateSharedResourceReadCache('arcane-native-parents')
+  return await response.json() as T
+}
+
+/** Exact Arcane original-prefix endpoint. No implicit POST retries. */
+export async function requestSharedArcaneBasePrefix<T>(operation:'request'|'begin'|'issue'|'raw'|'confirm',input:Record<string,unknown>):Promise<T>{
+ const session=getRoomSession(),api=sharedApiCandidates()[0]
+ if(!session||!['dm','player'].includes(session.role)||!api)throw Error('arcane-prefix-room-required')
+ const url=sharedSessionUrl(api+'/state/arcane-base-prefix/'+operation),requestUrl=operation==='request'?url+(url.includes('?')?'&':'?')+'requestId='+encodeURIComponent(String(input.requestId??'')):url
+ const response=await fetchSharedCandidate(requestUrl,{method:operation==='request'?'GET':'POST',cache:'no-store',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},...(operation==='request'?{}:{body:JSON.stringify(input)})})
+ if(!response.ok)throw Error('arcane-prefix-transport:'+response.status)
+ if(operation!=='request')invalidateSharedResourceReadCache('arcane-base-prefix-rolls')
+ return await response.json()as T
+}
+
+/** Dedicated owner/Host observation facts; generic shared-state writes are forbidden. */
+export async function requestSharedMastermindObservation<T>(operation:'request'|'accept'|'interval'|'interrupt'|'disclose'|'project'|'list',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('观察服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-observation/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'观察状态已改变，请重新查看。');return body}
+ throw lastError??Error('观察服务暂时不可用，请确认房间连接。')
+}
+
+
+/** A private original-input ledger; this endpoint never returns native result authority. */
+export async function requestSharedMastermindSpellWindow<T>(operation:'ward-choice-list'|'begin'|'register'|'ward-register'|'ward-complete'|'ward-bountiful-register'|'ward-bountiful-choice'|'ward-bountiful-raw'|'ward-bountiful-confirm'|'ward-bountiful-complete'|'ward-bountiful-project'|'ward-outcome-register'|'ward-outcome'|'ward-retarget-propose'|'ward-retarget-accept'|'ward-retarget-reject'|'issue'|'raw'|'confirm'|'complete'|'abort-extra'|'source'|'request',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('spell-window-room-unavailable')
+ const requestId=input&&typeof input==='object'&&'requestId'in input&&typeof input.requestId==='string'?input.requestId:''
+ let lastError:unknown;for(const api of candidates){const target=sharedSessionUrl(api+'/state/mastermind-spell-window/'+operation),url=operation==='request'?target+(target.includes('?')?'&':'?')+'requestId='+encodeURIComponent(requestId):target;let response:Response;try{response=await fetchSharedCandidate(url,{method:operation==='request'?'GET':'POST',cache:'no-store',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},...(operation==='request'?{}:{body:JSON.stringify(input)})})}catch(error){lastError=error;continue}const body=await response.json()as T&{error?:string};if(!response.ok)throw Error(body.error??'spell-window-transport:'+response.status);return body}throw lastError??Error('spell-window-room-unavailable')
+}
+
+export async function requestSharedMastermindWardOriginal<T>(operation:'register'|'request'|'raw'|'confirm'|'complete'|'abort-extra',input:unknown):Promise<T>{const candidates=sharedApiCandidates();if(!candidates.length)throw Error('原豁免骰服务暂时不可用。');let lastError:unknown;for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-ward-original/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原豁免或控制权已改变。');return body}throw lastError??Error('原豁免骰服务暂时不可用。')}
+export async function requestSharedMastermindWardSavingChoice<T>(operation:'register'|'request'|'list'|'answer'|'raw'|'confirm'|'complete',input:unknown):Promise<T>{const candidates=sharedApiCandidates();if(!candidates.length)throw Error('本次豁免选择服务暂时不可用。');let lastError:unknown;for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-ward-saving/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原豁免或控制权已改变。');return body}throw lastError??Error('本次豁免选择服务暂时不可用。')}
+
+export async function requestSharedMastermindWardAttack<T>(operation:'issue'|'answer'|'project'|'list',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('攻击选择服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-ward-attack/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原攻击或控制权已改变，请重新查看。');return body}
+ throw lastError??Error('攻击选择服务暂时不可用，请确认房间连接。')
+}
+
+export async function requestSharedMastermindMisdirection<T>(operation:'begin'|'begin-native'|'answer'|'project'|'list',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('攻击转移服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-misdirection/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'攻击转移状态已改变，请重新查看。');return body}
+ throw lastError??Error('攻击转移服务暂时不可用，请确认房间连接。')
+}
+
+/** Exact ordinary-movement endpoints. Original request identity is issued by Host. */
+export async function requestSharedArcaneMovement<T>(operation:'request'|'requests'|'begin'|'issue'|'raw'|'confirm'|'checkpoint'|'choice',input:Record<string,unknown>={}):Promise<T>{
+ const session=getRoomSession(),api=sharedApiCandidates()[0];if(!session||!['dm','player'].includes(session.role)||!api)throw Error('arcane-move-room-required')
+ const get=operation==='request'||operation==='requests',url=sharedSessionUrl(api+'/state/arcane-movement/'+operation),target=operation==='request'?url+(url.includes('?')?'&':'?')+'requestId='+encodeURIComponent(String(input.requestId??'')):url
+ try{const response=await fetchSharedCandidate(target,{method:get?'GET':'POST',cache:'no-store',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},...(get?{}:{body:JSON.stringify(input)})});if(!response.ok)throw Error('arcane-move-transport:'+response.status);return await response.json()as T}finally{if(!get)invalidateSharedResourceReadCache('arcane-movement-parents')}
+}
+
+export async function requestSharedMastermindThoughtReading<T>(operation:'begin-native'|'begin'|'answer'|'project'|'list'|'issue-roll'|'raw'|'confirm'|'roll-request'|'read-result'|'read-results',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('思想读取服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-thought-reading/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'思想读取状态已改变，请重新查看。');return body}
+ throw lastError??Error('思想读取服务暂时不可用，请确认房间连接。')
+}
+export async function requestSharedMastermindMagicTruth<T>(operation:'begin'|'begin-native'|'answer'|'project'|'list',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('魔法显现服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-magic-truth/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'魔法显现状态已改变，请重新查看。');return body}
+ throw lastError??Error('魔法显现服务暂时不可用，请确认房间连接。')
+}
+
+import type{BountifulOpportunitySequencePrivateBook}from'../rulesets/dnd5e/bountifulOpportunitySequencePrefixWindow'
+/** Host-only original-roll book for the actual queued move. Ordinary room
+ * resource reads cannot expose another player's protected physical faces. */
+export async function readBountifulOpportunitySequenceBook(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulOpportunitySequencePrivateBook>{
+ let failure:unknown=new Error('opportunity-sequence:private-source-unavailable')
+ for(const api of sharedApiCandidates()){
+  try{
+   const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-opportunity-sequence/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})
+   const result=await response.json().catch(()=>null)as(BountifulOpportunitySequencePrivateBook&{error?:string})|null
+   if(!response.ok)throw Error(result?.error??'opportunity-sequence:private-source-'+response.status)
+   if(!result?.source||!Array.isArray(result.rows)||!Array.isArray(result.prefixSettlementRolls)||result.rows.some(row=>!row.originalIssuer||!['dm','player'].includes(row.originalIssuer.mode)||!Number.isSafeInteger(row.originalIssuer.cursor)))throw Error('opportunity-sequence:invalid-private-source-response')
+   return result
+  }catch(error){failure=error}
+ }
+ throw failure
+}
+
+import type{BountifulDamageZeroOriginalRawBook}from'../rulesets/dnd5e/bountifulDamageZeroOriginalRaw'
+/** Protected original save faces are read only by the authenticated Host. */
+export async function readBountifulDamageZeroOriginalBook(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulDamageZeroOriginalRawBook>{
+ let failure:unknown=Error('damage-zero-original:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-damage-zero-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as(BountifulDamageZeroOriginalRawBook&{error?:string})|null;if(!response.ok)throw Error(result?.error??'damage-zero-original:private-source-'+response.status);if(!result?.ok||result.sourceKind!=='damage-zero-original-v1'||!result.source||!Array.isArray(result.rows))throw Error('damage-zero-original:invalid-private-source-response');return result}catch(error){failure=error}}throw failure
+}
+
+/** Only an authenticated canonical pending weapon parent may report absence.
+ * A stale issued source always rejects; it must never trigger a physical reroll. */
+export async function findBountifulDamageZeroOriginalBook(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulDamageZeroOriginalRawBook|undefined>{
+ let failure:unknown=Error('damage-zero-original:private-probe-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-damage-zero-original/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as(Omit<Partial<BountifulDamageZeroOriginalRawBook>,'sourceKind'>&{sourceKind?:string;present?:boolean;error?:string})|null;if(!response.ok)throw Error(result?.error??'damage-zero-original:private-probe-'+response.status);if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('damage-zero-original:invalid-private-probe-response');if(result.present===false&&result.sourceKind==='damage-zero-original-probe-v1')return undefined;if(result.present!==true||result.sourceKind!=='damage-zero-original-v1'||!result.source||!Array.isArray(result.rows))throw Error('damage-zero-original:invalid-private-probe-response');return result as BountifulDamageZeroOriginalRawBook}catch(error){failure=error}}throw failure
+}
+
+export async function inspectBountifulDamageZeroOriginalParent(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulDamageZeroOriginalParent|undefined>{
+ let failure:unknown=Error('damage-zero-original:private-parent-unavailable');for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-damage-zero-original/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as Record<string,unknown>|null;if(!response.ok)throw Error(typeof result?.error==='string'?result.error:'damage-zero-original:private-parent-'+response.status);if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('damage-zero-original:invalid-private-parent-response');if(result.present===false&&result.sourceKind==='damage-zero-original-probe-v1')return undefined;if(result.present!==true||!['damage-zero-preparation-v1','damage-zero-original-v1'].includes(result.sourceKind as string)||!result.source||!result.frame||typeof result.prefixSignature!=='string'||typeof result.effectTimestamp!=='number'||result.sourceKind==='damage-zero-preparation-v1'&&Object.hasOwn(result,'rows')||result.sourceKind==='damage-zero-original-v1'&&(!Array.isArray(result.rows)||!result.labels))throw Error('damage-zero-original:invalid-private-parent-response');return result as unknown as BountifulDamageZeroOriginalParent}catch(error){failure=error}}throw failure
+}
+
+/** A reachable private authority rejection never becomes optional absence. */
+export async function readStormCastOriginalPreparationBook(input:StormCastPreparationIdentity):Promise<StormCastOriginalPreparationBook|undefined>{
+ let networkFailure:unknown=Error('storm-cast-preparation:private-probe-unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response
+  try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/storm-cast-preparation/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){networkFailure=error;continue}
+  const result=await response.json().catch(()=>null)as Record<string,unknown>|null
+  if(!response.ok)throw Error(typeof result?.error==='string'?result.error:'storm-cast-preparation:private-probe-'+response.status)
+  if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('storm-cast-preparation:invalid-private-probe-response')
+  if(result.present===false&&result.sourceKind==='storm-cast-preparation-probe-v1')return undefined
+  if(result.present!==true||result.sourceKind!=='storm-cast-preparation-v1'||!result.source||!result.frame||typeof result.prefixSignature!=='string'||typeof result.effectTimestamp!=='number')throw Error('storm-cast-preparation:invalid-private-probe-response')
+  return result as unknown as StormCastOriginalPreparationBook
+ }
+ throw networkFailure
+}
+
+/** A reachable private authority rejection never becomes optional absence. */
+export async function readTempestuousBeforeOriginalPreparationBook(input:import('../rulesets/dnd5e/tempestuousBeforeOriginalPreparation').TempestuousBeforePreparationIdentity):Promise<import('../rulesets/dnd5e/tempestuousBeforeOriginalPreparation').TempestuousBeforeOriginalPreparationBook|undefined>{
+ let networkFailure:unknown=Error('tempestuous-before-preparation:private-probe-unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response
+  try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/tempestuous-before-preparation/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){networkFailure=error;continue}
+  const result=await response.json().catch(()=>null)as Record<string,unknown>|null
+  if(!response.ok)throw Error(typeof result?.error==='string'?result.error:'tempestuous-before-preparation:private-probe-'+response.status)
+  if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('tempestuous-before-preparation:invalid-private-probe-response')
+  if(result.present===false&&result.sourceKind==='tempestuous-before-preparation-probe-v1')return undefined
+  if(result.present!==true||result.sourceKind!=='tempestuous-before-preparation-v1'||!result.source||!result.frame||!result.preparation||typeof result.prefixSignature!=='string'||typeof result.effectTimestamp!=='number')throw Error('tempestuous-before-preparation:invalid-private-probe-response')
+  return result as unknown as import('../rulesets/dnd5e/tempestuousBeforeOriginalPreparation').TempestuousBeforeOriginalPreparationBook
+ }
+ throw networkFailure
+}
+
+/** The protected missing-caster preparation is readable only by its actual Host. */
+export async function readSpellcastingOriginalPreparationBook(input:import('../rulesets/dnd5e/spellcastingOriginalPreparation').SpellcastingOriginalPreparationIdentity):Promise<import('../rulesets/dnd5e/spellcastingOriginalPreparation').SpellcastingOriginalPreparationBook>{
+ let networkFailure:unknown=Error('spellcasting-preparation:private-source-unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response
+  try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/spellcasting-original-preparation/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){networkFailure=error;continue}
+  const result=await response.json()
+  if(!response.ok)throw Error(typeof result?.error==='string'?result.error:'spellcasting-preparation:private-source-'+response.status)
+  if(!result?.ok||result.sourceKind!=='spellcasting-original-preparation-v1'||!['parentId','mapId','combatId','effectId'].every(key=>result[key]===input[key as keyof typeof input])||!result.source||!result.requirement||typeof result.prefixSignature!=='string'||!Number.isSafeInteger(result.effectTimestamp)||typeof result.earlierStorm!=='boolean')throw Error('spellcasting-preparation:invalid-private-source-response')
+  return result
+ }
+ throw networkFailure
+}
+
+import type{BountifulSpellDamageZeroOriginalParent}from'../rulesets/dnd5e/bountifulSpellDamageZeroOriginalParentTypes'
+import type{BountifulSpellDamageZeroOriginalRawBook}from'../rulesets/dnd5e/bountifulSpellDamageZeroOriginalRaw'
+/** Protected original save faces are read only by the authenticated Host. */
+export async function readBountifulSpellDamageZeroOriginalBook(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulSpellDamageZeroOriginalRawBook>{
+ let failure:unknown=Error('damage-zero-original:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-spell-damage-zero-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as(BountifulSpellDamageZeroOriginalRawBook&{error?:string})|null;if(!response.ok)throw Error(result?.error??'damage-zero-original:private-source-'+response.status);if(!result?.ok||result.sourceKind!=='spell-damage-zero-original-v1'||!result.source||!Array.isArray(result.rows))throw Error('damage-zero-original:invalid-private-source-response');return result}catch(error){failure=error}}throw failure
+}
+
+/** Only an authenticated canonical pending weapon parent may report absence.
+ * A stale issued source always rejects; it must never trigger a physical reroll. */
+export async function findBountifulSpellDamageZeroOriginalBook(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulSpellDamageZeroOriginalRawBook|undefined>{
+ let failure:unknown=Error('damage-zero-original:private-probe-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-spell-damage-zero-original/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as(Omit<Partial<BountifulSpellDamageZeroOriginalRawBook>,'sourceKind'>&{sourceKind?:string;present?:boolean;error?:string})|null;if(!response.ok)throw Error(result?.error??'damage-zero-original:private-probe-'+response.status);if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('damage-zero-original:invalid-private-probe-response');if(result.present===false&&result.sourceKind==='spell-damage-zero-original-probe-v1')return undefined;if(result.present!==true||result.sourceKind!=='spell-damage-zero-original-v1'||!result.source||!Array.isArray(result.rows))throw Error('damage-zero-original:invalid-private-probe-response');return result as BountifulSpellDamageZeroOriginalRawBook}catch(error){failure=error}}throw failure
+}
+
+export async function inspectBountifulSpellDamageZeroOriginalParent(input:{mapId:string;combatId:string;parentId:string}):Promise<BountifulSpellDamageZeroOriginalParent|undefined>{
+ let failure:unknown=Error('damage-zero-original:private-parent-unavailable');for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-spell-damage-zero-original/probe'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),result=await response.json().catch(()=>null)as Record<string,unknown>|null;if(!response.ok)throw Error(typeof result?.error==='string'?result.error:'damage-zero-original:private-parent-'+response.status);if(!result?.ok||result.parentId!==input.parentId||result.mapId!==input.mapId||result.combatId!==input.combatId)throw Error('damage-zero-original:invalid-private-parent-response');if(result.present===false&&result.sourceKind==='spell-damage-zero-original-probe-v1')return undefined;if(result.present!==true||!['spell-damage-zero-preparation-v1','spell-damage-zero-original-v1'].includes(result.sourceKind as string)||!result.source||!result.frame||typeof result.prefixSignature!=='string'||typeof result.effectTimestamp!=='number'||result.sourceKind==='spell-damage-zero-preparation-v1'&&Object.hasOwn(result,'rows')||result.sourceKind==='spell-damage-zero-original-v1'&&(!Array.isArray(result.rows)||!result.labels))throw Error('damage-zero-original:invalid-private-parent-response');return result as unknown as BountifulSpellDamageZeroOriginalParent}catch(error){failure=error}}throw failure
+}
+
+
+type MonsterZeroIdentity={parentId:string;mapId:string;combatId:string}
+async function readPrivateMonsterZero<T>(path:'source'|'probe'|'current',input:MonsterZeroIdentity|Omit<MonsterZeroIdentity,'parentId'>,valid:(value:unknown)=>value is T):Promise<T>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('monster-zero-api:actual-host-required')
+ let failure:unknown=Error('monster-zero-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-monster-damage-zero-original/'+path),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'monster-zero-api:private-source-'+response.status);if(!valid(value))throw Error('monster-zero-api:invalid-private-response');return value}catch(error){failure=error}}throw failure
+}
+/** Dedicated Host private transport. JSON is only an input to the actual
+ * Native restorer; this fetch never registers a capability or a result. */
+export async function loadBountifulMonsterDamageZeroOriginalSource(input:MonsterZeroIdentity){return readPrivateMonsterZero('source',input,(value):value is import('../rulesets/dnd5e/bountifulMonsterDamageZeroOriginalRaw').BountifulMonsterDamageZeroOriginalRawBook=>{if(!value||typeof value!=='object')return false;const v=value as Record<string,unknown>;return v.ok===true&&v.sourceKind==='monster-damage-zero-original-v1'&&v.parentId===input.parentId&&v.mapId===input.mapId&&v.combatId===input.combatId&&!!v.source&&!!v.frame&&typeof v.prefixSignature==='string'&&typeof v.effectTimestamp==='number'&&Array.isArray(v.rows)})}
+export async function probeBountifulMonsterDamageZeroOriginalParent(input:MonsterZeroIdentity):Promise<import('../rulesets/dnd5e/bountifulMonsterDamageZeroOriginalPreparation').BountifulMonsterDamageZeroOriginalParent|undefined>{
+ const value=await readPrivateMonsterZero('probe',input,(value):value is Record<string,unknown>=>{if(!value||typeof value!=='object')return false;const v=value as Record<string,unknown>;if(v.ok!==true||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId)return false;if(v.present===false)return v.sourceKind==='monster-damage-zero-original-probe-v1';return v.present===true&&['monster-damage-zero-preparation-v1','monster-damage-zero-original-v1'].includes(v.sourceKind as string)&&!!v.source&&!!v.frame&&typeof v.prefixSignature==='string'&&typeof v.effectTimestamp==='number'&&(v.sourceKind==='monster-damage-zero-preparation-v1'?!Object.hasOwn(v,'rows'):Array.isArray(v.rows))});return value.present===false?undefined:value as unknown as import('../rulesets/dnd5e/bountifulMonsterDamageZeroOriginalPreparation').BountifulMonsterDamageZeroOriginalParent
+}
+export async function loadBountifulMonsterDamageZeroOriginalParent(input:MonsterZeroIdentity){const parent=await probeBountifulMonsterDamageZeroOriginalParent(input);if(!parent)throw Error('monster-zero-api:protected-original-parent-required');return parent}
+export async function currentBountifulMonsterDamageZeroOriginal(input:Omit<MonsterZeroIdentity,'parentId'>):Promise<MonsterZeroIdentity|undefined>{const value=await readPrivateMonsterZero('current',input,(value):value is Record<string,unknown>=>{if(!value||typeof value!=='object')return false;const v=value as Record<string,unknown>;return v.ok===true&&v.sourceKind==='monster-damage-zero-current-v1'&&v.mapId===input.mapId&&v.combatId===input.combatId&&(v.present===false||v.present===true&&typeof v.parentId==='string'&&v.parentId.length>0)});return value.present===false?undefined:{parentId:value.parentId as string,mapId:input.mapId,combatId:input.combatId}}
+
+/** A completed public row is insufficient: this reads independently authenticated owner answers. */
+export async function verifySharedTempestuousAfterOwnerDecision(input:{parentId:string;mapId:string;combatId:string;frameId:string}):Promise<{kind:'decline'}|{kind:'use';selection:{frameId:string;featureId:string;cell:{col:number;row:number};elevationFeet:number}}>{
+ let failure:unknown=Error('tempestuous-after-choice:private-verification-unavailable')
+ for(const api of sharedApiCandidates()){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/tempestuous-after-owner/verify'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){failure=error;continue}
+ const result=await response.json().catch(()=>null)as{ok?:boolean;error?:string;frameId?:string;decision?:{kind:'decline'}|{kind:'use';selection:{frameId:string;featureId:string;cell:{col:number;row:number};elevationFeet:number}}}|null
+ if(!response.ok)throw Error(result?.error??'tempestuous-after-choice:private-verification-'+response.status)
+ if(!result?.ok||result.frameId!==input.frameId||!result.decision||!['decline','use'].includes(result.decision.kind))throw Error('tempestuous-after-choice:invalid-private-verification')
+ return result.decision
+ }throw failure
+}
+
+export async function loadBountifulActivityOriginalSource(input:import('../ports/dnd5eActivityOriginalTransport').BountifulActivityOriginalIdentity):Promise<import('../ports/dnd5eActivityOriginalTransport').BountifulActivityOriginalBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('activity-original-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-activity-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'activity-original-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('activity-original-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.schemaVersion!==1||v.sourceKind!=='activity-original-v1'||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.source||!Array.isArray(v.rows)||!Number.isSafeInteger(v.effectTimestamp))throw Error('activity-original-api:invalid-book');return value as import('../ports/dnd5eActivityOriginalTransport').BountifulActivityOriginalBook}catch(error){failure=error}}throw failure
+}
+
+/** Fury-family private transport only; no decoded data is a Native/raw grant. */
+export async function requestSharedStormFurySaving(operation:'prepare'|'inspect'|'dice'|'read',payload:unknown):Promise<Record<string,unknown>>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('storm-fury-api:actual-host-required')
+ let failure:unknown=Error('storm-fury-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/storm-fury-saving/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'storm-fury-api:private-response-'+response.status);if(!value||typeof value!=='object'||!('ok'in value)||value.ok!==true)throw Error('storm-fury-api:invalid-private-response');return value as Record<string,unknown>}catch(error){failure=error}}throw failure
+}
+
+async function requestPrivateStormFuryRoom(family:'owner'|'push',operation:string,payload:unknown):Promise<Record<string,unknown>>{
+ const s=getRoomSession();if(!s?.roomId||!s.memberId||s.role!=='dm')throw Error('storm-fury-room-api:actual-host-required')
+ let failure:unknown=Error('storm-fury-room-api:private-response-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/storm-fury-'+family+'/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)}),result:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(result&&typeof result==='object'&&'error'in result&&typeof result.error==='string'?result.error:'storm-fury-room-api:rejected-'+response.status);if(!result||typeof result!=='object'||!('ok'in result)||result.ok!==true)throw Error('storm-fury-room-api:invalid-response');return result as Record<string,unknown>}catch(error){failure=error}}throw failure
+}
+export function requestSharedStormFuryOwner(operation:'prepare'|'decision',payload:unknown){return requestPrivateStormFuryRoom('owner',operation,payload)}
+export function requestSharedStormFuryPush(operation:'prepare'|'decision',payload:unknown){return requestPrivateStormFuryRoom('push',operation,payload)}
+
+export async function requestSharedBountifulInitiativeOriginal<T>(operation:'begin'|'issue'|'qualify'|'answer'|'raw'|'confirm'|'replacement-raw'|'replacement-confirm'|'complete'|'project'|'list',input:unknown):Promise<T>{const candidates=sharedApiCandidates();if(!candidates.length)throw Error('先攻原骰服务暂时不可用。');let lastError:unknown;for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/bountiful-initiative-original/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'先攻准备或控制权已改变。');return body}throw lastError??Error('先攻原骰服务暂时不可用。')}
+export async function requestSharedMastermindNativeWardOriginal<T>(operation:'register'|'request'|'raw'|'confirm'|'complete',input:unknown):Promise<T>{const candidates=sharedApiCandidates();if(!candidates.length)throw Error('原豁免骰服务暂时不可用。');let lastError:unknown;for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-native-ward-original/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原豁免或控制权已改变。');return body}throw lastError??Error('原豁免骰服务暂时不可用。')}
+export async function requestSharedMastermindNativeWardBountiful<T>(operation:'register'|'project'|'list'|'answer'|'raw'|'confirm',input:unknown):Promise<T>{const candidates=sharedApiCandidates();if(!candidates.length)throw Error('丰厚运势服务暂时不可用。');let lastError:unknown;for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-native-ward-bountiful/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原豁免、反应或控制权已改变。');return body}throw lastError??Error('丰厚运势服务暂时不可用。')}
+
+export async function requestSharedMastermindNativeWardOutcome<T>(operation:'register'|'answer'|'project'|'list',input:unknown):Promise<T>{
+ const candidates=sharedApiCandidates();if(!candidates.length)throw Error('攻击选择服务暂时不可用，请确认房间连接。')
+ let lastError:unknown
+ for(const api of candidates){let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(`${api}/state/mastermind-native-ward-outcome/${operation}`),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)})}catch(error){lastError=error;continue}
+ const body=await response.json() as T&{error?:string};if(!response.ok)throw Error(body.error??'原攻击或控制权已改变，请重新查看。');return body}
+ throw lastError??Error('攻击选择服务暂时不可用，请确认房间连接。')
+}
+
+export async function loadBountifulPluginSpellAbilityOriginalSource(input:import('../ports/dnd5ePluginSpellAbilityOriginalTransport').BountifulPluginSpellAbilityOriginalIdentity):Promise<import('../ports/dnd5ePluginSpellAbilityOriginalTransport').BountifulPluginSpellAbilityOriginalBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('plugin-spell-ability-original-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-plugin-spell-ability-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'plugin-spell-ability-original-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('plugin-spell-ability-original-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.schemaVersion!==1||v.sourceKind!=='plugin-spell-ability-original-v1'||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.source||!Array.isArray(v.rows)||!Number.isSafeInteger(v.effectTimestamp))throw Error('plugin-spell-ability-original-api:invalid-book');return value as import('../ports/dnd5ePluginSpellAbilityOriginalTransport').BountifulPluginSpellAbilityOriginalBook}catch(error){failure=error}}throw failure
+}
+
+export async function loadBountifulPluginSpellSavingOriginalSource(input:import('../ports/dnd5ePluginSpellSavingOriginalTransport').BountifulPluginSpellSavingOriginalIdentity):Promise<import('../ports/dnd5ePluginSpellSavingOriginalTransport').BountifulPluginSpellSavingOriginalBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('plugin-spell-saving-original-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-plugin-spell-saving-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'plugin-spell-saving-original-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('plugin-spell-saving-original-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.schemaVersion!==1||v.sourceKind!=='plugin-spell-saving-original-v1'||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.source||!Array.isArray(v.rows)||!Number.isSafeInteger(v.effectTimestamp))throw Error('plugin-spell-saving-original-api:invalid-book');return value as import('../ports/dnd5ePluginSpellSavingOriginalTransport').BountifulPluginSpellSavingOriginalBook}catch(error){failure=error}}throw failure
+}
+
+export async function loadBountifulPluginSpellCompoundPrimarySource(input:import('../ports/dnd5ePluginSpellSavingOriginalTransport').BountifulPluginSpellSavingOriginalIdentity):Promise<import('../ports/dnd5ePluginSpellCompoundPrimaryTransport').BountifulPluginSpellCompoundPrimaryBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('plugin-spell-saving-original-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-plugin-spell-saving-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify({...input,poolKind:'primary'})}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'plugin-spell-saving-original-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('plugin-spell-saving-original-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.schemaVersion!==1||v.sourceKind!=='plugin-spell-compound-primary-v1'||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.source||!Array.isArray(v.rows)||!Number.isSafeInteger(v.effectTimestamp))throw Error('plugin-spell-saving-original-api:invalid-book');return value as import('../ports/dnd5ePluginSpellCompoundPrimaryTransport').BountifulPluginSpellCompoundPrimaryBook}catch(error){failure=error}}throw failure
+}
+
+export const loadSpellcastingOriginalPreparation=readSpellcastingOriginalPreparationBook
+export async function requestSharedSpellcastingOriginalSaving(operation:'prepare'|'inspect'|'dice'|'read'|'target-source'|'target-prepare'|'target-inspect'|'target-dice'|'target-read',payload:unknown):Promise<Record<string,unknown>>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('spellcasting-saving-api:actual-host-required')
+ if(!['prepare','inspect','dice','read','target-source','target-prepare','target-inspect','target-dice','target-read'].includes(operation))throw Error('spellcasting-saving-api:operation-required')
+ if(!payload||typeof payload!=='object'||Array.isArray(payload))throw Error('spellcasting-saving-api:identity-required')
+ const identity=payload as Record<string,unknown>;if(!['parentId','mapId','combatId','effectId'].every(key=>typeof identity[key]==='string'&&(identity[key] as string).length>0&&(identity[key] as string).length<=2000))throw Error('spellcasting-saving-api:identity-required')
+ if(operation.startsWith('target-')&&(typeof identity.targetId!=='string'||!identity.targetId||identity.targetId.length>2000))throw Error('spellcasting-saving-api:target-identity-required')
+ let networkFailure:unknown=Error('spellcasting-saving-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response;try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/spellcasting-original-saving/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)})}catch(error){networkFailure=error;continue}
+  const value:unknown=await response.json();if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'spellcasting-saving-api:private-response-'+response.status)
+  if(!value||typeof value!=='object'||Array.isArray(value)||!('ok'in value)||value.ok!==true)throw Error('spellcasting-saving-api:invalid-private-response')
+  const reply=value as Record<string,unknown>,target=operation.startsWith('target-'),sourceKind=operation==='target-source'?'spell-target-original-preparation-v1':target?'spell-target-original-saving-v1':'spellcasting-original-saving-v1',identityKeys=target?['parentId','mapId','combatId','effectId','targetId']:['parentId','mapId','combatId','effectId'];if(operation!=='dice'&&operation!=='target-dice'&&(reply.schemaVersion!==1||reply.sourceKind!==sourceKind||reply.roomId!==session.roomId||reply.hostMemberId!==session.memberId||!identityKeys.every(key=>reply[key]===identity[key])||(operation==='target-source'?typeof reply.prefixSignature!=='string'||!reply.source||typeof reply.source!=='object'||!reply.requirement||typeof reply.requirement!=='object':typeof reply.parentSignature!=='string')||target&&(!Number.isSafeInteger(reply.effectTimestamp)||Number(reply.effectTimestamp)<=0)))throw Error('spellcasting-saving-api:invalid-private-response')
+  return reply
+ }
+ throw networkFailure
+}
+
+
+export async function requestSharedTempestuousLandingOriginal(operation:'prepare'|'inspect'|'dice'|'read',payload:unknown):Promise<Record<string,unknown>>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('tempestuous-landing-api:actual-host-required')
+ let failure:unknown=Error('tempestuous-landing-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/tempestuous-landing-original/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'tempestuous-landing-api:private-response-'+response.status);if(!value||typeof value!=='object'||!('ok'in value)||value.ok!==true)throw Error('tempestuous-landing-api:invalid-private-response');return value as Record<string,unknown>}catch(error){failure=error}}throw failure
+}
+
+export async function requestSharedTempestuousHostOriginal(operation:'begin'|'read'|'cancel'|'spell-window-prefix',payload:unknown):Promise<Record<string,unknown>>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('tempestuous-host-api:actual-host-required')
+ let failure:unknown=Error('tempestuous-host-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/tempestuous-host-original/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'tempestuous-host-api:private-response-'+response.status);if(!value||typeof value!=='object'||!('ok'in value)||value.ok!==true)throw Error('tempestuous-host-api:invalid-private-response');return value as Record<string,unknown>}catch(error){failure=error}}throw failure
+}
+
+/** Host-only source transport; decoded data grants no Native or physical authority. */
+export async function loadBountifulDeathRepeatSavingSource(input:import('../ports/dnd5eDeathRepeatSavingTransport').BountifulDeathRepeatSavingIdentity):Promise<import('../ports/dnd5eDeathRepeatSavingTransport').BountifulDeathRepeatSavingBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('death-repeat-saving-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-death-repeat-saving/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'death-repeat-saving-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('death-repeat-saving-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.present!==true||v.schemaVersion!==1||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.originalSource||!Array.isArray(v.originalRows)||!v.originalRows.length||!Number.isSafeInteger(v.effectTimestamp)||typeof v.requestId!=='string'||!v.requestId.startsWith('bountiful-death-repeat-saving:'))throw Error('death-repeat-saving-api:invalid-book');return value as import('../ports/dnd5eDeathRepeatSavingTransport').BountifulDeathRepeatSavingBook}catch(error){failure=error}}throw failure
+}
+
+/** Host transport for this independent input ledger only. It grants no Native,
+ * raw pool, movement or World permission and has no caller source-registration. */
+async function requestPluginTempestuousPrivate(namespace:'tempestuous-plugin-original'|'tempestuous-plugin-landing-original'|'tempestuous-plugin-saving-owned',operation:string,payload:unknown):Promise<Record<string,unknown>>{
+ const host=getRoomSession(),allowed=namespace==='tempestuous-plugin-original'?['prepare','read','probe','publication','inputs-read','inputs-start','inputs-record','inputs-save-start','saving-read','saving-begin','saving-append','saving-answer','saving-complete','saving-material-read','saving-material']:namespace==='tempestuous-plugin-saving-owned'?['read','claim']:['prepare','inspect','read','dice']
+ if(!host||host.role!=='dm'&&!(namespace==='tempestuous-plugin-saving-owned'&&host.role==='player')||!host.roomId||!host.memberId||!allowed.includes(operation))throw Error('plugin-tempestuous-api:actual-host-operation-required')
+ let failure:unknown=Error('plugin-tempestuous-api:private-source-unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response
+  try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/'+namespace+'/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(payload)})}catch(error){failure=error;continue}
+  const value:unknown=await response.json().catch(()=>null),current=getRoomSession()
+  if(current?.role!==host.role||current.roomId!==host.roomId||current.memberId!==host.memberId)throw Error('plugin-tempestuous-api:changed-host')
+  // An actual authority rejection is final, not a reason to query another host.
+  if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'plugin-tempestuous-api:private-response-'+response.status)
+  if(!value||typeof value!=='object'||!('ok'in value)||value.ok!==true)throw Error('plugin-tempestuous-api:invalid-private-response')
+  return value as Record<string,unknown>
+ }
+ throw failure
+}
+export async function requestSharedPluginTempestuousOriginal(operation:'prepare'|'read'|'probe'|'publication'|'inputs-read'|'inputs-start'|'inputs-record'|'inputs-save-start'|'saving-read'|'saving-begin'|'saving-append'|'saving-answer'|'saving-complete'|'saving-material-read'|'saving-material',payload:unknown):Promise<Record<string,unknown>>{return requestPluginTempestuousPrivate('tempestuous-plugin-original',operation,payload)}
+export async function requestSharedPluginTempestuousLandingOriginal(operation:'prepare'|'inspect'|'read'|'dice',payload:unknown):Promise<Record<string,unknown>>{return requestPluginTempestuousPrivate('tempestuous-plugin-landing-original',operation,payload)}
+
+/** Actual Host-only private first-ready/end-source transport. Returned data never
+ * substitutes for the Native operation and Node original issuance guards. */
+async function readDeathFirstPrivateSource(input:import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatIdentity,lane:'first'|'inspect'|'end'):Promise<unknown>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.memberId||!session.roomId)throw Error('death-first-api:actual-host-required');let failure:unknown=new Error('death-first-api:source-unavailable');for(const api of sharedApiCandidates()){try{const route=lane==='end'?'bountiful-death-first-repeat-saving/source':lane==='inspect'?'bountiful-death-first-original/inspect':'bountiful-death-first-original/source',response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/'+route),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'death-first-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('death-first-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true)throw Error('death-first-api:invalid-book');if(lane==='inspect'&&v.present===false){if(Object.keys(v).some(k=>k!=='ok'&&k!=='present'))throw Error('death-first-api:invalid-absence');return value}if(v.schemaVersion!==1||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!Number.isSafeInteger(v.effectTimestamp))throw Error('death-first-api:invalid-book');if(lane==='end'){if(v.present!==true||v.sourceKind!=='death-first-repeat-saving-v1'||!v.originalSource||!Array.isArray(v.originalRows)||typeof v.requestId!=='string'||!/^bountiful-death-first-repeat-saving:[a-f0-9]{64}$/.test(v.requestId))throw Error('death-first-api:invalid-end-book')}else if(v.sourceKind!=='death-first-ready-v1'||!v.source||!v.firstRaw||!v.firstAdopted||lane==='inspect'&&v.present!==true)throw Error('death-first-api:invalid-first-book');return value}catch(error){failure=error}}throw failure
+}
+export async function loadBountifulDeathFirstOriginalSource(input:import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatIdentity):Promise<import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstPreparationBook>{return await readDeathFirstPrivateSource(input,'first')as import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstPreparationBook}
+export async function inspectBountifulDeathFirstOriginal(input:import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatIdentity):Promise<import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstPreparationPresence>{return await readDeathFirstPrivateSource(input,'inspect')as import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstPreparationPresence}
+export async function loadBountifulDeathFirstRepeatSavingSource(input:import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatIdentity):Promise<import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatSavingBook>{return await readDeathFirstPrivateSource(input,'end')as import('../ports/dnd5eDeathFirstRepeatTransport').BountifulDeathFirstRepeatSavingBook}
+
+export async function requestSharedPluginTempestuousSavingOwned(operation:'read'|'claim',payload:unknown):Promise<Record<string,unknown>>{return requestPluginTempestuousPrivate('tempestuous-plugin-saving-owned',operation,payload)}
+
+/** Authenticated private Monster held-saving input ledger. No Native authority. */
+export async function requestSharedBountifulMonsterSavingLate<T>(input:{parentId:string;mapId:string;combatId:string}):Promise<T>{const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('monster-save-late-api:actual-host-required');let failure:unknown=Error('monster-save-late-api:source-unavailable');for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-monster-saving-late/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'monster-save-late-api:source-'+response.status);if(!value||typeof value!=='object')throw Error('monster-save-late-api:invalid-response');const row=value as Record<string,unknown>;if(row.ok!==true||typeof row.present!=='boolean'||row.present&&(row.sourceKind!=='monster-saving-late-v1'||row.parentId!==input.parentId||row.mapId!==input.mapId||row.combatId!==input.combatId||!Array.isArray(row.slots)))throw Error('monster-save-late-api:invalid-response');return value as T}catch(error){failure=error}}throw failure}
+
+export async function loadBountifulDeathAreaOriginalSource(input:import('../ports/dnd5eDeathAreaOriginalTransport').BountifulDeathAreaOriginalIdentity):Promise<import('../ports/dnd5eDeathAreaOriginalTransport').BountifulDeathAreaOriginalBook>{
+ const session=getRoomSession();if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('death-area-original-api:actual-host-required');let failure:unknown;
+ for(const api of sharedApiCandidates()){try{const response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/bountiful-death-area-original/source'),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify(input)}),value:unknown=await response.json().catch(()=>null);if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'death-area-original-api:private-source-'+response.status);if(!value||typeof value!=='object')throw Error('death-area-original-api:invalid-book');const v=value as Record<string,unknown>;if(v.ok!==true||v.present!==true||v.schemaVersion!==1||v.parentId!==input.parentId||v.mapId!==input.mapId||v.combatId!==input.combatId||v.roomId!==session.roomId||v.hostMemberId!==session.memberId||!v.originalSource||!Array.isArray(v.originalRows)||!v.originalRows.length||!Number.isSafeInteger(v.effectTimestamp)||typeof v.requestId!=='string'||!v.requestId.startsWith('bountiful-death-area-original:'))throw Error('death-area-original-api:invalid-book');return value as import('../ports/dnd5eDeathAreaOriginalTransport').BountifulDeathAreaOriginalBook}catch(error){failure=error}}throw failure
+}
+
+/** Host-attested transport recovery; never a substitute for the normal world commit. */
+export async function requestSharedEffectEndConfirmedReceipt<T>(operation:'read'|'record',mapId:string,receipt?:{before:T;after:T;contextKey:string}):Promise<{receipt:{before:T;after:T}|null;contextKey:string;combatRevision:number;hasPending:boolean}>{
+ const session=getRoomSession()
+ if(session?.role!=='dm'||!session.roomId||!session.memberId)throw Error('effect-end-receipt:actual-host-required')
+ let networkFailure:unknown=Error('effect-end-receipt:unavailable')
+ for(const api of sharedApiCandidates()){
+  let response:Response
+  try{response=await fetchSharedCandidate(sharedSessionUrl(api+'/state/effect-end-confirmed/'+operation),{method:'POST',headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},body:JSON.stringify({mapId,...(receipt?{contextKey:receipt.contextKey,receipt:{before:receipt.before,after:receipt.after}}:{})})})}catch(error){networkFailure=error;continue}
+  const value:unknown=await response.json()
+  if(!response.ok)throw Error(value&&typeof value==='object'&&'error'in value&&typeof value.error==='string'?value.error:'effect-end-receipt:response-'+response.status)
+  if(!value||typeof value!=='object'||!('ok'in value)||value.ok!==true||!('roomId'in value)||value.roomId!==session.roomId||!('hostMemberId'in value)||value.hostMemberId!==session.memberId||!('mapId'in value)||value.mapId!==mapId||!('contextKey'in value)||typeof value.contextKey!=='string'||!('combatRevision'in value)||typeof value.combatRevision!=='number'||!Number.isSafeInteger(value.combatRevision)||value.combatRevision<0||!('hasPending'in value)||typeof value.hasPending!=='boolean'||!('receipt'in value))throw Error('effect-end-receipt:invalid-response')
+  if(value.receipt===null)return {receipt:null,contextKey:value.contextKey,combatRevision:value.combatRevision,hasPending:value.hasPending}
+  const saved=value.receipt
+  if(!saved||typeof saved!=='object'||!('before'in saved)||!('after'in saved)||!saved.before||typeof saved.before!=='object'||!saved.after||typeof saved.after!=='object')throw Error('effect-end-receipt:invalid-receipt')
+  return {receipt:saved as {before:T;after:T},contextKey:value.contextKey,combatRevision:value.combatRevision,hasPending:value.hasPending}
+ }
+ throw networkFailure
 }

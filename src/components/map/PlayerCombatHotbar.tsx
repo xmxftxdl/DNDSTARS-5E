@@ -1,3 +1,4 @@
+import type{ReactNode}from'react'
 import { dnd5eCharacterWeaponAttackSlot } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
 import { dnd5eCreatureFormAttackSelection } from '../../rulesets/dnd5e/creatureFormMultiattackContinuation'
 import { alternateResourceSpellHotbarSources } from './alternateResourceSpellHotbarSources'
@@ -141,6 +142,7 @@ const TARGETING_LABELS: Record<Dnd5eCombatActionTargeting, string> = {
 }
 
 interface PlayerCombatHotbarProps {
+  inventorySupplement?: (character: Character) => ReactNode
   character: Character
   mapArmorClassBonus?: number
   mapWeather?: import('../../rulesets/dnd5e/environmentRules').Dnd5eMapWeather
@@ -325,6 +327,7 @@ function readBackpackOpen(characterId: string): boolean {
 }
 
 export default function PlayerCombatHotbar({
+  inventorySupplement,
   character,
   mapArmorClassBonus = 0,
   mapWeather,
@@ -761,7 +764,9 @@ export default function PlayerCombatHotbar({
     featureSources.push(...activityWeaponAttackGrants.map(({ grant, slot, profile }) => ({
       id: `activity-weapon-attack:${grant.grantId}:${slot}`,
       label: `${grant.label} · ${profile.weaponName}`,
-      description: grant.economy === 'none'
+      description: grant.consumesReaction
+        ? '坚韧不屈后立即消耗反应进行一次武器攻击。选择目标后校验武器、距离和目标限制。'
+        : grant.economy === 'none'
         ? '追加攻击，不消耗动作或附赠动作。选择目标后校验武器、距离和目标限制。'
         : '消耗附赠动作进行追加攻击。选择目标后校验武器、距离和目标限制。',
       icon: dnd5eClassFeatureActionIcon({
@@ -769,7 +774,7 @@ export default function PlayerCombatHotbar({
         name: grant.label,
         classId: primaryClassId,
       }),
-      economy: grant.economy,
+      economy: grant.consumesReaction ? 'reaction' as const : grant.economy,
       targeting: 'creature' as const,
       command: {
         kind: 'select-weapon-target' as const,
@@ -1080,6 +1085,9 @@ export default function PlayerCombatHotbar({
           // 可执行的道具在探索状态下仍应沿用 use-item 权威链路。此前这里把药水等
           // 全部降级成“打开背包”，导致快捷槽只能查看，不能真正使用。
           if (entry.sourceKind === 'item') return entry
+          // Ordinary scene attacks use the existing authenticated original attack pipeline.
+          // Keep the descriptor's pending, actor, form and reaction restrictions intact.
+          if (entry.id === 'system:weapon-attack') return entry
           if (entry.id === 'system:other-actions') return {
             ...entry,
             description: '查看并尝试解除自己或附近生物身上的效果。',
@@ -1815,6 +1823,7 @@ export default function PlayerCombatHotbar({
               onAssignQuickbarSlot={assignItemToQuickbar}
               onClearQuickbarSlot={clearItemQuickbarSlot}
             />
+            {inventorySupplement?.(character)}
           </div>
         </section>
       </div>,

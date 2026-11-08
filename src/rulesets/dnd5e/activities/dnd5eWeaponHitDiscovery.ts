@@ -41,7 +41,7 @@ export function listDnd5eWeaponHitActivities(input: {
         for (const check of available.activity.checks ?? []) {
           if (check.kind !== 'saving-throw' || !target) continue
           const mode = check.rollMode === 'host-derived'
-            ? dnd5eSavingThrowMode(target, check.ability, { effectVisible: true, sourceCreatureType: actor.creatureType, sourceIsSpell: false })
+            ? dnd5eSavingThrowMode(target, check.ability, { effectVisible: true, sourceCreatureType: actor.creatureType, sourceIsSpell: available.activity.legacySource?.kind === 'spell' })
             : check.rollMode ?? 'normal'
           rolls = [...rolls, { id: `${check.rollId}:${target.id}`, count: mode === 'normal' ? 1 : 2, sides: 20,
             kind: 'saving-throw', rollerTokenId: target.id }]

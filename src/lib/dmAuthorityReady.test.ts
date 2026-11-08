@@ -37,9 +37,9 @@ describe('matchesDmAuthorityReady', () => {
 
   it('accepts a matching authority latch published by another writer', async () => {
     let attempts = 0
-    const concurrent = { ...ready, updatedAt: 2 }
+    const concurrent = { ...ready, updatedAt: 2 };let loads=0
     await expect(persistDmAuthorityReady(ready, {
-      load: async () => concurrent,
+      load: async () => ++loads===1?null:concurrent,
       save: async () => {
         attempts += 1
         throw new Error('revision-conflict')
@@ -48,3 +48,6 @@ describe('matchesDmAuthorityReady', () => {
     expect(attempts).toBe(1)
   })
 })
+
+it('reuses the exact already-persisted current latch on fresh local state without rewriting its timestamp or revision',async()=>{const stored={...ready,_sync:{revision:1,writtenAt:100}},writes:unknown[]=[];const result=await persistDmAuthorityReady({...ready,updatedAt:200},{load:async()=>stored,save:async value=>{writes.push(value)}});expect(result).toBe(stored);expect(writes).toEqual([]);expect(result).toEqual({...ready,_sync:{revision:1,writtenAt:100}})})
+it.each([{...ready,mapId:'other-map'},{...ready,combatId:'other-combat'},{...ready,ready:false}])('does not reuse a latch with a different current semantic identity %j',async stored=>{const writes:unknown[]=[];expect(await persistDmAuthorityReady(ready,{load:async()=>stored,save:async value=>{writes.push(value)}})).toEqual(ready);expect(writes).toEqual([ready])})

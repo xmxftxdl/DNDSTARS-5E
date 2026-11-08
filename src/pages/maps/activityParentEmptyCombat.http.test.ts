@@ -1,0 +1,13 @@
+import{it,expect,vi}from'vitest'
+import{bountifulReadyHttpFixture}from'../../rulesets/dnd5e/opportunityMove.httpSupport'
+import{captureActivityDeathParentBaseline}from'./postNativeActivityParent'
+import{normalizeCharacter}from'../../store/characters'
+import{normalizeSharedCampaignTime}from'../../lib/campaignTime'
+import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
+import type{BattleMap}from'../../store/maps'
+vi.mock('../../lib/roomSession',()=>({getRoomSession:()=>({roomId:'room',memberId:'host',role:'dm'})}))
+it.each([{stored:'',requested:undefined,accepted:true},{stored:undefined,requested:'',accepted:true},{stored:'encounter-a',requested:'encounter-a',accepted:true},{stored:'encounter-a',requested:'encounter-b',accepted:false}])('actual HTTP original baseline treats only equivalent missing encounter encodings as the same: %j',async({stored,requested,accepted})=>{
+ const http=await bountifulReadyHttpFixture();try{const owner=normalizeCharacter({id:'owner',name:'Owner',charClass:'战士',level:1,roomMemberId:'first-member'}),map:BattleMap={id:'map',name:'Actual no-encounter baseline',width:500,height:500,gridSize:50,feetPerCell:5,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[{id:'owner-token',characterId:owner.id,type:'player',label:owner.name,x:25,y:25,size:1,color:'',emoji:''}]},action:SharedPlayerActionState={id:'actual-rest-parent-second',mapId:map.id,...(requested===undefined?{}:{combatId:requested}),type:'dnd5e-plugin-action',sourceMode:'player',status:'pending',actorTokenId:'owner-token',characterId:owner.id,roomMemberId:'first-member',round:1,initiativeIndex:0,seq:2,updatedAt:1,dnd5ePluginAction:{featureId:'local.celestial:rest',payload:{restEventId:'rest:long-rest-complete:1020'}}},sync={revision:1,schemaVersion:1,writerId:'host',writtenAt:1},data={maps:{maps:[map],selectedId:map.id,updatedAt:1,_sync:sync},characters:{characters:[owner],selectedId:owner.id,updatedAt:1,_sync:sync},combat:{mapId:map.id,active:false,round:1,initiativeIndex:0,initiativeOrder:[],...(stored===undefined?{}:{combatId:stored}),updatedAt:1,_sync:sync},'map-geometry':{schemaVersion:2,maps:[],updatedAt:1,_sync:sync},'campaign-time':{...normalizeSharedCampaignTime({worldMinute:1020}),_sync:sync},'player-action-requests':{mapId:map.id,requests:[action],updatedAt:1,_sync:sync}},gateway={loadResource:async<T,>(name:string):Promise<T|null>=>{const r=await http.state('GET',name,null,data,'host');expect(r.status).toBe(200);return r.payload as T}};
+ const operation=captureActivityDeathParentBaseline({command:action,map,characters:[owner]},gateway);if(accepted)expect(await operation).toBeDefined();else await expect(operation).rejects.toThrow('activity-parent:prepared-baseline-mismatch');
+ }finally{await http.close()}
+})

@@ -1,3 +1,4 @@
+import DiceOverlayPortal from '../../components/DiceOverlayPortal'
 import { useState, type Dispatch, type SetStateAction } from 'react'
 import { Maximize2, Minus, Scale } from 'lucide-react'
 import type {
@@ -359,6 +360,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
   if (!isDM || !sharedDmAdjudicationPrompt) return null
   if (minimizedPromptId === sharedDmAdjudicationPrompt.id) {
     return (
+      <DiceOverlayPortal layer="confirmation">
       <button
         type="button"
         onClick={() => setMinimizedPromptId(null)}
@@ -377,12 +379,13 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
         </span>
         <Maximize2 className="h-4 w-4 shrink-0 text-slate-300" />
       </button>
+      </DiceOverlayPortal>
     )
   }
 
   return (
-    <>
-        <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+    <DiceOverlayPortal layer="confirmation">
+        <div className="pointer-events-auto fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
@@ -1378,6 +1381,6 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
             </div>
           </div>
         </div>
-    </>
+    </DiceOverlayPortal>
   )
 }

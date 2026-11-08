@@ -27,6 +27,7 @@ export interface Dnd5eActivityRollTargetV1 {
   sizeRank?: number
   /** Host-derived source-relative audibility for effects that only affect hearers. */
   canHearActivitySource?: boolean
+  canSeeActivitySource?: boolean
   languages?: readonly string[]
   elevationFeet?: number
   groundElevationFeet?: number
@@ -110,6 +111,22 @@ function selectedSavingThrowAbility(
     modifier(candidate) > modifier(best) ? candidate : best, check.ability)
 }
 
+/** A single authored failed-save condition effect identifies what the save
+ * resists even when condition immunity is declared at the target boundary.
+ * Infer no condition from unrelated, conditional or compound operations. */
+function authoredFailedSaveCondition(
+  activity: Dnd5eActivityDefinitionV1,
+  check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>,
+) {
+  const outcomes = activity.outcomes.filter(outcome => outcome.when.kind === 'check' &&
+    outcome.when.checkId === check.id && outcome.when.result === 'failure')
+  if (outcomes.length !== 1 || outcomes[0].operations.length !== 1) return undefined
+  const operation = outcomes[0].operations[0]
+  if (operation.kind !== 'apply-effect' || operation.target !== 'target') return undefined
+  const effect = activity.effects?.find(effect => effect.id === operation.effectId)
+  return effect?.conditions?.length === 1 ? effect.conditions[0] : undefined
+}
+
 /** Derives the base save mode from authoritative combat state for an Activity. */
 export function dnd5eActivityHostSavingThrowModeV1(input: {
   activity: Dnd5eActivityDefinitionV1
@@ -140,7 +157,7 @@ export function dnd5eActivityHostSavingThrowModeV1(input: {
       // A condition immunity declared on the save is also the authoritative
       // condition the spell is attempting to impose. Passing it through lets
       // racial rules such as Fey Ancestry derive advantage for charm saves.
-      condition: input.check.automaticSuccessIfConditionImmune,
+      condition: input.check.automaticSuccessIfConditionImmune ?? authoredFailedSaveCondition(input.activity, input.check),
     },
   )
 }
@@ -210,7 +227,7 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
         if (input.weaponCounterattackSuccessCheckKeys?.has(key)) return false
         const source = input.combatants?.[input.actor.id]
         const host = input.combatants?.[target.id]
-        const communicationTarget = host && source ? { languages: host.languages, canHearActivitySource: target.canHearActivitySource ?? dnd5eCombatantCanHearSource(host, source) } : target
+        const communicationTarget = host && source ? { ...target, languages: host.languages, canHearActivitySource: target.canHearActivitySource ?? dnd5eCombatantCanHearSource(host, source) } : target
         if (dnd5eActivityCommunicationSaveSucceeds(check, source ?? input.actor, communicationTarget)) return false
       }
       if (check?.kind === 'saving-throw' && dnd5eActivitySaveExcludesCreatureType(check, input.combatants?.[target.id]?.creatureType ?? target.creatureType)) return false

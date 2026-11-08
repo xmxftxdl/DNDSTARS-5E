@@ -1,4 +1,8 @@
-@import "tailwindcss";
+/* Web styles only need application sources, not local rule archives or audit output. */
+@import "tailwindcss" source(none);
+@source "./";
+@source "../index.html";
+@source "../dice-box-frame.html";
 /* Verification output is not UI source. Watching growing logs causes full reloads. */
 @source not "../.codex-logs";
 @source not "../.codex-temp";

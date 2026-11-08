@@ -1,3 +1,5 @@
+import type {PactAuthorityCharacter} from './pactWeaponSummonHost'
+import {pactWeaponHasPhysicalIdentity} from './pactWeaponIdentity'
 import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
 import type { AbilityKey } from '../../lib/dnd'
 import { dnd5eConcentrationDefenseBonus } from './concentrationDefense'
@@ -598,6 +600,7 @@ export function dnd5eWeaponAttackProfile(
   character: Character,
   options?: {
     shillelaghAbility?: 'str' | 'spellcasting'
+    boundWeaponAbility?: 'normal' | 'bound'
     /** A maintained grapple occupies one hand, so versatile weapons use one hand and true two-handed weapons cannot attack. */
     forceOneHanded?: boolean
     /** A granted attack may use either equipped hand without invoking two-weapon-fighting damage rules. */
@@ -664,15 +667,17 @@ export function dnd5eWeaponAttackProfile(
   const shillelagh = weaponSlot === 'mainWeapon' ? dnd5eShillelaghAttackChoice(character) : undefined
   const martialArts = !data.usesSourceSpellcastingAbility && dnd5eMonkMartialArtsEligible(character) && dnd5eMonkWeapon(character, weapon)
   const useSpellcastingAbility = shillelagh && options?.shillelaghAbility === 'spellcasting'
-  const ability: AbilityKey = useSpellcastingAbility
+  const boundAbility=options?.boundWeaponAbility==='bound'?dnd5eBoundWeaponAbilityChoice(character,weaponSlot):undefined
+  if(options?.boundWeaponAbility==='bound'&&!boundAbility)return undefined
+  const ability: AbilityKey = boundAbility ?? (useSpellcastingAbility
     ? shillelagh.spellcastingAbility
     : shillelagh
       ? 'str'
       : data.attackAbility === 'finesse' || (martialArts && data.attackAbility === 'str')
         ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
-        : data.attackAbility
+        : data.attackAbility)
   if (data.usesSourceSpellcastingAbility && !Number.isInteger(data.sourceSpellcastingModifier)) return undefined
-  const abilityModifier = data.usesSourceSpellcastingAbility ? data.sourceSpellcastingModifier! : useSpellcastingAbility
+  const abilityModifier = boundAbility ? rules.abilityModifier(character.abilities[boundAbility]) : data.usesSourceSpellcastingAbility ? data.sourceSpellcastingModifier! : useSpellcastingAbility
     ? shillelagh.spellcastingModifier
     : ability === 'dex'
       ? dexterityModifier
@@ -732,7 +737,7 @@ export function dnd5eWeaponAttackProfile(
   }
 }
 
-export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeaponAttackProfile | undefined {
+export function dnd5eOffHandWeaponAttackProfile(character: Character,options?:{boundWeaponAbility?:'normal'|'bound'}): Dnd5eWeaponAttackProfile | undefined {
   if (dnd5eEquipmentMergedBySpellForm(character)) return undefined
   const mainData = character.equipment?.mainWeapon?.dnd5e
   const weapon = character.equipment?.offHand
@@ -747,10 +752,12 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
   ) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
-  const ability: AbilityKey = data.attackAbility === 'finesse'
+  const boundAbility=options?.boundWeaponAbility==='bound'?dnd5eBoundWeaponAbilityChoice(character,'offHand'):undefined
+  if(options?.boundWeaponAbility==='bound'&&!boundAbility)return undefined
+  const ability: AbilityKey = boundAbility ?? (data.attackAbility === 'finesse'
     ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
-    : data.attackAbility
-  const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
+    : data.attackAbility)
+  const abilityModifier = boundAbility ? rules.abilityModifier(character.abilities[boundAbility]) : ability === 'dex' ? dexterityModifier : strengthModifier
   const proficient = dnd5eWeaponProficient(character, weapon)
   const proficiency = proficient ? rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))) : 0
   const styles = dnd5eSelectedFightingStyles(character)
@@ -848,4 +855,39 @@ export function dnd5eWeaponProficient(character: Character, weapon: EquipmentIte
   }
   if (primaryClassId && special[primaryClassId]?.has(weaponId)) return true
   return multiclassIds.includes('monk') && weaponId === 'dnd5e-shortsword'
+}
+
+/** Source-only projection; never changes the weapon's magic status or damage source. */
+export function dnd5eBoundWeaponAbilityChoice(character:Character,slot:'mainWeapon'|'offHand'='mainWeapon'):AbilityKey|undefined{
+ const weapon=character.equipment?.[slot];if(!weapon)return
+ const matches=(character.dnd5eInventory?.entries??[]).filter(entry=>entry.equippedSlot===slot&&entry.quantity===1&&!entry.condition?.destroyed&&entry.item.equipment?.id===weapon.id)
+ if(matches.length!==1)return
+ const pactAbility=equipmentPluginFeaturesForCharacter(character).find(feature=>feature.automation==='full'&&feature.sourceClassId==='warlock'&&
+   feature.sourceSubclassId===character.dnd5eClassChoices?.classes?.warlock?.subclass&&dnd5eCharacterClassLevel(character,'warlock')>=Math.max(3,feature.minimumLevel??1)&&
+   feature.declarativeAbility?.automation==='full'&&feature.declarativeAbility.mechanic?.kind==='pact-weapon-ability')?.declarativeAbility?.mechanic
+ const authority=(character as PactAuthorityCharacter).dnd5ePactWeaponAuthority
+ const summoned=authority?.summons?.some(receipt=>receipt.inventoryInstanceId===matches[0].instanceId&&Number.isSafeInteger(receipt.pactRevision)&&receipt.pactRevision>0&&receipt.pactRevision<=authority.state.revision)
+ if(pactAbility?.kind==='pact-weapon-ability'&&summoned&&character.dnd5eClassChoices?.classes?.warlock?.selections?.['pact-boon']?.includes('blade')&&pactWeaponHasPhysicalIdentity(character,matches[0].instanceId))return pactAbility.ability
+ return effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects).flatMap(effect=>{
+  const bound=effect.modifiers?.boundWeaponAbility
+  return bound&&(effect.source.characterId??effect.source.actorId)===character.id&&bound.inventoryInstanceId===matches[0].instanceId&&bound.weaponId===weapon.id?[bound.ability]:[]
+ })[0]
+}
+
+/** Display-only choice for the authenticated owner's redacted character view.
+ * Authoritative preparation and attack profiles keep using the private identity
+ * check above; the submitted choice never grants permission by itself. */
+export function dnd5eOwnerViewBoundWeaponAbilityChoice(character:Character,slot:'mainWeapon'|'offHand'='mainWeapon'):AbilityKey|undefined{
+ const native=dnd5eBoundWeaponAbilityChoice(character,slot)
+ if(native)return native
+ const status=(character as Character&{dnd5ePactWeaponStatus?:{revision?:unknown;status?:unknown;summonedWeaponSlots?:unknown}}).dnd5ePactWeaponStatus
+ if(!status||status.status!=='present'||!Number.isSafeInteger(status.revision)||Number(status.revision)<1||
+   !Array.isArray(status.summonedWeaponSlots)||!status.summonedWeaponSlots.includes(slot))return
+ const weapon=character.equipment?.[slot]
+ if(!weapon||(character.dnd5eInventory?.entries??[]).filter(entry=>entry.equippedSlot===slot&&entry.quantity===1&&!entry.condition?.destroyed&&entry.item.equipment?.id===weapon.id).length!==1)return
+ if(!character.dnd5eClassChoices?.classes?.warlock?.selections?.['pact-boon']?.includes('blade'))return
+ const mechanic=equipmentPluginFeaturesForCharacter(character).find(feature=>feature.automation==='full'&&feature.sourceClassId==='warlock'&&
+   feature.sourceSubclassId===character.dnd5eClassChoices?.classes?.warlock?.subclass&&dnd5eCharacterClassLevel(character,'warlock')>=Math.max(3,feature.minimumLevel??1)&&
+   feature.declarativeAbility?.automation==='full'&&feature.declarativeAbility.mechanic?.kind==='pact-weapon-ability')?.declarativeAbility?.mechanic
+ return mechanic?.kind==='pact-weapon-ability'?mechanic.ability:undefined
 }

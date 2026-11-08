@@ -4,7 +4,7 @@ import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { evaluateDnd5eFormulaV1, type Dnd5eFormulaV1 } from './dnd5eFormula'
 
 /** Local presentation hints only. The Host still validates every requirement. */
-export function dnd5eActivityControlUnavailableReason(activity: Dnd5eActivityDefinitionV1, character: Character): string | undefined {
+export function dnd5eActivityControlUnavailableReason(activity: Dnd5eActivityDefinitionV1, character: Character, choices?: Readonly<Record<string, string>>): string | undefined {
   const classLevels: Record<string, number> = Object.fromEntries(
     Object.entries(normalizeDnd5eClassLevels(character)).filter((entry): entry is [string, number] =>
       typeof entry[1] === 'number' && Number.isFinite(entry[1])))
@@ -26,6 +26,10 @@ export function dnd5eActivityControlUnavailableReason(activity: Dnd5eActivityDef
   const costs = new Map<string, number>()
   for (const consumption of activity.consumption ?? []) {
     if (consumption.kind !== 'resource') continue
+    if (consumption.whenChoice) {
+      const selected = choices?.[consumption.whenChoice.choiceId] ?? activity.choices?.find(choice => choice.id === consumption.whenChoice!.choiceId)?.defaultOptionId ?? activity.choices?.find(choice => choice.id === consumption.whenChoice!.choiceId)?.options[0]?.id
+      if (!selected || !consumption.whenChoice.optionIds.includes(selected)) continue
+    }
     const cost = amount(consumption.amount)
     if (cost != null && Number.isFinite(cost) && cost > 0) costs.set(consumption.resourceId, (costs.get(consumption.resourceId) ?? 0) + cost)
   }

@@ -1,3 +1,4 @@
+import{DICE_OVERLAY_Z_INDEX}from'../../components/DiceOverlayPortal'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
@@ -37,6 +38,16 @@ function render(overrides: Partial<Props> = {}) {
 }
 
 describe('DM 裁定面板', () => {
+  it('keeps the real DM confirmation and note input above foreground dice without granting a player a dialog', () => {
+    const prompt: SharedDmAdjudicationPromptView = {id:'actual-thought-reading-confirmation',payload:{contextKind:'spell',actionId:'actual-native-thoughts',casterName:'法师',spellId:'detect-thoughts',spellName:'侦测思想',spellLevel:2,slotLevel:2,castingTime:'action',description:'确认真实目标语言并仅向读者提供思想。',concentration:true}}
+    const html=render({prompt})
+    expect(html).toContain('data-dice-overlay-layer="confirmation"')
+    expect(html).toContain('z-index:'+String(DICE_OVERLAY_Z_INDEX+1))
+    expect(html).toContain('pointer-events-auto fixed inset-0')
+    expect(html).toContain('data-testid="dm-adjudication-approve"')
+    expect(html).toContain('批准并提交 Headless 事务')
+    expect(render({prompt,isDm:false})).toBe('')
+  })
   it('does not invent a zero-damage effect for a save-only persistent-area trigger', () => {
     expect(initialPersistentAreaAdjudicationEffects({
       id: 'sleet-concentration',

@@ -188,3 +188,21 @@ it('checks the compiled plugin against Host turn state even when the action allo
   } finally { dispose() }
 })
 
+
+it.each(['near','far','ally'] as const)('checks fixed ended-creature target before prompting its observer: %s',async mode=>{
+ const activity:Dnd5eActivityDefinitionV1={...definition('other'),requirements:[],activation:{kind:'reaction'},
+  consumption:[{kind:'action-economy',economy:'reaction',amount:1,consumeOn:'resolve'}],
+  target:{kind:'creature',count:1,relation:'enemy',rangeFeet:5},
+  invocation:{kind:'triggered',event:'other-turn-end',confirmation:'actor-choice',retention:'single-event'}}
+ registerDnd5eActivityPackage({packageId:'test.observer-prefilter',packageVersion:'1.0.0',activities:[activity]})
+ const state=combat();state.combatants.actor.controller=mode==='ally'?'player':'dm'
+ state.combatants.other.pluginFeatureIds=['test.observer-prefilter:turn-benefit']
+ state.distanceFeetByCombatantPair={[dnd5eCombatantPairKey('actor','other')]:mode==='far'?10:5}
+ const ended=resolveDnd5eHeadlessAction(state,{type:'end-turn',actorId:'actor'});expect(ended.ok).toBe(true)
+ let prompts=0
+ const settled=await settleDnd5eActivityTriggerWindowsV1({state:ended.state,combatRevision:1,events:[...ended.events],eventBatchId:'fixed-target-prefilter',confirm:async()=>{prompts++;return true},roll:async()=>[]})
+ expect(prompts).toBe(mode==='near'?1:0)
+ expect(settled.state.combatants.other.temporaryHp).toBe(mode==='near'?3:0)
+ expect(settled.state.combatants.other.turn.reactionAvailable).toBe(mode!=='near')
+ expect(state.combatants.other.temporaryHp).toBe(0)
+})

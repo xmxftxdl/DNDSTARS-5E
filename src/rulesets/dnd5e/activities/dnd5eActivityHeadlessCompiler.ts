@@ -1,3 +1,23 @@
+import{activityAttackOriginalMissingActive}from'./activityAttackOriginalMissing'
+import{createDnd5eActivityAbilityOriginalDice,createDnd5eActivitySavingOriginalDice,createDnd5eActivityAttackOriginalDice}from'../headlessCombatEngine'
+import{dnd5eActivityRoundScope,dnd5eActivityRoundUseKey,dnd5eActivitySceneWorldSecond}from'../stormGuideRoundClock'
+import{dnd5eStormGuideSceneWeatherAt}from'../stormGuideWeatherProjection'
+import{currentDnd5eMagicTruthAppearance}from'../mastermindMagicTruthParent'
+import {settleDnd5eSpellHealingDiceGroups} from '../headlessCombatEngine'
+import {dnd5eActivitySpellHealingGroups,dnd5eActivityHealingRollOverrides} from '../spellHealingActivityDice'
+import{withFailedD20NativeAttackScope,recordFailedD20NativeAttack,failedD20CheckpointsActive,failedD20NativeAcceptedAmount,bindFailedD20ActivityAdjustment,suppressFailedD20NativeAttack}from'../failedD20BonusCheckpoint'
+import {withMasterDuelistNativeAttackScope,masterDuelistCheckpointsActive,masterDuelistOptions,recordMasterDuelistOriginalAttack,masterDuelistActivityModeSource,masterDuelistNativeModeAfterOverride,bindMasterDuelistActivityReplacement,suppressMasterDuelistNativeAttack} from '../masterDuelistCheckpoint'
+import {dnd5eMonsterSpellAttackModeResolution} from '../headlessCombatEngine'
+import{currentSoulOfDeceitReadingPolicy}from'../mastermindSoulOfDeceit'
+import {registeredDnd5eRulesPlugins} from '../plugins/pluginRuntimeIndex'
+import {dnd5eHeadlessTurnKey} from '../headlessCombatEngine'
+import { transferSourceConcentrationEffect } from '../curseTransfer'
+import {transferDnd5eOwnedCurseAfterDeath,consumeDnd5eOwnedCurseDeathHealing} from '../ownedCurseDeathTransfer'
+import{recordIncomingAttackDice,incomingCriticalFormulaRolls}from'../incomingAttackRerollCheckpoint'
+import{settleIncomingAttackRerollCheckpoint}from'../headlessCombatEngine'
+import{dnd5e2014Adapter as incomingAttackRules}from'../dnd5e2014Adapter'
+import { dnd5eActiveMinimumAbilityCheckD20 } from '../activeEffects'
+import { recordDnd5eSensoryDeceptionReport } from '../sensoryDeceptionReport'
 import { dnd5eActivityRetainedSaveDiceHooks } from './dnd5eActivityRetainedSaveDice'
 import { recordDnd5eDeclaredDamageTraitReport } from '../damageTraitReport'
 import { bindDnd5eApplicationEffectLinks } from './dnd5eApplicationEffectLinks'
@@ -14,6 +34,7 @@ import { dnd5eCombatantEntitledToActivityV1 } from './dnd5eActivityEntitlements'
 import { dnd5eCombatantEnvironmentalImmunities } from '../environmentalProtection'
 import { dnd5eCarriedLoadPreventsMovement } from '../carryingCapacity'
 import { dnd5eActivityDmChoicesAuthorizedV1 } from './dnd5eActivityDmChoices'
+import { dnd5eActivityWorldFactActionAuthorized } from './dnd5eActivityWorldFacts'
 import { dnd5eActivityDamagePathAmount } from '../activityDamagePath'
 import { dnd5eActivePerceivesVisibleCreaturesAsHostile } from '../activeEffects'
 import { dnd5eCombatantPerceivesHostile } from '../headlessCombatEngine'
@@ -203,7 +224,7 @@ export function dnd5eActivityHeadlessCompatibility(
   return { supported: reasons.length === 0, reasons }
 }
 
-function actorSnapshot(
+export function actorSnapshot(
   combatant: Dnd5eCombatant,
   activitySource?: Dnd5eCombatant,
   state?: import('../headlessCombatEngine').Dnd5eHeadlessCombatState,
@@ -219,6 +240,7 @@ function actorSnapshot(
   ) || dnd5eActiveControlledDescent(combatant.classState.activeEffects) != null
   return {
     etherealAccess: dnd5eActorEtherealAccess(state, combatant.classState.activeEffects),
+    pluginFeatureIds:[...combatant.pluginFeatureIds],
     id: combatant.id,
     raging: combatant.classState.raging === true,
     criticalThresholdAgainstSource: dnd5eTargetCriticalThreshold(combatant.classState.activeEffects, activitySource?.id),
@@ -242,7 +264,7 @@ function actorSnapshot(
     currentHp: combatant.currentHp,
     maxHp: combatant.maxHp,
     speed: dnd5eEffectiveSpeed(combatant),
-    armorClass: combatant.armorClass + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'armorClass'),
+    armorClass: combatant.armorClass + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'armorClass', combatant.magicSuppressed),
     sizeRank: combatant.sizeRank,
     creatureType: combatant.creatureType,
     elevationFeet: combatant.elevationFeet,
@@ -271,17 +293,22 @@ function actorSnapshot(
     // d20 roll. Strip it from saves that already carry the penalty so Activity
     // saving throws receive it exactly once.
     savingThrowModifiers: Object.fromEntries(Object.entries(combatant.savingThrowBonuses)
-      .map(([ability, modifier]) => [ability, modifier - resurrectionPenalty + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows') + dnd5eActiveSavingThrowProficiencyBonus(combatant.classState.activeEffects, ability as keyof typeof combatant.abilities, combatant)])),
+      .map(([ability, modifier]) => [ability, modifier - resurrectionPenalty + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows', combatant.magicSuppressed) + dnd5eActiveSavingThrowProficiencyBonus(combatant.classState.activeEffects, ability as keyof typeof combatant.abilities, combatant)])),
     savingThrowProficiencies: [...combatant.savingThrowProficiencies],
     bodyPartPresence: combatant.classState.bodyPartPresence ? { ...combatant.classState.bodyPartPresence } : undefined,
     corpse:combatant.currentHp===0 && (combatant.deathSaves.dead || combatant.classState.deathRound!=null) ? {bodyPresent:combatant.classState.bodyPresent!==false, undeadCreationProtected:dnd5eUndeadCreationIsProtected(combatant.classState.activeEffects)} : undefined,
     ammunitionContainers:combatant.ammunitionContainers,
+    minimumAbilityCheckD20ByAbility: Object.fromEntries((['str','dex','con','int','wis','cha'] as const).map(ability =>
+      [ability, dnd5eActiveMinimumAbilityCheckD20(combatant.classState.activeEffects, ability)])),
     rollDiceEffects: structuredClone((combatant.classState.activeEffects ?? []).filter(effect => effect.modifiers?.rollDiceModifiers != null)),
     charmedByActorIds: dnd5eActiveCharmSourceIds(combatant.classState.activeEffects, combatant.magicSuppressed),
     activeEffectDefinitionIds: (combatant.classState.activeEffects ?? []).map((effect) => ({
       definitionId: effect.definitionId,
       sourceActorId: effect.source.actorId,
       sourceCharacterId: effect.source.characterId,
+      sourceRulesId: effect.source.rulesId,
+      sourcePluginId: effect.source.pluginId,
+      sourcePluginAvailable: registeredDnd5eRulesPlugins().some(plugin=>plugin.id===effect.source.pluginId),
       tags: effect.suspendedBy?.length ? [] : effect.tags,
       suspended: !!effect.suspendedBy?.length,
       spellLevel: effect.source.spellLevel,
@@ -330,6 +357,9 @@ function actorSnapshot(
     d20RollModifier: resurrectionPenalty || undefined,
     canHearActivitySource: activitySource
       ? dnd5eCombatantCanHearSource(combatant, activitySource, state?.mapId)
+      : undefined,
+    canSeeActivitySource: activitySource && state
+      ? dnd5eCombatantCanSee(state, combatant.id, activitySource.id)
       : undefined,
   }
 }
@@ -513,7 +543,11 @@ export function compileDnd5eActivityHeadlessAction(
       visibility: 'public',
     }]),
     resolve(context) {
+return withActivityAttackFailureScopes(()=>{
+      if (!context.action || !context.state || !context.actor) return context.fail('invalid-plugin-action')
       if (!dnd5eActivityDmChoicesAuthorizedV1(context.action, activity, context.rolls)) return context.fail('invalid-plugin-action')
+      if (!dnd5eActivityWorldFactActionAuthorized(context.action, activity, {mapId:context.state.mapId, combatId:context.state.combatId,
+        actorId:context.actor.id, targetIds:context.action.targetIds ?? (context.action.targetId ? [context.action.targetId] : [])})) return context.fail('invalid-plugin-action')
       // Crafting needs the persisted Host ritual and atomic inventory/map plan.
       if (dnd5eActivityHasInventoryExchangeRitualProfile(activity)) return context.fail('invalid-plugin-action')
       const invocation = resolveDnd5eActivityInvocationV1(activity)
@@ -551,7 +585,7 @@ export function compileDnd5eActivityHeadlessAction(
         ? context.targets
         : selectedTarget.kind === 'self'
           ? [context.actor]
-          : selectedTarget.kind === 'area'
+          : selectedTarget.kind === 'area' || (selectedTarget.kind === 'creature' && selectedTarget.minimumCount === 0 && Array.isArray(context.action.targetIds) && context.action.targetIds.length === 0)
             ? []
             : context.target
               ? [context.target]
@@ -622,22 +656,38 @@ export function compileDnd5eActivityHeadlessAction(
         activityId: activity.id, actionId: continuationCommand.commandId,
         choices: context.action.disadvantageNegationChoices! }) : undefined
       const cancelledCriticalCheckKeys = new Set<string>()
-      const execute = (forcedAttackMissCheckKeys?: ReadonlySet<string>) => resolveDnd5eActivity({
+      let healingRolls:Readonly<Record<string,import('./dnd5eFormula').Dnd5eFormulaRollResult>>|undefined
+      let incomingAttackRolls=continuation.rolls
+      let incomingAttackHasCriticalDice=false
+      const originalAbility=createDnd5eActivityAbilityOriginalDice(context.state,context.events),originalSaving=createDnd5eActivitySavingOriginalDice(context.state,context.events)
+      const originalAttack=activityAttackOriginalMissingActive()?createDnd5eActivityAttackOriginalDice(context.state,context.events):undefined
+      const runOriginals=<T>(run:()=>T)=>originalAbility.run(()=>originalSaving.run(()=>originalAttack?originalAttack.run(run):run()))
+      const execute = (forcedAttackMissCheckKeys?: ReadonlySet<string>) => runOriginals(()=>resolveDnd5eActivity({
         weaponCounterattackSuccessCheckKeys: context.weaponCounterattackSuccessCheckKeys,
         ...dnd5eActivityRetainedSaveDiceHooks(context.state, context.actor.id, actionPayload?.activityRetainedSaveDice),
         negateDisadvantage: negation?.negate,
+        resolveSpellDamageFeatureIds:(targetId,attribution)=>{if(attribution!=='grant-source')return context.actor.pluginFeatureIds;const grant=grantedDamageSource(context.state,context.actor,context.action.pluginId,activity.id,targetId);return grant?.source.kind==='spell'?grant.actor.pluginFeatureIds:[]},
         resolveDamageRollBonus: (targetId, attribution) => dnd5eTargetDamageRollBonus(context.state.combatants[targetId]?.classState.activeEffects,
           attribution === 'grant-source' ? grantedDamageSource(context.state, context.actor, context.action.pluginId, activity.id, targetId)?.actor.id : context.actor.id),
         combatActive: context.state.active,
+        combatRound: context.state.round,
+        activityRoundScopeKnown:dnd5eActivityRoundScope(context.state)!==undefined,
+        sceneWeatherExploration:context.state.companionScene?.weatherControlCombatActive===false,
+        sceneWeatherWorldSecond:dnd5eActivitySceneWorldSecond(context.state),
+        activityUsedThisRound:context.actor.classState.declarativeUsedTurnKeys?.[dnd5eActivityRoundUseKey(context.action.pluginId,activity.id)]===dnd5eActivityRoundScope(context.state),
+        sceneWeatherFacts:dnd5eStormGuideSceneWeatherAt(context.state,{...context.actor.position,elevationFeet:context.actor.elevationFeet??context.actor.groundElevationFeet??0}),
+        attackActionUsed: context.actor.classState.weaponAttackActionTurnKey === dnd5eHeadlessTurnKey(context.state, context.actor.id),
+        actionEconomyAvailable: {action:context.actor.turn.actionAvailable,'bonus-action':context.actor.turn.bonusActionAvailable,reaction:context.actor.turn.reactionAvailable},
         currentTurnActorId: context.state.active ? context.state.initiativeOrder[context.state.initiativeIndex] : undefined,
         activity: context.featureSpellInvocationInterrupted ? dnd5eInterruptedFeatureSpellActivity(activity) : activity,
         targetQualificationIdsByTargetId: dnd5eHostTargetQualificationsV1(context.action),
         saveFactsByTargetId: dnd5eHostSaveFactsV1(context.action),
         actor: actorSnapshot(context.actor, context.actor, context.state),
-        targets: targets.map((target) => ({ ...actorSnapshot(target, context.actor, context.state), conditionImmunities: dnd5eActivityTargetImmunities(activity, target, context.actor), attackArmorClasses: dnd5eActivityAttackDefenses(context.state, context.actor.id, target.id, activity.target.kind === 'creature' && activity.target.mappedObjectOrigin ? dnd5eActivityMappedRockOrigin({ state: context.state, actorId: context.actor.id, activityId: activity.id, areaId: context.action.hostEntitlement?.kind === 'persistent-area' ? context.action.hostEntitlement.areaId : undefined, payload: context.action.payload }) : undefined) })),
+        targets: targets.map((target) => ({ ...actorSnapshot(target, context.actor, context.state),soulThoughtPolicy:currentSoulOfDeceitReadingPolicy(context.state,{parentId:continuationCommand.commandId,ownerId:target.id,readerId:context.actor.id}), conditionImmunities: dnd5eActivityTargetImmunities(activity, target, context.actor), attackArmorClasses: dnd5eActivityAttackDefenses(context.state, context.actor.id, target.id, activity.target.kind === 'creature' && activity.target.mappedObjectOrigin ? dnd5eActivityMappedRockOrigin({ state: context.state, actorId: context.actor.id, activityId: activity.id, areaId: context.action.hostEntitlement?.kind === 'persistent-area' ? context.action.hostEntitlement.areaId : undefined, payload: context.action.payload }) : undefined) })),
         combatants: Object.values(context.state.combatants)
           .map((combatant) => actorSnapshot(combatant, context.actor, context.state)),
-        rolls: continuation.rolls,
+        rolls: incomingAttackRolls,
+        healingRolls,
         resolveSequentialCheckRollModes: dnd5eActivitySequentialCheckModesV1({
           activity, actor: context.actor, combatants: context.state.combatants,
           state: context.state, grantingAreaId: context.action.hostEntitlement?.kind === 'persistent-area' ? context.action.hostEntitlement.areaId : undefined,
@@ -646,7 +696,7 @@ export function compileDnd5eActivityHeadlessAction(
         continuationTargetIds: continuation.pending?.finishActivityId === activity.id ? continuation.pending.visitedTargetIds : undefined,
         checkRollModes: Object.fromEntries([...sharedActorChecks.flatMap((check) =>
           check.rollMode === 'host-derived'
-            ? [[check.id, dnd5eActivityHostActorCheckModeV1(context.actor, check)] as const]
+            ? [[check.id, dnd5eActivityHostActorCheckModeV1(context.actor, check, context.state)] as const]
             : []), ...targetChecks.flatMap((check) =>
           check.kind === 'opposed-ability-check'
             ? targets.flatMap((target) => {
@@ -675,7 +725,7 @@ export function compileDnd5eActivityHeadlessAction(
                     })
                   : check.kind === 'attack-roll'
                     ? context.attackRollMode(target.id, check.delivery)
-                    : dnd5eActivityHostActorCheckModeV1(context.actor, check)
+                    : dnd5eActivityHostActorCheckModeV1(context.actor, check, context.state)
                 if ('perProjectile' in check && check.perProjectile) {
                   return (context.action.projectileTargetIds ?? []).flatMap((targetId, index) =>
                     targetId === target.id ? [[`${check.id}:projectile:${index}:${target.id}`, mode] as const] : [])
@@ -747,12 +797,13 @@ export function compileDnd5eActivityHeadlessAction(
         dmApproved: context.action.interruptChoiceId === 'dm-apply',
         forcedAttackMissCheckKeys,
         cancelledCriticalCheckKeys,
-        allowCriticalDiceSuperset: submittedAttackCritical || cancelledCriticalCheckKeys.size > 0,
-      })
+        allowCriticalDiceSuperset: incomingAttackHasCriticalDice || submittedAttackCritical || cancelledCriticalCheckKeys.size > 0,
+      }))
       let result = execute()
       if (!result.ok) {
         return context.fail(failureReason(result.reason, activity))
       }
+      originalAbility.seal();originalSaving.seal();originalAttack?.seal()
       const redirectedCheckKeys = new Set<string>()
       for (const check of result.checks) {
         if (
@@ -772,6 +823,43 @@ export function compileDnd5eActivityHeadlessAction(
       if (redirectedCheckKeys.size > 0) {
         result = execute(redirectedCheckKeys)
         if (!result.ok) return context.fail(failureReason(result.reason, activity))
+      }
+      // These are the actual compiled/imported spell and feature checks, after
+      // decoy redirection and before the existing critical/damage settlement.
+      for(const originalKey of result.checks.map(check=>check.key)){
+        const check:import('./dnd5eActivityExecutor').Dnd5eActivityCheckResult|undefined=result.checks.find(row=>row.key===originalKey)
+        if(!check||check.kind!=='attack-roll'||!check.targetId||check.dc==null)continue
+        const definition:import('./dnd5eActivityContracts').Dnd5eActivityCheckV1|undefined=activity.checks?.find(row=>row.id===check.checkId)
+        if(!definition||definition.kind!=='attack-roll')continue
+        const rollKey=definition.rollId+check.key.slice(check.checkId.length),dice=incomingAttackRolls[rollKey]?.values
+        if(!dice)return context.fail('invalid-plugin-action')
+        const mode=check.rollMode??'normal'
+        if(masterDuelistCheckpointsActive()&&masterDuelistOptions(context.state,context.actor.id).length){
+         const sourceMode=definition.rollMode==='host-derived'&&(definition.attackType??'spell')==='spell'?dnd5eMonsterSpellAttackModeResolution(context.state,context.actor.id,check.targetId,definition.delivery,undefined,{activity}):masterDuelistActivityModeSource(check)
+         if(!sourceMode)throw Error('master-duelist:actual-compiled-activity-mode-source-required')
+         recordMasterDuelistOriginalAttack({state:context.state,actorId:context.actor.id,targetId:check.targetId,rolls:dice,mode:masterDuelistNativeModeAfterOverride(sourceMode,mode),advantageAllowed:true,meleeAttack:definition.delivery==='melee'})
+         if(redirectedCheckKeys.has(check.key))suppressMasterDuelistNativeAttack()
+        }
+                 if(failedD20CheckpointsActive()){recordFailedD20NativeAttack({state:context.state,actorId:context.actor.id,targetId:check.targetId,rolls:dice,mode,meleeAttack:definition.delivery==='melee'});if(redirectedCheckKeys.has(check.key))suppressFailedD20NativeAttack()}
+         recordIncomingAttackDice(context.actor.id,dice,mode)
+        const attack=incomingAttackRules.resolveAttack({rolls:dice,mode,modifier:check.modifier,targetAc:check.dc})
+        const event:Extract<Dnd5eCombatEvent,{type:'attack-resolved'}>={type:'attack-resolved',actorId:context.actor.id,targetId:check.targetId,d20:check.d20,total:check.total,armorClass:check.dc,hit:check.success===true,critical:check.criticalSuccess,activityId:activity.id}
+        if(!settleIncomingAttackRerollCheckpoint(context.state,event,attack,context.events,definition.criticalThreshold))return context.fail('reaction-unavailable')
+                 const failedBonus=failedD20NativeAcceptedAmount()
+         if(failedBonus!=null)bindFailedD20ActivityAdjustment(originalKey,failedBonus,event.hit,event.armorClass)
+         if(event.d20Rolls||failedBonus!=null){
+          bindMasterDuelistActivityReplacement(originalKey,event.hit)
+          incomingAttackHasCriticalDice ||= check.criticalSuccess || event.critical
+                     if(event.d20Rolls)incomingAttackRolls={...incomingAttackRolls,[rollKey]:{...incomingAttackRolls[rollKey],values:[...event.d20Rolls]}}
+          result=execute(redirectedCheckKeys)
+          if(!result.ok)return context.fail(failureReason(result.reason,activity))
+          const supplemented=incomingCriticalFormulaRolls()
+          if(Object.keys(supplemented).length)incomingAttackRolls={...incomingAttackRolls,...Object.fromEntries(Object.entries(supplemented).map(([key,values])=>[key,{values:[...values]}]))}
+        }else if(!event.hit){
+          redirectedCheckKeys.add(check.key)
+          result=execute(redirectedCheckKeys)
+          if(!result.ok)return context.fail(failureReason(result.reason,activity))
+        }
       }
       for (const check of result.checks) {
         if (check.kind !== 'attack-roll' || !check.success || !check.criticalSuccess || !check.targetId || check.dc == null) continue
@@ -817,6 +905,13 @@ export function compileDnd5eActivityHeadlessAction(
         context.canReceiveRestCompletion?.(proposal.targetId) !== true)) return context.fail('invalid-target')
       if (result.proposals.some(proposal => proposal.kind === 'restore-original-alignment' &&
         !dnd5eRestorableOriginalAlignment(context.state.combatants[proposal.targetId] ?? {}))) return context.fail('invalid-target')
+      if(activity.legacySource?.kind==='spell'||activity.spellInvocation){
+        const healingProposals=activity.spellInvocation?result.proposals.filter(p=>activity.spellInvocation!.operationIds.includes(p.operationId)):result.proposals
+        const groups=dnd5eActivitySpellHealingGroups({...result,proposals:healingProposals},incomingAttackRolls)
+        if(groups.length){const values=settleDnd5eSpellHealingDiceGroups(context.state,context.actor,activity.spellInvocation?.spellId??activity.legacySource!.id,groups,context.events);healingRolls=dnd5eActivityHealingRollOverrides(groups,values)
+          if(Object.keys(healingRolls).length){result=execute(redirectedCheckKeys);if(!result.ok)return context.fail(failureReason(result.reason,activity))}
+        }
+      }
       const lifetimeClaims = new Set<string>()
       for (const proposal of result.proposals) {
         if (proposal.kind !== 'establish-spell-authority' || proposal.recordKind !== 'benefit-history') continue
@@ -850,8 +945,8 @@ export function compileDnd5eActivityHeadlessAction(
             d20: resolvedCheck.d20,
             total: resolvedCheck.total,
             armorClass: resolvedCheck.dc,
-            hit: resolvedCheck.success,
-            critical: resolvedCheck.criticalSuccess === true && resolvedCheck.success,
+            hit: resolvedCheck.success === true,
+            critical: resolvedCheck.criticalSuccess === true && resolvedCheck.success === true,
             attackMode: declaredCheck.attackType === 'weapon' ? declaredCheck.delivery ?? 'melee' : 'spell',
             attackCategory: declaredCheck.attackType ?? 'spell',
             activityId: activity.id,
@@ -881,14 +976,14 @@ export function compileDnd5eActivityHeadlessAction(
             modifier: resolvedCheck.modifier,
             total: resolvedCheck.total,
             dc: resolvedCheck.dc,
-            success: resolvedCheck.success,
+            success: resolvedCheck.success === true,
             automaticOutcome: resolvedCheck.automaticOutcome,
           })
         } else if (declaredCheck?.kind === 'concentration-check' && resolvedCheck.dc != null) {
           context.actor.classState.concentrationCheckDisadvantagePendingSourceId = undefined
           context.events.push({ type: 'concentration-resolved', actorId: context.actor.id,
             activityId: activity.id, checkId: resolvedCheck.checkId,
-            d20: resolvedCheck.d20, total: resolvedCheck.total, dc: resolvedCheck.dc, success: resolvedCheck.success })
+            d20: resolvedCheck.d20, total: resolvedCheck.total, dc: resolvedCheck.dc, success: resolvedCheck.success === true })
         } else if (
           (declaredCheck?.kind === 'ability-check' || declaredCheck?.kind === 'skill-check') &&
           resolvedCheck.ability != null
@@ -903,7 +998,8 @@ export function compileDnd5eActivityHeadlessAction(
             modifier: resolvedCheck.modifier,
             total: resolvedCheck.total,
             mode: resolvedCheck.rollMode ?? 'normal',
-            reliableTalentApplied: false,
+            reliableTalentApplied: resolvedCheck.reliableTalentApplied === true,
+            rawD20: resolvedCheck.rawD20,
             dc: resolvedCheck.dc,
             success: resolvedCheck.success,
           })
@@ -932,14 +1028,16 @@ export function compileDnd5eActivityHeadlessAction(
           sourceAbility: check.ability,
           sourceSkill: check.skill,
           sourceD20: check.d20,
+          sourceRawD20: check.rawD20,
           sourceModifier: check.modifier,
           sourceTotal: check.total,
           targetAbility: check.opposedAbility,
           targetSkill: check.opposedSkill,
           targetD20: check.opposedD20,
+          targetRawD20: check.rawOpposedD20,
           targetModifier: check.opposedModifier,
           targetTotal: check.opposedTotal,
-          success: check.success,
+          success: check.success === true,
         })
       }
       const resolvedMovements: Extract<Dnd5eActivityCapabilityProposal, { kind: 'move' }>[] = []
@@ -1066,6 +1164,8 @@ export function compileDnd5eActivityHeadlessAction(
           if (!context.revive(proposal)) return context.fail('invalid-target')
         } else if (proposal.kind === 'reveal-target-location') {
           if (!recordDnd5eTargetLocation(context.state, context.actor.id, proposal.targetId, activity.id)) return context.fail('invalid-target')
+        } else if (proposal.kind === 'read-sensory-deception') {
+          if (!recordDnd5eSensoryDeceptionReport(context.state, context.actor.id, activity.id, 30)) return context.fail('invalid-target')
         } else if (proposal.kind === 'read-damage-traits') {
           if (!recordDnd5eDeclaredDamageTraitReport(context.state, context.actor.id, proposal.targetId, activity.id)) return context.fail('invalid-target')
         } else if (proposal.kind === 'detect-planar-portal') {
@@ -1084,9 +1184,14 @@ export function compileDnd5eActivityHeadlessAction(
           )) {
             return context.fail('invalid-target')
           }
+         } else if(proposal.kind==='record-activity-round-use'){
+          const scope=dnd5eActivityRoundScope(context.state);if(proposal.targetId!==context.actor.id||!scope)return context.fail('invalid-plugin-action')
+          context.actor.classState.declarativeUsedTurnKeys={...context.actor.classState.declarativeUsedTurnKeys,[dnd5eActivityRoundUseKey(context.action.pluginId,activity.id)]:scope}
         } else if (proposal.kind === 'apply-standard-condition') {
           const duration = pluginDuration(proposal.duration)
           if (!duration) return context.fail('invalid-plugin-action')
+          // Sleep is an explicit source fact. Ordinary unconsciousness remains unaffected.
+          if (proposal.sleep === 'forced' && context.state.combatants[proposal.targetId]?.cannotBeForcedToSleep === true) continue
           context.applyStandardCondition(proposal.targetId, proposal.condition, duration)
         } else if (proposal.kind === 'apply-effect') {
           if (proposal.disguiseFromGrant) {
@@ -1099,6 +1204,17 @@ export function compileDnd5eActivityHeadlessAction(
           if (!effect || !context.applyResolvedEffect(proposal)) {
             return context.fail('invalid-plugin-action')
           }
+        } else if(proposal.kind==='heal-owned-curse-on-bearer-death'){
+          const amount=consumeDnd5eOwnedCurseDeathHealing({state:context.state,actorId:context.actor.id,bearerId:proposal.targetId,
+            packageId:context.action.pluginId,sourceActivityId:proposal.sourceActivityId,events:context.events})
+          if(amount==null)return context.fail('invalid-target')
+          context.heal(context.actor.id,amount)
+        } else if(proposal.kind==='transfer-owned-curse-on-bearer-death'){
+          if(!transferDnd5eOwnedCurseAfterDeath({state:context.state,actorId:context.actor.id,bearerId:proposal.targetId,
+            destinationId:proposal.destinationId,packageId:context.action.pluginId,sourceActivityId:proposal.sourceActivityId,events:context.events}))return context.fail('invalid-target')
+        } else if (proposal.kind === 'transfer-effect') {
+          if (!transferSourceConcentrationEffect(context.state, {actorId:context.actor.id,targetId:proposal.targetId,spellId:proposal.sourceSpellId,tags:proposal.tags})) return context.fail('invalid-target')
+          context.events.push({type:'class-state-changed',actorId:context.actor.id,stateKey:`effect-transferred:${proposal.sourceSpellId}:${proposal.targetId}`,active:true,value:1})
         } else if (proposal.kind === 'remove-effect') {
           if (!context.removeEffectDefinition(proposal.targetId, proposal.effectId, proposal.source)) {
             return context.fail('invalid-plugin-action')
@@ -1189,6 +1305,19 @@ export function compileDnd5eActivityHeadlessAction(
             activityId: activity.id, previousAlignment, alignment })
         } else if (proposal.kind === 'transform-creature') {
           if (!context.transformCreature(proposal)) return context.fail('invalid-target')
+        } else if (proposal.kind === 'grant-weapon-attack') {
+          const {kind: _kind, operationId: _operationId, attacks, available, ...grantFields} = proposal
+          context.actor.classState.activityWeaponAttackGrants = {
+            ...(context.actor.classState.activityWeaponAttackGrants ?? {}),
+            [proposal.grantId]: {
+              ...structuredClone(grantFields), schemaVersion: 1,
+              sourceActivityId: activity.id,
+              appliedTurnKey: dnd5eHeadlessTurnKey(context.state, context.actor.id),
+              pendingNextOwnTurn: available === 'next-own-turn' ? true : undefined,
+              remainingAttacks: attacks,
+            },
+          }
+          context.events.push({type:'class-state-changed',actorId:context.actor.id,stateKey:'activity-weapon-attack-grant:'+proposal.grantId,active:true})
         } else if (proposal.kind === 'grant-extra-turns') {
           if (!context.grantExtraTurns(proposal)) return context.fail('invalid-plugin-action')
         } else if (proposal.kind === 'set-directional-command') {
@@ -1198,6 +1327,12 @@ export function compileDnd5eActivityHeadlessAction(
         } else if (proposal.kind === 'transition-spell-authority') {
           if (!context.transitionSpellAuthority(proposal)) return context.fail('invalid-plugin-action')
         } else if (proposal.kind === 'request-dm-adjudication') {
+          if(proposal.purpose==='magical-truth-detection'){
+            if(!proposal.targetId||activity.legacySource?.magical!==true)return context.fail('invalid-plugin-action')
+            const appearance=currentDnd5eMagicTruthAppearance({state:context.state,parentId:continuationCommand.commandId,actorId:context.actor.id,ownerId:proposal.targetId,packageId:context.action.pluginId,activity,operationId:proposal.operationId})
+            if(appearance==='pending')return context.fail('dm-adjudication-pending')
+            if(appearance==='truthful')context.events.push({type:'activity-narrative-prompt',actorId:context.actor.id,activityId:activity.id,prompt:'这次魔法显现出目标所言真实的迹象。'})
+          }
           // The shared DM interrupt approved this exact transaction before
           // the trusted resolver was replayed.
           continue
@@ -1242,7 +1377,7 @@ export function compileDnd5eActivityHeadlessAction(
       }
       const succeeded = context.succeed()
       if (!succeeded.ok) return succeeded
-      finishDnd5eActivityContinuationV1(succeeded.state, continuationCommand, activity, continuation.rolls, result.checks, continuation.pending)
+      finishDnd5eActivityContinuationV1(succeeded.state, continuationCommand, activity, incomingAttackRolls, result.checks, continuation.pending)
       context.events.push({ type: 'activity-resolved', actorId: context.actor.id, activityId: activity.id,
         targetIds: targets.map(target => target.id),
         sourceKind: activity.legacySource?.kind === 'spell' ? 'spell' : activity.legacySource?.kind === 'item' ? 'item' :
@@ -1306,6 +1441,9 @@ export function compileDnd5eActivityHeadlessAction(
             proposal.kind === 'transition-spell-authority'),
         },
       }
-    },
+    })
+},
   }
 }
+
+function withActivityAttackFailureScopes<T>(run:()=>T):T{return withFailedD20NativeAttackScope(()=>withMasterDuelistNativeAttackScope(run))}

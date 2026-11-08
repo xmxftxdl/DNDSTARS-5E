@@ -1,3 +1,4 @@
+import{captureDnd5eCompletedLongCastingWitness,restoreDnd5eCompletedLongCastingWitness,captureDnd5eCompletedExplorationCastingWitness,restoreDnd5eCompletedExplorationCastingWitness,type Dnd5eCompletedLongCastingWitness,type Dnd5eCompletedExplorationCastingWitness}from'./longCastingContinuity'
 import type { Character } from '../../types/character'
 import type { SharedCampaignTimeState } from '../../lib/campaignTime'
 import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
@@ -72,4 +73,38 @@ export function openDnd5eRestCastingWindow(input: {
     (input.requiredSeconds !== undefined && !dnd5eLongCastingHasDuration(stored.castingReceipt,binding.casting,input.requiredSeconds)) ||
     !dnd5eLongCastingCanComplete(stored.castingReceipt, binding.casting, state)) return undefined
   return window
+}
+
+export interface Dnd5eCompletedRestCastingWitness{
+ schemaVersion:1;binding:Dnd5eRestCastingBinding;characterId:string;completedWorldMinute:number;requiredSeconds:number;
+ casting:{kind:'combat';witness:Dnd5eCompletedLongCastingWitness}|{kind:'exploration';witness:Dnd5eCompletedExplorationCastingWitness}
+}
+function completedRestBindingClosed(value:Dnd5eRestCastingBinding):boolean{
+ const allowed=['packageId','packageVersion','activityId','restEventId','casting'],castingKeys=['requestId','spellId','mapId','actorTokenId','actorCharacterId']
+ const text=(value:unknown)=>typeof value==='string'&&value.length>0&&value.length<=640&&value.trim()===value
+ return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).every(key=>allowed.includes(key))&&allowed.slice(0,4).every(key=>text((value as unknown as Record<string,unknown>)[key]))&&!!value.casting&&typeof value.casting==='object'&&!Array.isArray(value.casting)&&Object.keys(value.casting).every(key=>castingKeys.includes(key))&&castingKeys.every(key=>text((value.casting as unknown as Record<string,unknown>)[key]))
+}
+/** Only a genuine issued rest window whose actual cast has finished can be
+ * captured. A wire copy or an incomplete window cannot produce a witness. */
+export function captureDnd5eCompletedRestCastingWitness(input:Parameters<typeof openDnd5eRestCastingWindow>[0]&{requiredSeconds:number}):Dnd5eCompletedRestCastingWitness|undefined{
+ const stored=input.receipt&&issued.get(input.receipt),window=openDnd5eRestCastingWindow(input)
+ if(!stored||!window)return undefined
+ const binding=input.binding.casting,seconds=input.requiredSeconds
+ const combat=input.state.active?captureDnd5eCompletedLongCastingWitness(stored.castingReceipt,binding,input.state,seconds):undefined
+ const exploration=!input.state.active?captureDnd5eCompletedExplorationCastingWitness(stored.castingReceipt,binding,input.state,seconds):undefined
+ if(!combat&&!exploration)return undefined
+ return{schemaVersion:1,binding:structuredClone(input.binding),characterId:input.character.id,completedWorldMinute:stored.completedWorldMinute,requiredSeconds:seconds,casting:combat?{kind:'combat',witness:combat}:{kind:'exploration',witness:exploration!}}
+}
+/** Host-only restore of the completed stage retained inside the same private
+ * parent. Current rest ledger, original event, owner, binding, duration and
+ * campaign snapshot must still agree; this cannot reopen an already used rest. */
+export function restoreDnd5eCompletedRestCastingWitness(witness:Dnd5eCompletedRestCastingWitness,input:Omit<Parameters<typeof openDnd5eRestCastingWindow>[0],'receipt'>&{requiredSeconds:number}):Dnd5eRestCastingWindowReceipt|undefined{
+ if(!witness||Object.keys(witness).some(key=>!['schemaVersion','binding','characterId','completedWorldMinute','requiredSeconds','casting'].includes(key))||witness.schemaVersion!==1||!completedRestBindingClosed(witness.binding)||!completedRestBindingClosed(input.binding)||signature(witness.binding)!==signature(input.binding)||witness.characterId!==input.character.id||witness.characterId!==input.binding.casting.actorCharacterId||witness.requiredSeconds!==input.requiredSeconds)return undefined
+ const window=normalizeDnd5eRestActivityWindow(input.character.dnd5eRestActivityWindow,input.character.id),choice=witness.casting
+ if(!window||window.eventId!==input.binding.restEventId||window.completedWorldMinute!==witness.completedWorldMinute||window.receipts[dnd5eRestActivityReceiptKey(input.binding.packageId,input.binding.activityId)]||!input.clock.advances.some(advance=>advance.toWorldMinute===window.completedWorldMinute&&advance.kind+'-complete'===window.event&&(advance.beneficiaryCharacterIds==null||advance.beneficiaryCharacterIds.includes(input.character.id)))||!choice||Object.keys(choice).some(key=>!['kind','witness'].includes(key)))return undefined
+ const restored=choice.kind==='combat'?restoreDnd5eCompletedLongCastingWitness(choice.witness,input.binding.casting,input.state,input.requiredSeconds):choice.kind==='exploration'?restoreDnd5eCompletedExplorationCastingWitness(choice.witness,input.binding.casting,input.state,input.requiredSeconds):undefined
+ if(!restored)return undefined
+ const receipt=registerDnd5eHostReceipt(Object.freeze({}))as Dnd5eRestCastingWindowReceipt
+ issued.set(receipt,{binding:signature(input.binding),characterId:input.character.id,completedWorldMinute:window.completedWorldMinute,castingReceipt:restored})
+ return openDnd5eRestCastingWindow({...input,receipt})?receipt:undefined
 }

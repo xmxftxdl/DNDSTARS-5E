@@ -148,7 +148,7 @@ test('账号控制台、房间入口和战役工作台使用独立路由外壳',
     'href',
     `/campaign/${campaign.campaignId}/characters`,
   )
-  await expect(page.getByRole('link', { name: '设置' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: '设置', exact: true })).toHaveAttribute(
     'href',
     `/campaign/${campaign.campaignId}/settings`,
   )

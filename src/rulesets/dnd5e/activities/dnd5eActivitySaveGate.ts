@@ -1,10 +1,19 @@
+import{activityAttackOriginalMissingActive}from'./activityAttackOriginalMissing'
+import{activitySavingOriginalPlanningActive,probeActivitySavingOriginalPool,settleActivitySavingOriginalDice}from'./activitySavingOriginalDice'
 import { previewDnd5eActivityAttackV1, previewDnd5eActivitySavingThrowV1, previewDnd5eActivityUpwardClearanceV1, type Dnd5eActivityExecutionInput } from './dnd5eActivityExecutor'
 import type { Dnd5eActivityOutcomeWhenV1 } from './dnd5eActivityContracts'
 import type { Dnd5ePluginDiceRollDeclaration } from '../plugins/pluginHeadlessContracts'
 import { Dnd5eFormulaEvaluationError } from './dnd5eFormula'
 
 function previewSave(...args: Parameters<typeof previewDnd5eActivitySavingThrowV1>) {
-  try { return previewDnd5eActivitySavingThrowV1(...args) }
+  try {
+    if(activitySavingOriginalPlanningActive()){
+      const probe=probeActivitySavingOriginalPool(()=>previewDnd5eActivitySavingThrowV1(...args))
+      if(!probe.pool)return probe.value
+      settleActivitySavingOriginalDice(probe.pool)
+    }
+    return previewDnd5eActivitySavingThrowV1(...args)
+  }
   catch (error) {
     // Invalid submitted dice establish neither outcome; final authority rejects them.
     if (error instanceof Dnd5eFormulaEvaluationError) return undefined
@@ -111,8 +120,11 @@ export function dnd5eActivityAttackGateResultV1(
   const suffix = check.scope === 'per-target' ? `${check.perProjectile ? `:projectile:${projectileOccurrenceIndex}` : ''}:${targetId}` : ''
   const rollId = `${check.rollId}${suffix}`
   const key = `${check.id}${suffix}`
-  if (!input.rolls[rollId]) return undefined
   const mode = declarations.find(declaration => declaration.id === rollId)?.d20RollMode ?? input.checkRollModes?.[key]
+  if (!input.rolls[rollId]) {
+    if(activityAttackOriginalMissingActive()&&activitySavingOriginalPlanningActive())previewDnd5eActivityAttackV1({...input,checkRollModes:mode==null?input.checkRollModes:{...input.checkRollModes,[key]:mode}},rollId,mode)
+    return undefined
+  }
   try {
     return previewDnd5eActivityAttackV1({ ...input,
       checkRollModes: mode == null ? input.checkRollModes : { ...input.checkRollModes, [key]: mode },
@@ -145,7 +157,7 @@ export function dnd5eActivitySaveGateResultV1(
     for (const [previousIndex, previousId] of orderedIds.slice(0, index).entries()) {
       const previousRollId = `${check.rollId}${suffixFor(previousId, previousIndex)}`
       const previousKey = `${check.id}${suffixFor(previousId, previousIndex)}`
-      if (!input.rolls[previousRollId] && !input.weaponCounterattackSuccessCheckKeys?.has(previousKey)) return undefined
+      if (!input.rolls[previousRollId] && !input.weaponCounterattackSuccessCheckKeys?.has(previousKey) && !activitySavingOriginalPlanningActive()) return undefined
       const mode = declarations.find(declaration => declaration.id === previousRollId)?.d20RollMode ?? input.checkRollModes?.[previousKey]
       if (previewSave({ ...input,
         checkRollModes: mode == null ? input.checkRollModes : { ...input.checkRollModes, [previousKey]: mode },
@@ -156,7 +168,7 @@ export function dnd5eActivitySaveGateResultV1(
   if (check.appliesWhenCheck && dnd5eActivityAttackGateResultV1(input, declarations, check.appliesWhenCheck.checkId, targetId, projectileOccurrenceIndex) !== true) return undefined
   const rollId = `${check.rollId}${suffixFor(targetId, projectileOccurrenceIndex)}`
   const key = `${check.id}${suffixFor(targetId, projectileOccurrenceIndex)}`
-  if (!input.rolls[rollId] && !input.weaponCounterattackSuccessCheckKeys?.has(key)) return undefined
+  if (!input.rolls[rollId] && !input.weaponCounterattackSuccessCheckKeys?.has(key) && !activitySavingOriginalPlanningActive()) return undefined
   const mode = declarations.find(declaration => declaration.id === rollId)?.d20RollMode ?? input.checkRollModes?.[key]
   return previewSave({ ...input,
     checkRollModes: mode == null ? input.checkRollModes : { ...input.checkRollModes, [key]: mode },

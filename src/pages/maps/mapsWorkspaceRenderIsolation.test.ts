@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
 
-const workspaceSource = readFileSync(
+const workspaceControllerSource = readFileSync(
   new URL('../MapsWorkspacePage.tsx', import.meta.url),
   'utf8',
 ).replace(/\r\n/g, '\n')
@@ -22,11 +23,28 @@ const panelsLayerSource = readFileSync(
   'utf8',
 )
 
+const movementHazardsSource = readFileSync(new URL('./movementHazardsProducer.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const workspaceViewSource = readFileSync(new URL('../../presentation/maps/MapsWorkspaceView.tsx', import.meta.url), 'utf8')
+const sceneMapOverlaysSource = readFileSync(new URL('./useSceneMapOverlays.ts', import.meta.url), 'utf8')
+const workspaceSource = workspaceControllerSource + '\n' + workspaceViewSource
+const workspaceAst = ts.createSourceFile('MapsWorkspacePage.tsx', workspaceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const movementHazardsAst = ts.createSourceFile('movementHazardsProducer.ts', movementHazardsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+function sourceDeclaration(source: ts.SourceFile, name: string, initializer?: string) {
+  const declarations: ts.VariableDeclaration[] = []
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && (initializer === undefined || node.initializer?.getText(source) === initializer)) declarations.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  expect(declarations).toHaveLength(1)
+  return declarations[0]
+}
+
 describe('MapsWorkspacePage render isolation', () => {
   it('finishes Prismatic Spray animation before requesting Activity dice', () => {
     const branch = workspaceSource.slice(
-      workspaceSource.indexOf('let pluginCast = preparedPluginSpell.prepared'),
-      workspaceSource.indexOf('const settledPluginSpell = pluginSettlement.settled'),
+      sourceDeclaration(workspaceAst, 'pluginCast').getStart(workspaceAst),
+      sourceDeclaration(workspaceAst, 'settledPluginSpell').getStart(workspaceAst),
     )
     expect(branch).toContain("spellAnimationsEnabled && (pluginCast.spell.id === 'prismatic-spray'")
     expect(branch).toContain('areaAnchorCell: pluginCast.payload.areaTargetCell')
@@ -35,7 +53,8 @@ describe('MapsWorkspacePage render isolation', () => {
     const wait = branch.indexOf('schedule.completesAt - combatPresentationServerNow()', publish)
     const roll = branch.indexOf('await collectSpellActivityRolls')
     expect(roll).toBeGreaterThan(-1)
-    expect(branch).toContain('executeDnd5ePluginDiceRolls(refreshed, roller)')
+    expect(branch).toContain('executeDnd5ePluginDiceRolls(planned, roller)')
+    expect(branch).toContain('pluginSpellSavingCollector.planEffects(refreshed.rolls??[])')
     expect(publish).toBeGreaterThan(branch.indexOf('activity-target-missing'))
     expect(wait).toBeGreaterThan(publish)
     expect(wait).toBeLessThan(roll)
@@ -55,8 +74,9 @@ describe('MapsWorkspacePage render isolation', () => {
 
   it('subscribes to the active map while isolating all-map UI and artwork scans', () => {
     expect(workspaceSource).toContain('activeMap, addMap, updateMap')
-    expect(workspaceSource).toContain('<MapWorkspaceMapSelect')
-    expect(workspaceSource).toContain('<EnemyTokenPortraitSyncBoundary')
+    expect(workspaceViewSource).toContain('<MapWorkspaceMapSelect')
+    expect(workspaceViewSource).toContain('<EnemyTokenPortraitSyncBoundary')
+    expect(workspaceSource).toContain('renderMapsWorkspaceView(model)')
     expect(workspaceSource).not.toContain('maps, selectedId, select, addMap')
     expect(workspaceSource).not.toContain('useEnemyTokenPortraitSync({')
   })
@@ -67,13 +87,14 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(workspaceSource).toContain('const optimisticTokenMoveIds = useMemo(')
     expect(workspaceSource).toContain('const playerMovableTokenIds = useMemo(')
     expect(workspaceSource).toContain('const lockDragTokenIds = useMemo(')
-    expect(workspaceSource).toContain('const sceneTriggerZones = useMemo(')
-    expect(workspaceSource).toContain('const sceneInteractionPoints = useMemo(')
+    expect(workspaceSource).toContain('useSceneMapOverlays(')
+    expect(sceneMapOverlaysSource).toContain('const sceneTriggerZones = useMemo(')
+    expect(sceneMapOverlaysSource).toContain('const sceneInteractionPoints = useMemo(')
     expect(workspaceSource).toContain('const mapEditingCoordinator = useMemo(')
-    expect(workspaceSource).toContain('targetSelectTokenIds={targetSelectTokenIds}')
-    expect(workspaceSource).toContain('lockDragTokenIds={lockDragTokenIds}')
-    expect(workspaceSource).not.toContain('targetSelectTokenIds={[\n')
-    expect(workspaceSource).not.toContain('lockDragTokenIds={[\n')
+    expect(workspaceViewSource).toContain('targetSelectTokenIds={targetSelectTokenIds}')
+    expect(workspaceViewSource).toContain('lockDragTokenIds={lockDragTokenIds}')
+    expect(workspaceViewSource).not.toContain('targetSelectTokenIds={[\n')
+    expect(workspaceViewSource).not.toContain('lockDragTokenIds={[\n')
   })
 
   it('stabilizes interaction handlers before they reach the memoized Konva canvas', () => {
@@ -132,17 +153,16 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('settles attack-decoy targeting before the monster attack d20 and on-hit riders', () => {
-    const monsterAttackFlowStart = workspaceSource.indexOf(
-      'const monsterAttack = prepared.prepared',
-    )
+    const monsterAttackFlowStart = sourceDeclaration(workspaceAst, 'monsterAttack', 'prepared.prepared').getStart(workspaceAst)
     const attackDecoyPrecheck = workspaceSource.indexOf(
       'const initialAttackDecoyRequirement = tranquility.passed',
       monsterAttackFlowStart,
     )
     const attackD20Roll = workspaceSource.indexOf(
-      'let [d20, d20Second] = tranquility.passed',
+      'await rollDiceBoxD20Pair',
       attackDecoyPrecheck,
     )
+    const attackDecoyRoll = workspaceSource.indexOf('attackDecoyRedirectD20 = await rollDiceBoxD20(', attackDecoyPrecheck)
     const onHitRiderRolls = workspaceSource.indexOf(
       'const onHitEffectResolution = attackHit',
       attackDecoyPrecheck,
@@ -150,6 +170,11 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(monsterAttackFlowStart).toBeGreaterThan(-1)
     expect(attackDecoyPrecheck).toBeGreaterThan(monsterAttackFlowStart)
     expect(attackD20Roll).toBeGreaterThan(attackDecoyPrecheck)
+    expect(attackDecoyRoll).toBeGreaterThan(attackDecoyPrecheck)
+    expect(attackDecoyRoll).toBeLessThan(attackD20Roll)
+    const hitGate = workspaceSource.indexOf('let attackHit = !attackRedirectedToDecoy && (', attackDecoyPrecheck)
+    expect(hitGate).toBeGreaterThan(attackD20Roll)
+    expect(hitGate).toBeLessThan(onHitRiderRolls)
     expect(onHitRiderRolls).toBeGreaterThan(attackDecoyPrecheck)
     expect(workspaceSource).toContain("'镜影术·分身目标判定'")
     expect(workspaceSource).toContain(
@@ -162,19 +187,28 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('uses the acting character palette for creature-form attack banners', () => {
-    const creatureFormBranchStart = workspaceSource.indexOf(
-      'if (wildShapeActionIndex != null) {',
-    )
-    const normalWeaponBranchStart = workspaceSource.indexOf(
-      'const attack = prepared.prepared',
-      creatureFormBranchStart,
-    )
-    const creatureFormBranch = workspaceSource.slice(
-      creatureFormBranchStart,
-      normalWeaponBranchStart,
-    )
-    expect(creatureFormBranchStart).toBeGreaterThan(-1)
-    expect(normalWeaponBranchStart).toBeGreaterThan(creatureFormBranchStart)
+    const branches: ts.IfStatement[] = []
+    function visit(node: ts.Node) {
+      if (ts.isIfStatement(node) && node.expression.getText(workspaceAst) === 'wildShapeActionIndex != null') branches.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(workspaceAst)
+    expect(branches).toHaveLength(1)
+    const creatureFormBranch = branches[0].thenStatement.getText(workspaceAst)
+    const presentations: ts.CallExpression[] = []
+    function findPresentation(node: ts.Node) {
+      if (ts.isCallExpression(node) && node.expression.getText(workspaceAst) === 'publishSingleTargetAttackPresentation') presentations.push(node)
+      ts.forEachChild(node, findPresentation)
+    }
+    findPresentation(branches[0].thenStatement)
+    expect(presentations).toHaveLength(1)
+    const payload = presentations[0].arguments[0]
+    expect(ts.isObjectLiteralExpression(payload)).toBe(true)
+    if (!ts.isObjectLiteralExpression(payload)) throw Error('Actual creature-form presentation payload required')
+    const actingCharacter = payload.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(workspaceAst) === 'character')
+    expect(actingCharacter && ts.isPropertyAssignment(actingCharacter) && actingCharacter.initializer.getText(workspaceAst)).toBe('wildShapeActorCharacter')
+    expect(sourceDeclaration(workspaceAst, 'wildShapeActorCharacter').getText(workspaceAst)).toContain('wildShapeRollPreview.actorToken.characterId')
+    expect(sourceDeclaration(workspaceAst, 'wildShapeActorCharacter').getText(workspaceAst)).toContain('wildShapeRollPreview.characters.find')
     expect(creatureFormBranch).toContain('character: wildShapeActorCharacter,')
     expect(creatureFormBranch).not.toContain("classId: 'druid'")
   })
@@ -318,12 +352,13 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(workspaceSource).toContain('const activityCreatedSpellAreaIds: string[] = []')
     expect(workspaceSource).toContain('for (const createdAreaId of activityCreatedSpellAreaIds.filter((areaId) =>')
     expect(workspaceSource).toContain('settledPluginSpellEvents.push(...createdSettled.events)')
-    expect(workspaceSource).toContain('const triggerInitiativeOrder = dnd5eSpellResolutionInitiativeOrder({')
+    const producerSettlement = sourceDeclaration(movementHazardsAst, 'settleDnd5ePersistentAreaCandidates').getText(movementHazardsAst)
+    expect(producerSettlement).toContain('const triggerInitiativeOrder = dnd5eSpellResolutionInitiativeOrder({')
     expect(workspaceSource).toContain('combatActive: combatActiveRef.current,')
-    expect(workspaceSource).toContain('initiativeOrder: triggerInitiativeOrder,')
+    expect(producerSettlement).toContain('initiativeOrder: triggerInitiativeOrder,')
     expect(workspaceSource).toContain('sourceSaveDc: pluginCast.saveDc,')
     expect(workspaceSource).not.toContain('sourceSaveDc: pluginCast.actor.saveDC,')
-    expect(workspaceSource).toContain('map = reconcileDnd5ePluginAreasOnMap(\n        settled.application.map,\n        characters,\n        input.round,')
+    expect(producerSettlement).toContain('map = reconcileDnd5ePluginAreasOnMap(\n        settled.application.map,\n        characters,\n        input.round,')
     expect(workspaceSource).toContain('const reconciled = reconcileDnd5ePluginAreasAndConcentrationOnMap(\n            detonated.map,\n            detonated.characters,')
     expect(workspaceSource).toContain('const detonationMapBefore = pluginApplication.map')
     expect(workspaceSource).toContain('const before = detonationMapBefore.tokens.find((candidate) => candidate.id === token.id)')
@@ -337,6 +372,27 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(workspaceSource).toContain('replacementConcentrationId: pluginCast.spell.id,')
     expect(workspaceSource).toContain('settledPluginSpellEvents.push(...detonated.events)')
     expect(workspaceSource).toContain('因施法者开始新的专注而自动爆炸并移除。')
+    expect(workspaceSource).toContain("import {createDnd5eMovementHazardsProducer} from './maps/movementHazardsProducer'")
+    const factory = sourceDeclaration(workspaceAst, 'movementHazardsProducer').getText(workspaceAst)
+    expect(factory).toContain('createDnd5eMovementHazardsProducer({')
+    expect(factory).toContain('get combatActiveRef(){return combatActiveRef}')
+    expect(factory).toContain('get initiativeOrderRef(){return initiativeOrderRef}')
+    expect(factory).toContain('get collectDnd5ePersistentAreaRolls(){return collectDnd5ePersistentAreaRolls}')
+    expect(sourceDeclaration(workspaceAst, 'settleDnd5ePersistentAreaCandidates').getText(workspaceAst)).toContain('movementHazardsProducer.settleDnd5ePersistentAreaCandidates(...args)')
+    expect(producerSettlement).toContain('combatActive: combatActiveRef.current,')
+    const createLoop = workspaceSource.indexOf('for (const createdAreaId of activityCreatedSpellAreaIds.filter((areaId) =>')
+    const collectCreated = workspaceSource.indexOf('const createdCandidates = collectDnd5ePersistentAreaTriggers({', createLoop)
+    const awaitCreated = workspaceSource.indexOf('const createdSettled = await settleDnd5ePersistentAreaCandidates({', collectCreated)
+    const mergeEvents = workspaceSource.indexOf('settledPluginSpellEvents.push(...createdSettled.events)', awaitCreated)
+    const mergeApplication = workspaceSource.indexOf('map: createdSettled.map,', mergeEvents)
+    const commitApplication = workspaceSource.indexOf('applySpellWithSurfaceDrops(pluginSpellApplication)', mergeApplication)
+    expect(createLoop).toBeGreaterThan(-1)
+    expect(collectCreated).toBeGreaterThan(createLoop)
+    expect(workspaceSource.slice(collectCreated, awaitCreated)).toContain("timing: 'on-create'")
+    expect(awaitCreated).toBeGreaterThan(collectCreated)
+    expect(mergeEvents).toBeGreaterThan(awaitCreated)
+    expect(mergeApplication).toBeGreaterThan(mergeEvents)
+    expect(commitApplication).toBeGreaterThan(mergeApplication)
   })
 
   it('collects a host-verifiable inventory selection for spells that establish a linked object', () => {
@@ -375,19 +431,26 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('collects every save in a simultaneous persistent-area wave before rolling shared damage', () => {
-    const collectWaveIndex = workspaceSource.indexOf('const primedSavingThrows = await collectDnd5ePersistentAreaSavingThrowWaveResults')
-    const perTargetIndex = workspaceSource.indexOf('for (const candidate of input.candidates)', collectWaveIndex)
-    const collectRollsIndex = workspaceSource.indexOf('await collectDnd5ePersistentAreaRolls({', perTargetIndex)
-    const collectorStart = workspaceSource.indexOf('const collectDnd5ePersistentAreaRolls =')
-    const collector = workspaceSource.slice(collectorStart, workspaceSource.indexOf('const settleDnd5ePersistentAreaCandidates =', collectorStart))
+    const producerSettlement = sourceDeclaration(movementHazardsAst, 'settleDnd5ePersistentAreaCandidates').getText(movementHazardsAst)
+    const collectWaveIndex = producerSettlement.indexOf('const primedSavingThrows = await collectDnd5ePersistentAreaSavingThrowWaveResults')
+    const perTargetIndex = producerSettlement.indexOf('for (const candidate of input.candidates)', collectWaveIndex)
+    const collectRollsIndex = producerSettlement.indexOf('await collectDnd5ePersistentAreaRolls({', perTargetIndex)
+    const collectorDeclaration = sourceDeclaration(workspaceAst, 'collectDnd5ePersistentAreaRolls')
+    const collectorStart = collectorDeclaration.getStart(workspaceAst)
+    const collector = collectorDeclaration.getText(workspaceAst)
     expect(collectWaveIndex).toBeGreaterThan(-1)
     expect(perTargetIndex).toBeGreaterThan(collectWaveIndex)
     expect(collectRollsIndex).toBeGreaterThan(perTargetIndex)
     expect(collectorStart).toBeGreaterThan(-1)
+    expect(collector.indexOf('const interrupted =')).toBeGreaterThan(-1)
     expect(collector.indexOf('const damageRolls = candidate.trigger.damage')).toBeGreaterThan(collector.indexOf('const interrupted ='))
-    expect(workspaceSource).toContain('resolve: async (waveCandidate) =>')
-    expect(workspaceSource).toContain('primedSavingThrow: primedSavingThrows.get(candidate.transactionId)')
-    expect(workspaceSource).toContain('if (save && savingThrowPresentationId && !primedSavingThrow)')
+    expect(collector).toContain('const interrupted = willingFailure ? undefined : primedSavingThrow ?? (save && targetCombatant')
+    expect(collector).toContain('? await rollDnd5eMapSavingThrowInterrupts({')
+    expect(producerSettlement).toContain('resolve: async (waveCandidate) =>')
+    expect(producerSettlement).toContain('primedSavingThrow: primedSavingThrows.get(candidate.transactionId)')
+    expect(collector).toContain('if (save && savingThrowPresentationId && !primedSavingThrow)')
+    expect(sourceDeclaration(workspaceAst, 'movementHazardsProducer').getText(workspaceAst)).toContain('get collectDnd5ePersistentAreaRolls(){return collectDnd5ePersistentAreaRolls}')
+    expect(sourceDeclaration(workspaceAst, 'settleDnd5ePersistentAreaCandidates').getText(workspaceAst)).toContain('movementHazardsProducer.settleDnd5ePersistentAreaCandidates(...args)')
   })
 
   it('opens character details from the left character rail even while combat input is locked', () => {

@@ -1,0 +1,18 @@
+import{bountifulDamageZeroQualifiedWire}from'./bountiful-damage-zero-original.mjs'
+const data=value=>!!value&&typeof value==='object'&&!Array.isArray(value),text=value=>typeof value==='string'&&value.length>0&&value.length<=2000
+export function validSpellTargetOriginalRequirement(value){return data(value)&&Object.keys(value).length===7&&Object.keys(value).every(key=>['actorId','targetId','spellId','ability','dc','rollMode','requiredDiceCount'].includes(key))&&['actorId','targetId','spellId'].every(key=>text(value[key]))&&['str','dex','con','int','wis','cha'].includes(value.ability)&&Number.isSafeInteger(value.dc)&&value.dc>=0&&value.dc<=10000&&['normal','advantage','disadvantage'].includes(value.rollMode)&&value.requiredDiceCount===(value.rollMode==='normal'?1:2)}
+/** This reader inspects only the already stored canonical single-save graph.
+ * It never treats a descriptor, snapshot or a replay ledger as a capability. */
+export function spellTargetOriginalPreparationFacts(wire,requirement){try{
+ if(!validSpellTargetOriginalRequirement(requirement)||!data(wire)||wire.schemaVersion!==1||!Array.isArray(wire.nodes)||wire.nodes.length>100000)return null
+ const entries=ref=>{const n=wire.nodes[ref?.ref];if(n?.kind!=='object'||!Array.isArray(n.entries)||n.entries.some(row=>!Array.isArray(row)||row.length!==2||typeof row[0]!=='string'||['__proto__','prototype','constructor'].includes(row[0]))||new Set(n.entries.map(row=>row[0])).size!==n.entries.length)throw Error('object');return Object.fromEntries(n.entries)}
+ const plain=(value,seen=new Set(),depth=0)=>{if(depth>100)throw Error('depth');if(value===undefined||value===null||['string','number','boolean'].includes(typeof value))return value;if(data(value)&&value.undefined===true&&Object.keys(value).length===1)return undefined;if(!Number.isSafeInteger(value?.ref)||seen.has(value.ref))throw Error('ref');const next=new Set(seen);next.add(value.ref);const node=wire.nodes[value.ref];if(node?.kind==='array')return node.items.map(item=>plain(item,next,depth+1));if(node?.kind==='object')return Object.fromEntries(Object.entries(entries(value)).map(([key,item])=>[key,plain(item,next,depth+1)]));throw Error('data')}
+ const top=entries(wire.root),source=top.secondChanceHostOriginalVersion===1?entries(top.input):top,p=entries(source.prepared),spell=entries(p.spell),actor=plain(p.actorToken),target=plain(p.targetToken),save=plain(p.savingThrow),targets=plain(p.targetTokens)
+ if(Object.hasOwn(source,'hostDamageZeroSavingThrows')||plain(source.savingThrowD20)!==undefined||plain(source.savingThrowD20Second)!==undefined||plain(p.targetSavingThrows)!==undefined||plain(p.targetSpellAttacks)!==undefined||!Array.isArray(targets)||targets.length!==1||targets[0].id!==target.id||actor.id!==requirement.actorId||target.id!==requirement.targetId||plain(spell.id)!==requirement.spellId||plain(spell.effect)!=='saving-throw'||plain(spell.saveAbility)!==requirement.ability||!data(save)||save.dc!==requirement.dc||save.mode!==requirement.rollMode)return null
+ const qualified=bountifulDamageZeroQualifiedWire(wire);if(!qualified||qualified.records!==undefined)return null
+ return{base:qualified.base,replay:qualified.replay,action:plain(p.action),actorToken:actor,targetToken:target,savingThrow:save}
+ }catch{return null}}
+const canonical=value=>Array.isArray(value)?value.map(canonical):data(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value
+/** Simple closed replay DTOs are order-insensitive only for object properties.
+ * Array order, every request field, original die and replacement remain exact. */
+export const sameSpellTargetOriginalData=(left,right)=>JSON.stringify(canonical(left))===JSON.stringify(canonical(right))

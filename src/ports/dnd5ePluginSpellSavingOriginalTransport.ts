@@ -1,0 +1,9 @@
+import type{BountifulPluginSpellCompoundPrimaryBook}from'./dnd5ePluginSpellCompoundPrimaryTransport'
+import type{ActivitySavingOriginalMissing}from'../rulesets/dnd5e/activities/activitySavingOriginalMissing';
+export type BountifulPluginSpellSavingOriginalIdentity={parentId:string;mapId:string;combatId:string};
+export interface BountifulPluginSpellSavingEffectRequest{activityId:string;actorId:string;rollId:string;count:number;sides:number;modifier:number}
+export interface BountifulPluginSpellSavingEffectRow extends BountifulPluginSpellSavingEffectRequest{request:BountifulPluginSpellSavingEffectRequest;index:number;requestId:string;characterId:string;memberId:string;label:string;raw?:{memberId:string;values:number[]};confirmed?:{memberId:string;values:number[]}}
+export interface BountifulPluginSpellSavingBeforeAnchor{schemaVersion:1;identity:BountifulPluginSpellSavingOriginalIdentity&{timing:'before'};owner:Record<string,unknown>;inputs:Record<string,unknown>&{collectionId:string}}
+export interface BountifulPluginSpellSavingOriginalBook extends BountifulPluginSpellSavingOriginalIdentity{
+ compoundNoBDependencies?:{versions:Record<string,number>;documents:Record<string,unknown>}
+primaryAnchor?:{schemaVersion:1;book:BountifulPluginSpellCompoundPrimaryBook};beforeAnchor?:BountifulPluginSpellSavingBeforeAnchor;ok:true;schemaVersion:1;sourceKind:'plugin-spell-saving-original-v1';roomId:string;hostMemberId:string;source:ReturnType<typeof import('../lib/secondChanceParentWire').encodeSecondChanceParentWire>;effectTimestamp:number;effects?:BountifulPluginSpellSavingEffectRow[];effectsAnchor?:string;scope:{versions:Readonly<Record<'characters'|'maps'|'combat'|'map-geometry'|'campaign-time',number>>};rows:(ActivitySavingOriginalMissing&{request:ActivitySavingOriginalMissing;index:number;requestId:string;characterId:string;memberId:string;label:string;raw?:{memberId:string;values:number[]};confirmed?:{memberId:string;values:number[]}})[]}

@@ -1,0 +1,15 @@
+import{getRoomSession}from'../../lib/roomSession'
+import{encodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
+import{captureSecondChancePreparedHostFacts}from'../../pages/maps/secondChancePreparedHostFacts'
+import{readDnd5eSpellTargetOriginalOperation,type Dnd5eSpellTargetOriginalOperation}from'./spellTargetOriginalOperation'
+import type{MissingSpellTargetOriginal}from'./missingSpellTargetOriginal'
+import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
+export interface SpellTargetOriginalIdentity{parentId:string;mapId:string;combatId:string;effectId:string;targetId:string}
+export interface SpellTargetOriginalPreparationBook extends SpellTargetOriginalIdentity{ok:true;schemaVersion:1;sourceKind:'spell-target-original-preparation-v1';roomId:string;hostMemberId:string;source:ReturnType<typeof encodeSecondChanceParentWire>;requirement:MissingSpellTargetOriginal['requirement'];prefixSignature:string;effectTimestamp:number;memberId:string;characterId:string}
+export type SpellTargetOriginalPreparationLoader=(identity:SpellTargetOriginalIdentity)=>Promise<SpellTargetOriginalPreparationBook>
+const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b)
+/** Only an actual missing target operation can publish this sibling private
+ * preparation. Its parent remains the original queued Spell transaction. */
+export async function captureSpellTargetOriginalPreparation(operation:Dnd5eSpellTargetOriginalOperation,gateway:Pick<SharedRoomGatewayPort,'publishEvent'>,load:SpellTargetOriginalPreparationLoader){
+ const host=getRoomSession();if(host?.role!=='dm'||!host.roomId||!host.memberId)throw Error('spell-target-preparation:actual-host-required');const native=await readDnd5eSpellTargetOriginalOperation(operation),p=native.source.prepared,id:SpellTargetOriginalIdentity={parentId:p.action.id,mapId:p.map.id,combatId:p.state.combatId,effectId:native.caster.effectId,targetId:native.requirement.targetId},wire=encodeSecondChanceParentWire(captureSecondChancePreparedHostFacts(native.source)),payload={sourceKind:'spell-target-original-preparation-v1',phase:'prepare',...id,source:wire,requirement:native.requirement,prefixSignature:JSON.stringify(native.snapshot),effectTimestamp:native.effectTimestamp};await gateway.publishEvent('bountiful-native-raw-source-dm-to-host',payload);const current=getRoomSession(),book=await load(id),after=await readDnd5eSpellTargetOriginalOperation(operation);if(current?.role!=='dm'||current.roomId!==host.roomId||current.memberId!==host.memberId||!equal(after,native)||!book?.ok||book.sourceKind!==payload.sourceKind||book.schemaVersion!==1||book.roomId!==host.roomId||book.hostMemberId!==host.memberId||!Object.entries(id).every(([key,value])=>book[key as keyof SpellTargetOriginalIdentity]===value)||!equal(book.source,wire)||!equal(book.requirement,native.requirement)||book.prefixSignature!==JSON.stringify(native.snapshot)||book.effectTimestamp!==native.effectTimestamp)throw Error('spell-target-preparation:exact-native-private-source-required');return book
+}

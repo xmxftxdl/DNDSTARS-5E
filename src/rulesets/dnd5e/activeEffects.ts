@@ -1,3 +1,22 @@
+import type{Dnd5eClassId}from'./classes'
+type Dnd5eParentEffectClockContext={parentId:string;sourceKey:string;timestamp:number}
+let activeParentEffectClock:Dnd5eParentEffectClockContext|undefined
+/** A synchronous frame owned by one frozen Host parent. No wall clock setter
+ * escapes this closure; nested frames restore their exact previous parent. */
+export function createDnd5eParentEffectClock(context:Dnd5eParentEffectClockContext){
+ if(!context.parentId||!context.sourceKey||!Number.isSafeInteger(context.timestamp)||context.timestamp<=0)throw Error('parent-effect-clock-invalid')
+ const frame=Object.freeze({...context})
+ return Object.freeze({run<T>(resolve:()=>T):T{
+  if(resolve.constructor.name==='AsyncFunction')throw Error('parent-effect-clock-sync-only')
+  const previous=activeParentEffectClock;activeParentEffectClock=frame
+  try{const result=resolve();if(result&&typeof result==='object'&&'then'in result&&typeof result.then==='function')throw Error('parent-effect-clock-sync-only');return result}finally{activeParentEffectClock=previous}
+ }})
+}
+/** Read only the actual private synchronous parent frame; no clock setter or authority is returned. */
+export function readDnd5eActiveParentEffectClock(){return activeParentEffectClock?Object.freeze({...activeParentEffectClock}):undefined}
+const dnd5eNewActiveEffectTimestamp=()=>activeParentEffectClock?.timestamp??Date.now()
+
+import { normalizeDnd5eMinimumSkillCheckD20, normalizeDnd5eHalfSpeedSkillChecks, dnd5eContextualMinimumSkillCheckD20, dnd5eHalfSpeedSkillCheckAdvantage, type Dnd5eMinimumSkillCheckD20Rule, type Dnd5eHalfSpeedSkillCheckRule, type Dnd5eContextualSkillCheckContext } from './contextualSkillChecks'
 import { validDnd5eHeldWeaponBaseIds } from './heldMeleeWeaponRequirement'
 import { normalizeDnd5eAttackAttemptWard, normalizeDnd5eAttackAttemptWardReceipts, normalizeDnd5eSourceTurnSpellSaveDisadvantage, type Dnd5eAttackAttemptWard, type Dnd5eAttackAttemptWardReceipt, type Dnd5eSourceTurnSpellSaveDisadvantage } from './attackAttemptWard'
 import { isDnd5eSourceAuraRequirement, type Dnd5eSourceAuraRequirement } from './sourceAuraRequirement'
@@ -5,6 +24,7 @@ import { validDnd5eEffectEndSavingThrow, retainDnd5eEndedEffectSavingThrows, typ
 import { normalizeDnd5eLinkedTargetPresentation } from './linkedTargetPresentationSchema'
 import { normalizeDnd5eCapturedCreatureIdentity, type Dnd5eCapturedCreatureIdentity } from './capturedCreatureIdentity'
 import { normalizeDnd5eSolidMaterialTraversal, type Dnd5eSolidMaterialTraversal } from './solidMaterialTraversal'
+import { normalizeDnd5eObjectCreatureTraversal, type Dnd5eObjectCreatureTraversal } from './objectCreatureTraversal'
 import { normalizeDnd5eInitialSpaceBoundary, type Dnd5eInitialSpaceBoundary } from './initialSpaceBoundary'
 import { validMapSurfaceMaterials, type MapSurfaceMaterial } from '../../lib/mapSurfaceMaterials'
 import { normalizeDnd5eEffectGrantCharges, dnd5eEffectGrantChargeLight, type Dnd5eEffectGrantCharges } from './effectGrantCharges'
@@ -70,7 +90,10 @@ export interface Dnd5eActiveEffectOptionalBonusDie {
   consumeOnUse: boolean
 }
 
+function effectCastingClass(value:unknown):Dnd5eClassId|undefined{if(typeof value!=='string')return undefined;return ['barbarian','bard','cleric','druid','fighter','monk','paladin','ranger','rogue','sorcerer','warlock','wizard'].includes(value)||/^[a-z0-9][a-z0-9._-]{0,95}:[a-z0-9][a-z0-9._-]{0,95}$/.test(value)?value as Dnd5eClassId:undefined}
 export interface Dnd5eActiveEffectSource {
+  /** Original native cast parent. Distinct from Activity execution/grant authority; later sustained actions retain this value. */
+  spellCastParentId?: string
   /** Host-owned execution that created/refreshed an Activity grant. */
   executionId?: string
   kind: Dnd5eActiveEffectSourceKind
@@ -81,6 +104,8 @@ export interface Dnd5eActiveEffectSource {
   lastLongRestWorldMinute?: number | null
   actorName?: string
   rulesId?: string
+  /** Original native casting selection, retained without inferring the current caster class. */
+  castingClassId?:Dnd5eClassId
   /** The authoritative slot level used to create a spell effect. */
   spellLevel?: number
   /** The caster's save DC captured when a spell effect is created. */
@@ -118,6 +143,7 @@ export interface Dnd5eActiveEffectRepeatSave {
   requiresSourceNotVisible?: boolean
   /** 受到伤害后额外触发一次豁免；由 Headless 记录待结算项，客户端不能自行伪造。 */
   onDamage?: {
+    optional?: true
     mode: 'normal' | 'advantage'
     /** Restricts monster charm retries to harm caused by that monster or its allies. */
     sourceFilter?: 'any' | 'source-or-allies'
@@ -168,6 +194,7 @@ export interface Dnd5eActiveEffectEscapeCheck {
 
 export interface Dnd5eActiveEffectEscapeSavingThrow {
   ability: AbilityKey
+  alternativeAbility?: AbilityKey
   dc: number
   economy: 'action'
 }
@@ -289,6 +316,7 @@ export interface Dnd5eActiveEffectRelation {
 }
 
 export interface Dnd5eActiveEffectSavingThrowRoll {
+  spellDamageDieRerolls?:readonly import('./spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[]
   disadvantageNegation?: { rollId: string; transactionId: string }
   disadvantageNegationChoice?: { featureId: string; rollId: string; transactionId: string; contextId: string }
   effectId: string
@@ -307,6 +335,7 @@ export interface Dnd5eActiveEffectSavingThrowRoll {
 }
 
 export interface Dnd5eActiveEffectPeriodicDamageRoll {
+  spellDamageDieRerolls?: readonly import('./spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[]
   effectId: string
   targetId: string
   rolls: readonly number[]
@@ -437,6 +466,8 @@ export interface Dnd5eActiveEffectModifiers {
   swimSpeedEqualsWalking?: boolean
   /** Grants true sight to at least this range. */
   truesightRangeFeet?: number
+  /** Sight through solid mapped objects only; never line of effect or movement. */
+  throughSolidObjectsRangeFeet?: number
   sightRangeLimitFeet?: number
   /** Host-enforced immunity to being selected by spells from these schools. */
   spellTargetingImmunitySchools?: readonly import('./spellbook').Dnd5eSpellbookSchoolId[]
@@ -474,6 +505,7 @@ export interface Dnd5eActiveEffectModifiers {
     unrestrictedVerticalMovement: boolean
   }
   solidMaterialTraversal?: Dnd5eSolidMaterialTraversal
+  objectCreatureTraversal?: Dnd5eObjectCreatureTraversal
   trackingCapability?: { mundaneTracking: 'impossible'; leavesTracks: false }
   /** Environmental travel/survival permissions consumed by Host queries. */
   environmentalCapabilities?: {
@@ -515,6 +547,10 @@ export interface Dnd5eActiveEffectModifiers {
   abilityCheckDisadvantages?: readonly AbilityKey[]
   /** Minimum raw d20 result used by checks with the corresponding ability. */
   minimumAbilityCheckD20ByAbility?: Partial<Record<AbilityKey, number>>
+  minimumSkillCheckD20?: readonly Dnd5eMinimumSkillCheckD20Rule[]
+  skillCheckAdvantagesWithinHalfSpeed?: readonly Dnd5eHalfSpeedSkillCheckRule[]
+  /** Selected creature identity is bound by the Host when the effect is applied. */
+  sneakAttackTarget?: { targetId: string; bonusDice?: { minimumRogueLevel: number; count: number } }
   /** Grants advantage only on checks using one of the listed stable skill ids. */
   skillExpertise?: readonly string[]
   skillCheckAdvantages?: readonly string[]
@@ -522,6 +558,10 @@ export interface Dnd5eActiveEffectModifiers {
   skillCheckDisadvantages?: readonly string[]
   /** Location only, relative to the effect source; callers must verify the same plane. */
   locationKnownToSource?: boolean
+  /** Knowledge does not by itself remove unseen attack benefits. */
+  locationKnowledgeRetainsUnseenAttackBenefits?: true
+  /** Only spells cast by these actual combatant identities. */
+  spellSavingThrowDisadvantageFromActorIds?: string[]
   perceptionDisadvantageAgainstOthersThanSource?: boolean
   skillCheckBonusAuras?: readonly {
     skill: string
@@ -634,10 +674,12 @@ export interface Dnd5eActiveEffectModifiers {
   mandatoryOpportunityAttacks?: boolean
   randomVisibleCreatureTargets?: boolean
   /** Attacks against creatures other than this effect's source have disadvantage. */
+  opportunityAttacksOnlyAgainstSource?: true
   attackDisadvantageAgainstOthersThanSource?: boolean
   /** Applies only while the bearer is within this distance of the effect source. */
   attackDisadvantageAgainstOthersThanSourceRangeFeet?: number
   notifySourceOnBearerDamage?: true
+  notifySourceOnBearerDeath?: true
   /** The next attack by a creature other than this effect's source has advantage. */
   nextAttackAdvantageByOtherThanSource?: boolean
   resistanceToAllDamage?: boolean
@@ -712,6 +754,7 @@ export interface Dnd5eActiveEffectModifiers {
     weaponId: string
     bonus: 1 | 2 | 3
   }
+  boundWeaponAbility?: {weaponId:string;inventoryInstanceId:string;ability:AbilityKey}
   armorEnchantment?: { armorId: string; inventoryInstanceId?: string; armorClassBonus: number }
   /** Generic Activity enchantment bound to one authoritative held weapon. */
   weaponEnchantment?: {
@@ -719,6 +762,7 @@ export interface Dnd5eActiveEffectModifiers {
     weaponId: string
     inventoryInstanceId?: string
     attackAndDamageBonus: 0 | 1 | 2 | 3
+    attackBonusOnly?:true
     spellcastingFocusClassIds?: readonly string[]
     remainingAttacks?: number
     ammunitionContainer?: boolean
@@ -808,6 +852,7 @@ export interface Dnd5eActiveEffectInstance {
   areaLifetime?: { mapId: string; areaId: string; sourceActorId: string; generation?: number }
   /** Original occupied volume captured by the Host; never follows a moving token. */
   initialSpaceBoundary?: Dnd5eInitialSpaceBoundary
+  captureExecutionIdentity?: true
   capturedCreatureIdentity?: Dnd5eCapturedCreatureIdentity
   disguisedCreatureIdentity?: Dnd5eCapturedCreatureIdentity
   disguiseRecognizedByActorIds?: string[]
@@ -816,6 +861,8 @@ export interface Dnd5eActiveEffectInstance {
   explorationExpiresAtWorldSecond?: number
   appliedRound?: number
   appliedTurnKey?: string
+  /** Host-only first actual HP-zero turn, retained for later source-owned transfer. */
+  bearerZeroHitPointsTurnKey?: string
   duration: Dnd5eActiveEffectDuration
   /** A failed save wastes an attempted spell; it does not end this effect. */
   attackAttemptWard?: Dnd5eAttackAttemptWard
@@ -1017,7 +1064,7 @@ export function createDnd5eConditionEffect(input: {
     kind: 'condition',
     standardCondition: input.condition,
     source: { ...input.source },
-    appliedAt: input.appliedAt ?? Date.now(),
+    appliedAt: input.appliedAt ?? dnd5eNewActiveEffectTimestamp(),
     appliedRound: input.appliedRound,
     appliedTurnKey: input.appliedTurnKey,
     duration: input.duration ?? { type: 'permanent' },
@@ -1081,14 +1128,18 @@ export function createDnd5eConditionEffect(input: {
     modifiers: input.modifiers
       ? {
           ...input.modifiers,
+          boundWeaponAbility:input.modifiers.boundWeaponAbility?{...input.modifiers.boundWeaponAbility}:undefined,
           skillCheckBonuses: input.modifiers.skillCheckBonuses?.map(rule => ({ ...rule })),
           abilityCheckRules: normalizeDnd5eAbilityCheckRules(input.modifiers.abilityCheckRules),
+          minimumSkillCheckD20: normalizeDnd5eMinimumSkillCheckD20(input.modifiers.minimumSkillCheckD20),
+          skillCheckAdvantagesWithinHalfSpeed: normalizeDnd5eHalfSpeedSkillChecks(input.modifiers.skillCheckAdvantagesWithinHalfSpeed),
           abilityCheckAdvantages: input.modifiers.abilityCheckAdvantages
             ? [...new Set(input.modifiers.abilityCheckAdvantages)]
             : undefined,
           abilityCheckDisadvantages: input.modifiers.abilityCheckDisadvantages
             ? [...new Set(input.modifiers.abilityCheckDisadvantages)]
             : undefined,
+          sneakAttackTarget: input.modifiers.sneakAttackTarget ? structuredClone(input.modifiers.sneakAttackTarget) : undefined,
           minimumAbilityCheckD20ByAbility: input.modifiers.minimumAbilityCheckD20ByAbility
             ? { ...input.modifiers.minimumAbilityCheckD20ByAbility }
             : undefined,
@@ -1105,6 +1156,8 @@ export function createDnd5eConditionEffect(input: {
             ? [...new Set(input.modifiers.skillCheckDisadvantages)]
             : undefined,
           locationKnownToSource: input.modifiers.locationKnownToSource,
+          locationKnowledgeRetainsUnseenAttackBenefits: input.modifiers.locationKnowledgeRetainsUnseenAttackBenefits,
+          spellSavingThrowDisadvantageFromActorIds: input.modifiers.spellSavingThrowDisadvantageFromActorIds ? [...new Set(input.modifiers.spellSavingThrowDisadvantageFromActorIds)] : undefined,
           perceptionDisadvantageAgainstOthersThanSource:
             input.modifiers.perceptionDisadvantageAgainstOthersThanSource,
           skillCheckBonusAuras: input.modifiers.skillCheckBonusAuras?.map((aura) => ({ ...aura })),
@@ -1240,7 +1293,7 @@ export function createDnd5eMechanicalEffect(input: {
       : undefined,
     kind: input.kind ?? 'debuff',
     source: { ...input.source },
-    appliedAt: input.appliedAt ?? Date.now(),
+    appliedAt: input.appliedAt ?? dnd5eNewActiveEffectTimestamp(),
     appliedRound: input.appliedRound,
     appliedTurnKey: input.appliedTurnKey,
     duration: input.duration ?? { type: 'permanent' },
@@ -1306,14 +1359,18 @@ export function createDnd5eMechanicalEffect(input: {
     modifiers: input.modifiers
       ? {
           ...input.modifiers,
+          boundWeaponAbility:input.modifiers.boundWeaponAbility?{...input.modifiers.boundWeaponAbility}:undefined,
           skillCheckBonuses: input.modifiers.skillCheckBonuses?.map(rule => ({ ...rule })),
           abilityCheckRules: normalizeDnd5eAbilityCheckRules(input.modifiers.abilityCheckRules),
+          minimumSkillCheckD20: normalizeDnd5eMinimumSkillCheckD20(input.modifiers.minimumSkillCheckD20),
+          skillCheckAdvantagesWithinHalfSpeed: normalizeDnd5eHalfSpeedSkillChecks(input.modifiers.skillCheckAdvantagesWithinHalfSpeed),
           abilityCheckAdvantages: input.modifiers.abilityCheckAdvantages
             ? [...new Set(input.modifiers.abilityCheckAdvantages)]
             : undefined,
           abilityCheckDisadvantages: input.modifiers.abilityCheckDisadvantages
             ? [...new Set(input.modifiers.abilityCheckDisadvantages)]
             : undefined,
+          sneakAttackTarget: input.modifiers.sneakAttackTarget ? structuredClone(input.modifiers.sneakAttackTarget) : undefined,
           minimumAbilityCheckD20ByAbility: input.modifiers.minimumAbilityCheckD20ByAbility
             ? { ...input.modifiers.minimumAbilityCheckD20ByAbility }
             : undefined,
@@ -1330,6 +1387,8 @@ export function createDnd5eMechanicalEffect(input: {
             ? [...new Set(input.modifiers.skillCheckDisadvantages)]
             : undefined,
           locationKnownToSource: input.modifiers.locationKnownToSource,
+          locationKnowledgeRetainsUnseenAttackBenefits: input.modifiers.locationKnowledgeRetainsUnseenAttackBenefits,
+          spellSavingThrowDisadvantageFromActorIds: input.modifiers.spellSavingThrowDisadvantageFromActorIds ? [...new Set(input.modifiers.spellSavingThrowDisadvantageFromActorIds)] : undefined,
           perceptionDisadvantageAgainstOthersThanSource:
             input.modifiers.perceptionDisadvantageAgainstOthersThanSource,
           skillCheckBonusAuras: input.modifiers.skillCheckBonusAuras?.map((aura) => ({ ...aura })),
@@ -1396,6 +1455,17 @@ export function createDnd5eMechanicalEffect(input: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function validSneakAttackTarget(value: unknown): value is NonNullable<Dnd5eActiveEffectModifiers['sneakAttackTarget']> {
+  if (!isRecord(value) || typeof value.targetId !== 'string' || !value.targetId.trim() ||
+    Object.keys(value).some(key => !['targetId', 'bonusDice'].includes(key))) return false
+  const bonus = value.bonusDice
+  return bonus === undefined || (isRecord(bonus) &&
+    Object.keys(bonus).every(key => ['minimumRogueLevel', 'count'].includes(key)) &&
+    typeof bonus.minimumRogueLevel === 'number' && Number.isInteger(bonus.minimumRogueLevel) &&
+    bonus.minimumRogueLevel >= 1 && bonus.minimumRogueLevel <= 20 &&
+    typeof bonus.count === 'number' && Number.isInteger(bonus.count) && bonus.count >= 1 && bonus.count <= 100)
 }
 
 const ACTIVE_EFFECT_KINDS = new Set<Dnd5eActiveEffectKind>(['condition', 'mark', 'buff', 'debuff', 'custom'])
@@ -1565,7 +1635,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       (rawRepeatSave.onDamage == null || (
         isRecord(rawRepeatSave.onDamage) &&
         Object.keys(rawRepeatSave.onDamage).every((key) =>
-          ['mode', 'sourceFilter', 'advantageIfSourceOrAllies'].includes(key)) &&
+          ['mode', 'sourceFilter', 'advantageIfSourceOrAllies', 'optional'].includes(key)) &&
+        (rawRepeatSave.onDamage.optional == null || rawRepeatSave.onDamage.optional === true) &&
         (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage') &&
         (
           rawRepeatSave.onDamage.sourceFilter == null ||
@@ -1586,6 +1657,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
             ? { onDamage: {
                 mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage',
+                ...(rawRepeatSave.onDamage.optional === true ? { optional: true as const } : {}),
                 ...(rawRepeatSave.onDamage.sourceFilter === 'any' ||
                     rawRepeatSave.onDamage.sourceFilter === 'source-or-allies'
                   ? { sourceFilter: rawRepeatSave.onDamage.sourceFilter as 'any' | 'source-or-allies' }
@@ -1762,14 +1834,16 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
     const rawEscapeSavingThrow = candidate.escapeSavingThrow
     const escapeSavingThrow = isRecord(rawEscapeSavingThrow) &&
       Object.keys(rawEscapeSavingThrow).every((key) =>
-        ['ability', 'dc', 'economy'].includes(key)) &&
+        ['ability', 'alternativeAbility', 'dc', 'economy'].includes(key)) &&
       ABILITIES.has(rawEscapeSavingThrow.ability as AbilityKey) &&
+      (rawEscapeSavingThrow.alternativeAbility == null || ABILITIES.has(rawEscapeSavingThrow.alternativeAbility as AbilityKey)) &&
       Number.isInteger(rawEscapeSavingThrow.dc) &&
       Number(rawEscapeSavingThrow.dc) >= 1 &&
       Number(rawEscapeSavingThrow.dc) <= 100 &&
       rawEscapeSavingThrow.economy === 'action'
       ? {
           ability: rawEscapeSavingThrow.ability as AbilityKey,
+          ...(rawEscapeSavingThrow.alternativeAbility ? {alternativeAbility: rawEscapeSavingThrow.alternativeAbility as AbilityKey} : {}),
           dc: Number(rawEscapeSavingThrow.dc),
           economy: 'action' as const,
         }
@@ -2256,6 +2330,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           bonus: rawMagicWeapon.bonus as 1 | 2 | 3,
         }
       : undefined
+    const binding=isRecord(rawModifiers)?rawModifiers.boundWeaponAbility:undefined
+    const boundWeaponAbility=validBoundWeaponAbility(binding)?{...binding}:undefined
     const armorEnchantment = isRecord(rawModifiers) && validArmorEnchantment(rawModifiers.armorEnchantment)
       ? { ...rawModifiers.armorEnchantment } : undefined
     const rawWeaponEnchantment = isRecord(rawModifiers) ? rawModifiers.weaponEnchantment : undefined
@@ -2271,6 +2347,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       typeof rawWeaponEnchantment.attackAndDamageBonus === 'number' &&
       rawWeaponEnchantment.attackAndDamageBonus >= 0 &&
       rawWeaponEnchantment.attackAndDamageBonus <= 3 &&
+      (rawWeaponEnchantment.attackBonusOnly==null||rawWeaponEnchantment.attackBonusOnly===true) &&
       (rawWeaponEnchantment.spellcastingFocusClassIds == null || (validWeaponFocusClassIds(rawWeaponEnchantment.spellcastingFocusClassIds) && typeof rawWeaponEnchantment.inventoryInstanceId === 'string' && rawWeaponEnchantment.ammunitionContainer !== true)) &&
       (rawWeaponEnchantment.remainingAttacks == null || (typeof rawWeaponEnchantment.remainingAttacks === 'number' && Number.isInteger(rawWeaponEnchantment.remainingAttacks) && rawWeaponEnchantment.remainingAttacks >= 1 && rawWeaponEnchantment.remainingAttacks <= 1000)) &&
       (rawWeaponEnchantment.consumeOnDraw == null || (rawWeaponEnchantment.consumeOnDraw === true && rawWeaponEnchantment.ammunitionContainer === true && rawWeaponEnchantment.remainingAttacks != null)) &&
@@ -2288,6 +2365,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       ))
       ? {
           weaponId: rawWeaponEnchantment.weaponId.trim(),
+          attackBonusOnly:rawWeaponEnchantment.attackBonusOnly===true?true as const:undefined,
           sourceWielderOnly: rawWeaponEnchantment.sourceWielderOnly === true ? true as const : undefined,
           inventoryInstanceId: rawWeaponEnchantment.inventoryInstanceId as string | undefined,
           remainingAttacks: rawWeaponEnchantment.remainingAttacks as number | undefined,
@@ -2491,6 +2569,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             ? rawModifiers.swimSpeedEqualsWalking
             : undefined,
           sightRangeLimitFeet: typeof rawModifiers.sightRangeLimitFeet === 'number' && Number.isFinite(rawModifiers.sightRangeLimitFeet) && rawModifiers.sightRangeLimitFeet >= 1 && rawModifiers.sightRangeLimitFeet <= 10_000 ? rawModifiers.sightRangeLimitFeet : undefined,
+          throughSolidObjectsRangeFeet: typeof rawModifiers.throughSolidObjectsRangeFeet === 'number' && Number.isFinite(rawModifiers.throughSolidObjectsRangeFeet) && rawModifiers.throughSolidObjectsRangeFeet > 0 && rawModifiers.throughSolidObjectsRangeFeet <= 10_000 ? rawModifiers.throughSolidObjectsRangeFeet : undefined,
           truesightRangeFeet: typeof rawModifiers.truesightRangeFeet === 'number' &&
             Number.isFinite(rawModifiers.truesightRangeFeet) &&
             rawModifiers.truesightRangeFeet > 0 &&
@@ -2606,6 +2685,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
               }
             : undefined,
           solidMaterialTraversal: normalizeDnd5eSolidMaterialTraversal(rawModifiers.solidMaterialTraversal),
+          objectCreatureTraversal: normalizeDnd5eObjectCreatureTraversal(rawModifiers.objectCreatureTraversal),
           trackingCapability: isRecord(rawModifiers.trackingCapability) &&
             Object.keys(rawModifiers.trackingCapability).every((key) =>
               ['mundaneTracking', 'leavesTracks'].includes(key)) &&
@@ -2728,6 +2808,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             : undefined,
           skillCheckBonuses: validSkillCheckBonuses(rawModifiers.skillCheckBonuses) ? rawModifiers.skillCheckBonuses.map(rule => ({ ...rule })) : undefined,
           abilityCheckRules: normalizeDnd5eAbilityCheckRules(rawModifiers.abilityCheckRules),
+          minimumSkillCheckD20: normalizeDnd5eMinimumSkillCheckD20(rawModifiers.minimumSkillCheckD20),
+          skillCheckAdvantagesWithinHalfSpeed: normalizeDnd5eHalfSpeedSkillChecks(rawModifiers.skillCheckAdvantagesWithinHalfSpeed),
           abilityCheckAdvantages: Array.isArray(rawModifiers.abilityCheckAdvantages) &&
             rawModifiers.abilityCheckAdvantages.every((entry) => ABILITIES.has(entry as AbilityKey))
             ? [...new Set(rawModifiers.abilityCheckAdvantages)] as AbilityKey[]
@@ -2736,6 +2818,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             rawModifiers.abilityCheckDisadvantages.every((entry) => ABILITIES.has(entry as AbilityKey))
             ? [...new Set(rawModifiers.abilityCheckDisadvantages)] as AbilityKey[]
             : undefined,
+          sneakAttackTarget: validSneakAttackTarget(rawModifiers.sneakAttackTarget)
+            ? structuredClone(rawModifiers.sneakAttackTarget) : undefined,
           minimumAbilityCheckD20ByAbility: isRecord(rawModifiers.minimumAbilityCheckD20ByAbility) &&
             Object.entries(rawModifiers.minimumAbilityCheckD20ByAbility).every(([ability, value]) =>
               ABILITIES.has(ability as AbilityKey) &&
@@ -2758,6 +2842,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             ? [...new Set(rawModifiers.skillCheckDisadvantages)] as string[]
             : undefined,
           locationKnownToSource: typeof rawModifiers.locationKnownToSource === 'boolean' ? rawModifiers.locationKnownToSource : undefined,
+          locationKnowledgeRetainsUnseenAttackBenefits: rawModifiers.locationKnownToSource === true && rawModifiers.locationKnowledgeRetainsUnseenAttackBenefits === true ? true as const : undefined,
+          spellSavingThrowDisadvantageFromActorIds: Array.isArray(rawModifiers.spellSavingThrowDisadvantageFromActorIds) && rawModifiers.spellSavingThrowDisadvantageFromActorIds.length > 0 && rawModifiers.spellSavingThrowDisadvantageFromActorIds.every(entry=>typeof entry==='string' && entry.trim().length>0) ? [...new Set(rawModifiers.spellSavingThrowDisadvantageFromActorIds)] as string[] : undefined,
           perceptionDisadvantageAgainstOthersThanSource:
             typeof rawModifiers.perceptionDisadvantageAgainstOthersThanSource === 'boolean'
               ? rawModifiers.perceptionDisadvantageAgainstOthersThanSource
@@ -3078,6 +3164,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             ? rawModifiers.mandatoryOpportunityAttacks : undefined,
           perceiveVisibleCreaturesAsHostile: typeof rawModifiers.perceiveVisibleCreaturesAsHostile === 'boolean'
             ? rawModifiers.perceiveVisibleCreaturesAsHostile : undefined,
+          opportunityAttacksOnlyAgainstSource: rawModifiers.opportunityAttacksOnlyAgainstSource === true ? true as const : undefined,
           attackDisadvantageAgainstOthersThanSource:
             typeof rawModifiers.attackDisadvantageAgainstOthersThanSource === 'boolean'
               ? rawModifiers.attackDisadvantageAgainstOthersThanSource
@@ -3087,6 +3174,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
               ? rawModifiers.nextAttackAdvantageByOtherThanSource
               : undefined,
           notifySourceOnBearerDamage: rawModifiers.notifySourceOnBearerDamage === true ? true as const : undefined,
+          notifySourceOnBearerDeath: rawModifiers.notifySourceOnBearerDeath === true ? true as const : undefined,
           attackDisadvantageAgainstOthersThanSourceRangeFeet:
             typeof rawModifiers.attackDisadvantageAgainstOthersThanSourceRangeFeet === 'number' &&
             Number.isFinite(rawModifiers.attackDisadvantageAgainstOthersThanSourceRangeFeet) &&
@@ -3270,6 +3358,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           magicWeapon,
           armorEnchantment,
           weaponEnchantment,
+          boundWeaponAbility,
         }
       : undefined
     const dependsOnEffectId = typeof candidate.dependsOnEffectId === 'string' &&
@@ -3339,6 +3428,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       ...(candidate as unknown as Dnd5eActiveEffectInstance),
       explorationExpiresAtWorldSecond: Number.isSafeInteger(candidate.explorationExpiresAtWorldSecond) &&
         Number(candidate.explorationExpiresAtWorldSecond) >= 0 ? Number(candidate.explorationExpiresAtWorldSecond) : undefined,
+      bearerZeroHitPointsTurnKey: typeof candidate.bearerZeroHitPointsTurnKey === 'string' && candidate.bearerZeroHitPointsTurnKey.length > 0 && candidate.bearerZeroHitPointsTurnKey.length <= 2000 ? candidate.bearerZeroHitPointsTurnKey : undefined,
       id: candidate.id.trim(),
       definitionId: candidate.definitionId.trim(),
       label: candidate.label.trim(),
@@ -3349,6 +3439,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       grantedActivities: normalizedGrantedActivities,
       completionGrant,
       initialSpaceBoundary: normalizeDnd5eInitialSpaceBoundary(candidate.initialSpaceBoundary),
+      captureExecutionIdentity: candidate.captureExecutionIdentity === true ? true : undefined,
       capturedCreatureIdentity: normalizeDnd5eCapturedCreatureIdentity(candidate.capturedCreatureIdentity),
       disguisedCreatureIdentity: normalizeDnd5eCapturedCreatureIdentity(candidate.disguisedCreatureIdentity),
       disguiseRecognizedByActorIds: candidate.disguisedCreatureIdentity && Array.isArray(candidate.disguiseRecognizedByActorIds) && candidate.disguiseRecognizedByActorIds.length <= 1000 && candidate.disguiseRecognizedByActorIds.every(id => typeof id === "string" && id.trim().length > 0 && id.length <= 256) ? [...new Set(candidate.disguiseRecognizedByActorIds)] as string[] : undefined,
@@ -3376,6 +3467,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       standardCondition,
       source: {
         ...(candidate.source as unknown as Dnd5eActiveEffectSource),
+        castingClassId:candidate.source.kind==='spell'?effectCastingClass(candidate.source.castingClassId):undefined,
         ...(Number.isInteger(candidate.source.spellLevel) &&
           Number(candidate.source.spellLevel) >= 0 &&
           Number(candidate.source.spellLevel) <= 9
@@ -3450,6 +3542,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.swimSpeedEqualsWalking != null ||
         modifiers.sightRangeLimitFeet != null ||
         modifiers.truesightRangeFeet != null ||
+        modifiers.throughSolidObjectsRangeFeet != null ||
         modifiers.spellTargetingImmunitySchools != null ||
         modifiers.seeInvisible != null ||
         modifiers.suppressInvisibilityBenefits != null ||
@@ -3459,6 +3552,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.attackDecoys != null ||
         modifiers.planarPhase != null ||
         modifiers.solidMaterialTraversal != null ||
+        modifiers.objectCreatureTraversal != null ||
         modifiers.trackingCapability != null ||
         modifiers.environmentalCapabilities != null ||
         modifiers.emittedLight != null ||
@@ -3475,6 +3569,9 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.abilityCheckAdvantages != null ||
         modifiers.abilityCheckDisadvantages != null ||
         modifiers.minimumAbilityCheckD20ByAbility != null ||
+        modifiers.minimumSkillCheckD20 != null ||
+        modifiers.skillCheckAdvantagesWithinHalfSpeed != null ||
+        modifiers.sneakAttackTarget != null ||
         modifiers.skillExpertise != null ||
         modifiers.attackActionMinimum != null ||
         modifiers.ownTurnAttackActionBonus != null ||
@@ -3483,6 +3580,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.skillCheckAdvantages != null ||
         modifiers.skillCheckDisadvantages != null ||
         modifiers.locationKnownToSource != null ||
+        modifiers.locationKnowledgeRetainsUnseenAttackBenefits != null ||
+        modifiers.spellSavingThrowDisadvantageFromActorIds != null ||
         modifiers.perceptionDisadvantageAgainstOthersThanSource != null ||
         modifiers.skillCheckBonusAuras != null ||
         modifiers.savingThrowDisadvantages != null ||
@@ -3527,8 +3626,10 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.perceiveVisibleCreaturesAsHostile != null ||
         modifiers.randomVisibleCreatureTargets != null ||
         modifiers.mandatoryOpportunityAttacks != null ||
+        modifiers.opportunityAttacksOnlyAgainstSource != null ||
         modifiers.attackDisadvantageAgainstOthersThanSource != null ||
         modifiers.notifySourceOnBearerDamage != null ||
+        modifiers.notifySourceOnBearerDeath != null ||
         modifiers.nextAttackAdvantageByOtherThanSource != null ||
         modifiers.resistanceToAllDamage != null ||
         modifiers.nextSourceOrAllyAttackVulnerability != null ||
@@ -3554,7 +3655,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.attackProfiles != null ||
         modifiers.shillelagh != null ||
         modifiers.magicWeapon != null ||
-        modifiers.weaponEnchantment != null || modifiers.armorEnchantment != null
+        modifiers.weaponEnchantment != null || modifiers.armorEnchantment != null || modifiers.boundWeaponAbility != null
       )
         ? modifiers
         : undefined,
@@ -3694,6 +3795,7 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     )) {
       issues.push(`activeEffects[${index}].suspendedBy is invalid`)
     }
+    if(isRecord(raw.source)&&raw.source.castingClassId!=null&&effect.source.castingClassId==null)issues.push(`activeEffects[${index}].source.castingClassId 无效`)
     if (isRecord(raw.source) && raw.source.spellLevel != null && effect.source.spellLevel == null) {
       issues.push(`activeEffects[${index}].source.spellLevel 无效`)
     }
@@ -3704,6 +3806,7 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     if (raw.completionRequirement != null && !effect.completionRequirement) issues.push(`activeEffects[${index}].completionRequirement 无效`)
     if (raw.linkedLifetime != null && !effect.linkedLifetime) issues.push(`activeEffects[${index}].linkedLifetime 无效`)
     if (raw.areaLifetime != null && !effect.areaLifetime) issues.push(`activeEffects[${index}].areaLifetime 无效`)
+    if (raw.captureExecutionIdentity != null && raw.captureExecutionIdentity !== true) issues.push(`activeEffects[${index}].captureExecutionIdentity invalid`)
     if (raw.initialSpaceBoundary != null && !effect.initialSpaceBoundary) issues.push(`activeEffects[${index}].initialSpaceBoundary 无效`)
     if (raw.capturedCreatureIdentity != null && !effect.capturedCreatureIdentity) issues.push(`activeEffects[${index}].capturedCreatureIdentity 无效`)
     if (raw.disguiseRecognizedByActorIds != null && (!effect.disguisedCreatureIdentity || !effect.disguiseRecognizedByActorIds)) issues.push(`activeEffects[${index}].disguiseRecognizedByActorIds 无效`)
@@ -3815,6 +3918,7 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           issues.push(`activeEffects[${index}].modifiers.swimSpeedEqualsWalking 无效`)
         }
         if (raw.modifiers.sightRangeLimitFeet != null && (typeof raw.modifiers.sightRangeLimitFeet !== 'number' || !Number.isFinite(raw.modifiers.sightRangeLimitFeet) || raw.modifiers.sightRangeLimitFeet < 1 || raw.modifiers.sightRangeLimitFeet > 10_000)) issues.push(`activeEffects[${index}].modifiers.sightRangeLimitFeet 无效`)
+        if (raw.modifiers.throughSolidObjectsRangeFeet != null && (typeof raw.modifiers.throughSolidObjectsRangeFeet !== 'number' || !Number.isFinite(raw.modifiers.throughSolidObjectsRangeFeet) || raw.modifiers.throughSolidObjectsRangeFeet <= 0 || raw.modifiers.throughSolidObjectsRangeFeet > 10_000)) issues.push(`activeEffects[${index}].modifiers.throughSolidObjectsRangeFeet 无效`)
         if (raw.modifiers.truesightRangeFeet != null && (
           typeof raw.modifiers.truesightRangeFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.truesightRangeFeet) ||
@@ -3900,6 +4004,9 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           (raw.modifiers.planarPhase.plane === 'terrain' &&
             (raw.modifiers.planarPhase.ignoresMaterialCollision || raw.modifiers.planarPhase.unrestrictedVerticalMovement))
         )) issues.push(`activeEffects[${index}].modifiers.planarPhase 无效`)
+        if (raw.modifiers.objectCreatureTraversal != null && !normalizeDnd5eObjectCreatureTraversal(raw.modifiers.objectCreatureTraversal)) {
+          issues.push('activeEffects[' + index + '].modifiers.objectCreatureTraversal 无效')
+        }
         if (raw.modifiers.solidMaterialTraversal != null && !normalizeDnd5eSolidMaterialTraversal(raw.modifiers.solidMaterialTraversal)) {
           issues.push(`activeEffects[${index}].modifiers.solidMaterialTraversal 无效`)
         }
@@ -4004,6 +4111,15 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           !Array.isArray(raw.modifiers.abilityCheckDisadvantages) ||
           raw.modifiers.abilityCheckDisadvantages.some((entry) => !ABILITIES.has(entry as AbilityKey))
         )) issues.push(`activeEffects[${index}].modifiers.abilityCheckDisadvantages 无效`)
+        if (raw.modifiers.sneakAttackTarget != null && !validSneakAttackTarget(raw.modifiers.sneakAttackTarget)) {
+          issues.push(`activeEffects[${index}].modifiers.sneakAttackTarget invalid`)
+        }
+        if (raw.modifiers.minimumSkillCheckD20 != null && !normalizeDnd5eMinimumSkillCheckD20(raw.modifiers.minimumSkillCheckD20)) {
+          issues.push(`activeEffects[${index}].modifiers.minimumSkillCheckD20 无效`)
+        }
+        if (raw.modifiers.skillCheckAdvantagesWithinHalfSpeed != null && !normalizeDnd5eHalfSpeedSkillChecks(raw.modifiers.skillCheckAdvantagesWithinHalfSpeed)) {
+          issues.push(`activeEffects[${index}].modifiers.skillCheckAdvantagesWithinHalfSpeed 无效`)
+        }
         if (raw.modifiers.minimumAbilityCheckD20ByAbility != null && (
           !isRecord(raw.modifiers.minimumAbilityCheckD20ByAbility) ||
           Object.entries(raw.modifiers.minimumAbilityCheckD20ByAbility).some(([ability, value]) =>
@@ -4028,6 +4144,8 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           typeof raw.modifiers.perceptionDisadvantageAgainstOthersThanSource !== 'boolean'
         ) issues.push(`activeEffects[${index}].modifiers.perceptionDisadvantageAgainstOthersThanSource 无效`)
         if (raw.modifiers.locationKnownToSource != null && typeof raw.modifiers.locationKnownToSource !== 'boolean') issues.push('activeEffects locationKnownToSource invalid')
+        if (raw.modifiers.locationKnowledgeRetainsUnseenAttackBenefits != null && (raw.modifiers.locationKnowledgeRetainsUnseenAttackBenefits !== true || raw.modifiers.locationKnownToSource !== true)) issues.push('activeEffects locationKnowledgeRetainsUnseenAttackBenefits invalid')
+        if (raw.modifiers.spellSavingThrowDisadvantageFromActorIds != null && (!Array.isArray(raw.modifiers.spellSavingThrowDisadvantageFromActorIds) || raw.modifiers.spellSavingThrowDisadvantageFromActorIds.length === 0 || raw.modifiers.spellSavingThrowDisadvantageFromActorIds.some(entry=>typeof entry!=='string' || !entry.trim()))) issues.push('activeEffects spellSavingThrowDisadvantageFromActorIds invalid')
         if (raw.modifiers.skillCheckBonusAuras != null && (
           !Array.isArray(raw.modifiers.skillCheckBonusAuras) ||
           raw.modifiers.skillCheckBonusAuras.length === 0 ||
@@ -4307,8 +4425,14 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           raw.modifiers.attackDisadvantageAgainstOthersThanSource != null &&
           typeof raw.modifiers.attackDisadvantageAgainstOthersThanSource !== 'boolean'
         ) issues.push(`activeEffects[${index}].modifiers.attackDisadvantageAgainstOthersThanSource 无效`)
+        if (raw.modifiers.notifySourceOnBearerDeath != null && raw.modifiers.notifySourceOnBearerDeath !== true) {
+          issues.push(`activeEffects[${index}].modifiers.notifySourceOnBearerDeath 无效`)
+        }
         if (raw.modifiers.notifySourceOnBearerDamage != null && raw.modifiers.notifySourceOnBearerDamage !== true) {
           issues.push(`activeEffects[${index}].modifiers.notifySourceOnBearerDamage 无效`)
+        }
+        if (raw.modifiers.opportunityAttacksOnlyAgainstSource != null && raw.modifiers.opportunityAttacksOnlyAgainstSource !== true) {
+          issues.push(`activeEffects[${index}].modifiers.opportunityAttacksOnlyAgainstSource 无效`)
         }
         if (raw.modifiers.attackDisadvantageAgainstOthersThanSourceRangeFeet != null &&
           (raw.modifiers.attackDisadvantageAgainstOthersThanSource !== true ||
@@ -4497,8 +4621,10 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
             raw.modifiers.magicWeapon.bonus !== 2 &&
             raw.modifiers.magicWeapon.bonus !== 3)
         )) issues.push(`activeEffects[${index}].modifiers.magicWeapon 无效`)
+        if(raw.modifiers.boundWeaponAbility!=null&&!validBoundWeaponAbility(raw.modifiers.boundWeaponAbility))issues.push(`activeEffects[${index}].modifiers.boundWeaponAbility 无效`)
         if (raw.modifiers.armorEnchantment != null && !validArmorEnchantment(raw.modifiers.armorEnchantment)) issues.push(`activeEffects[${index}].modifiers.armorEnchantment 无效`)
         if (raw.modifiers.weaponEnchantment != null && (
+          (isRecord(raw.modifiers.weaponEnchantment)&&raw.modifiers.weaponEnchantment.attackBonusOnly!=null&&raw.modifiers.weaponEnchantment.attackBonusOnly!==true) ||
           !isRecord(raw.modifiers.weaponEnchantment) ||
           (raw.modifiers.weaponEnchantment.sourceWielderOnly != null && (raw.modifiers.weaponEnchantment.sourceWielderOnly !== true || raw.modifiers.weaponEnchantment.ammunitionContainer === true)) ||
           (raw.modifiers.weaponEnchantment.spellcastingFocusClassIds != null && (!validWeaponFocusClassIds(raw.modifiers.weaponEnchantment.spellcastingFocusClassIds) || !raw.modifiers.weaponEnchantment.inventoryInstanceId || raw.modifiers.weaponEnchantment.ammunitionContainer === true)) ||
@@ -5954,7 +6080,7 @@ export function dnd5eMagicallyEnchantedWeaponIds(effects: readonly Dnd5eActiveEf
 /** 返回指定武器当前获得的最高“魔化武器”加值。 */
 export function dnd5eActiveMagicWeaponBonus(
   effects: readonly Dnd5eActiveEffectInstance[] | undefined,
-  weaponId: string | undefined,
+  weaponId: string | undefined,  purpose:'attack'|'damage'='attack',
 ): 0 | 1 | 2 | 3 {
   if (!weaponId) return 0
   return effectiveDnd5eActiveEffects(effects).reduce<0 | 1 | 2 | 3>((highest, effect) => {
@@ -5962,7 +6088,7 @@ export function dnd5eActiveMagicWeaponBonus(
     const enchantment = effect.modifiers?.weaponEnchantment
     const candidate = Math.max(
       magicWeapon?.weaponId === weaponId ? magicWeapon.bonus : 0,
-      enchantment?.weaponId === weaponId ? enchantment.attackAndDamageBonus : 0,
+      enchantment?.weaponId === weaponId && !(purpose==='damage'&&enchantment.attackBonusOnly) ? enchantment.attackAndDamageBonus : 0,
     ) as 0 | 1 | 2 | 3
     return candidate > highest ? candidate : highest
   }, 0)
@@ -6406,3 +6532,29 @@ export function dnd5eActiveSolidMaterialTraversals(effects: readonly Dnd5eActive
 }
 
 
+
+/** Purpose is supplied by the trusted check request, never guessed from an Insight roll. */
+export function dnd5eActiveMinimumSkillCheckD20(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+  context: Dnd5eContextualSkillCheckContext,
+): number {
+  return dnd5eContextualMinimumSkillCheckD20(
+    effectiveDnd5eActiveEffects(effects).flatMap(effect => effect.modifiers?.minimumSkillCheckD20 ?? []), context,
+  )
+}
+
+export function dnd5eActiveHalfSpeedSkillCheckAdvantage(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+  context: Dnd5eContextualSkillCheckContext,
+): boolean {
+  return dnd5eHalfSpeedSkillCheckAdvantage(
+    effectiveDnd5eActiveEffects(effects).flatMap(effect => effect.modifiers?.skillCheckAdvantagesWithinHalfSpeed ?? []), context,
+  )
+}
+
+function validBoundWeaponAbility(value:unknown):value is {weaponId:string;inventoryInstanceId:string;ability:AbilityKey}{return isRecord(value)&&Object.keys(value).every(key=>['weaponId','inventoryInstanceId','ability'].includes(key))&&typeof value.weaponId==='string'&&value.weaponId.length>0&&value.weaponId.length<=200&&typeof value.inventoryInstanceId==='string'&&value.inventoryInstanceId.length>0&&value.inventoryInstanceId.length<=200&&['str','dex','con','int','wis','cha'].includes(String(value.ability))}
+
+/** Actual unsuspended effect instances; no caller-provided movement flag is accepted here. */
+export function dnd5eActiveObjectCreatureTraversal(effects: readonly Dnd5eActiveEffectInstance[] | undefined): boolean {
+  return effectiveDnd5eActiveEffects(effects).some(effect => effect.modifiers?.objectCreatureTraversal != null)
+}

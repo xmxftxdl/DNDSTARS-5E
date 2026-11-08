@@ -14,6 +14,8 @@ import type { Dnd5eAction, Dnd5eActionResult, Dnd5eHeadlessCombatState } from '.
 import { dnd5eTrackableDefinitionIdForActionV1 } from './activities/dnd5eActivityIdentity'
 
 export interface Dnd5eHeadlessTransactionOptions {
+  /** Host-only original-die facts. Never read from an action payload. */
+  originalD20Replay?:import('./allyNaturalOneCheckpoint').OriginalD20ReplayFacts
   transaction?: CombatTransaction
   transactionId?: string
   mapId?: string

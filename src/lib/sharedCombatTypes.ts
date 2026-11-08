@@ -109,6 +109,9 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'feature-extra-action-teleport'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
+  /** A purpose request only. The DM must confirm it before the Host grants any benefit. */
+  requestedPurpose?: 'detect-lies'
+
   /** Selection only; Host validates this owned sensor and the remote sound source. */
   remoteHearing?: { sensorId: string; soundSourceTokenId: string }
   toolId?: string
@@ -149,6 +152,8 @@ export type Dnd5eRacialActionPayload =
   | { feature: 'dragonborn-breath' }
 
 export interface Dnd5eItemUsePayload {
+  /** Ordered native item attacks; repeated targets are intentional. */
+  targetTokenIds?: string[]
   /** 名称、数量、骰值与效果由 DM 端当前角色快照重建。 */
   instanceId: string
   /** 多动作物品只提交动作 ID；实际动作定义与消耗由 DM 端模板重建。 */
@@ -177,6 +182,8 @@ export interface Dnd5eWeaponAttackOptions {
   declarativeIntentFeatureIds?: string[]
   /** 橡棍术生效时，本次主手近战攻击使用力量或施法关键属性。 */
   shillelaghAbility?: 'str' | 'spellcasting'
+  /** Choice only; Host rebuilds exact source, weapon instance and suppression. */
+  boundWeaponAbility?: 'normal' | 'bound'
   /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
   wildShapeActionIndex?: number
   /** 仅表示玩家请求；是否可用、法术位与伤害骰均由 DM/Headless 重算。 */
@@ -263,6 +270,8 @@ export interface Dnd5eAntipathySympathyConfigV1 {
 }
 
 export interface Dnd5eSpellCastPayload {
+  /** Choice only. The canonical Host spell facade validates and settles the flight with this same cast. */
+  tempestuousMovement?: {timing:'before'|'after';featureId:string;to:{x:number;y:number};elevationFeet?:number}
   /** Player choice only; Host must independently verify a matching spell-specific grant. */
   bonusActionCasting?: boolean
   /** Selected material face; coordinates and material are reconstructed by Host. */
@@ -714,6 +723,11 @@ export interface Dnd5ePersistentAreaMovePayload {
 }
 
 export interface SharedCombatState {
+  /** Full parent attack and snapshots are Host private; server projects bounded prompts. */
+  bountifulOriginalParents?:Record<string,import('../rulesets/dnd5e/bountifulLuckReceipt').BountifulOriginalDieReceipt>
+  bountifulLuckPrompts?:readonly import('../../shared/bountiful-luck-state.mjs').BountifulOriginalPrompt[]
+  secondChanceAttacks?:Record<string,import('./secondChanceHostState').PersistedSecondChanceAttack>
+  secondChancePrompts?:readonly import('./secondChanceHostState').SecondChancePrompt[]
   mapId: string
   combatId?: string
   active: boolean
@@ -742,7 +756,7 @@ export interface SharedCombatState {
 export type Dnd5eBasicActionPayload =
   | { kind: 'dash'; sourceSpellId?: 'expeditious-retreat' }
   | { kind: 'hide' }
-  | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
+  | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string; economy?:'bonusAction' }
   | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }
   | { kind: 'use-object'; interactionId: string }
   | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; activityBasicActionGrantId?: string; attackActionTeleport?: { targetCell: GridCell; elevationFeet?: number } }
@@ -762,6 +776,15 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'other-bonus-action'; description?: string; economyOnly?: true }
 
 export interface SharedPlayerActionState {
+  pactWeapon?: {kind:'start-binding';inventoryInstanceId:string;expectedPactRevision:number}|{kind:'start-release'|'complete'|'dismiss';expectedPactRevision:number}|{kind:'summon';expectedPactRevision:number;expectedCombatRevision?:number;templateId?:string}
+  bountifulLuck?:{parentId:string;occurrence:number;command:import('../rulesets/dnd5e/bountifulLuckReceipt').BountifulOriginalDieCommand|import('../rulesets/dnd5e/bountifulEquipmentD20Receipt').BountifulEquipmentD20Command}
+  secondChance?:
+    |{phase:'reaction';attackReceiptId:string;decision:'use'|'decline'}
+    |{phase:'select-die';attackReceiptId:string;dieIndex:number}
+    |{phase:'roll-result';attackReceiptId:string;rollRequestId:string;value:number}
+    |{phase:'critical-roll-result';attackReceiptId:string;supplementRequestId:string;values:number[]}
+    |{phase:'confirm-roll';attackReceiptId:string;rollRequestId:string;value:number}
+    |{phase:'confirm-critical-roll';attackReceiptId:string;supplementRequestId:string;values:number[]}
   id: string
   mapId: string
   combatId?: string
@@ -771,6 +794,9 @@ export interface SharedPlayerActionState {
   status: 'pending' | 'done'
   type:
     | 'end-turn'
+    | 'dnd5e-bountiful-luck'
+    | 'dnd5e-second-chance'
+    | 'dnd5e-pact-weapon'
     | 'dnd5e-death-save'
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
@@ -919,7 +945,7 @@ export interface SharedRollRequestEvent {
   delivery?: 'broadcast-result' | 'player-roll-request' | 'player-roll-start' | 'player-roll-result' | 'check-result' | 'combat-rolls-cancelled'
   checkOutcome?: { rollId?: string; values?: number[]; mode?: 'normal' | 'advantage' | 'disadvantage'; id: string; kind: 'attack' | 'save'; success: boolean; actorName: string; targetName?: string; provisional?: boolean }
   targetCharacterId?: string
-  rollKind?: 'attack' | 'ability-check' | 'saving-throw'
+  rollKind?: 'attack' | 'ability-check' | 'saving-throw' | 'damage' | 'other'
   savingThrowAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
   updatedAt: number
 }

@@ -189,6 +189,14 @@ export default function Dnd5eSpellAdvancementPicker({
         plan.spellOptions,
         plan.canReplaceKnownSpell,
       )}
+      {(plan.additionalKnownSpells??[]).map(slot=><section key={slot.sourceId} className="rounded-2xl border border-violet-300/15 p-4">
+        <label className="block text-sm text-violet-100">{slot.name}
+          <select aria-label={slot.name} disabled={!slot.canReplace} value={value.additionalKnownSpells?.[slot.sourceId]??slot.spellId} onChange={event=>onChange({...value,additionalKnownSpells:{...value.additionalKnownSpells,[slot.sourceId]:event.target.value}})} className="mt-2 block w-full rounded-xl bg-void-950 p-2">
+            {slot.options.map(spell=><option key={spell.id} value={spell.id}>{spell.name}</option>)}
+          </select>
+        </label>
+        <p className="mt-2 text-xs text-slate-500">{slot.canReplace?'不占普通已知数量；与普通已知法术合计，本次升级最多替换一个。':'此来源额外给予的法术，不占普通已知数量。'}</p>
+      </section>)}
       {plan.targetWizardSpellbookCount != null && renderChoices(
         'wizardSpellbook',
         '法师法术书',

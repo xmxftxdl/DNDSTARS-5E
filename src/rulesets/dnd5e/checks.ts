@@ -1,6 +1,9 @@
+import { dnd5ePassiveSkillCheckEffects } from './passiveSkillCheckEffects'
+import type { Dnd5eContextualSkillCheckContext } from './contextualSkillChecks'
 import { dnd5eImportedSkillAbilityBonus } from './skillAbilityBonuses'
 import {dnd5eActiveSkillCheckBonus, effectiveDnd5eActiveEffects} from './activeEffects'
 import { dnd5eImportedInitiativeBonus } from './initiativeModifiers'
+import {dnd5ePluginBooleanStaticModifierForCharacter} from './plugins/pluginContentCatalog'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { D20RollMode, D20RollResult } from '../contracts'
 import type { Character } from '../../types/character'
@@ -10,6 +13,9 @@ import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import {
   dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveMinimumAbilityCheckD20,
+  dnd5eActiveMinimumSkillCheckD20,
+  dnd5eActiveHalfSpeedSkillCheckAdvantage,
   dnd5eActiveAbilityCheckDisadvantages,
   dnd5eActivePerceptionDisadvantageApplies,
   dnd5eActiveSkillCheckAdvantages,
@@ -81,7 +87,7 @@ export function dnd5eAbilityCheckMode(
     conditions?: readonly string[]
     dnd5eCombatState?: { activeEffects?: readonly Dnd5eActiveEffectInstance[] }
   },
-  context: {
+  context: Dnd5eContextualSkillCheckContext & {
     initiative?: boolean
     ability?: AbilityKey
     skill?: string
@@ -90,13 +96,15 @@ export function dnd5eAbilityCheckMode(
     requestedMode?: D20RollMode
   } = {},
 ): D20RollMode {
-  const effects = character.dnd5eCombatState?.activeEffects
+  const effects = dnd5ePassiveSkillCheckEffects(character as Character, character.dnd5eCombatState?.activeEffects)
   const strengthEffect = context.ability === 'str'
     ? dnd5eActiveStrengthRollFlags(effects)
     : { advantage: false, disadvantage: false }
-  const advantage = (context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7) ||
+  const advantage = (context.initiative === true && (dnd5eCharacterClassLevel(character, 'barbarian') >= 7 ||
+    dnd5ePluginBooleanStaticModifierForCharacter(character as Character,'initiativeAdvantage'))) ||
     (context.ability != null && dnd5eActiveAbilityCheckAdvantages(effects, context).includes(context.ability)) ||
     (context.skill != null && dnd5eActiveSkillCheckAdvantages(effects).includes(context.skill)) ||
+    dnd5eActiveHalfSpeedSkillCheckAdvantage(effects, context) ||
     strengthEffect.advantage
   const disadvantage = (character.exhaustionLevel ?? 0) >= 1 ||
     dnd5eConditionAbilityCheckDisadvantage(character) ||
@@ -144,11 +152,19 @@ export function resolveDnd5eAbilityCheck(input: {
   proficiencyRank?: Dnd5eCheckProficiencyRank
   initiative?: boolean
   additionalModifier?: number
+  /** Host-established check scope and current-turn movement accounting. */
+  context?: Omit<Dnd5eContextualSkillCheckContext, 'ability'>
 }): Dnd5eAbilityCheckResult {
   const proficiencyRank = input.proficiencyRank ?? 0
-  const mode = dnd5eAbilityCheckMode(input.character, { initiative: input.initiative, ability: input.ability })
+  const mode = dnd5eAbilityCheckMode(input.character, { ...input.context, initiative: input.initiative, ability: input.ability })
   const reliableTalent = reliableTalentApplies(input.character, proficiencyRank)
-  const rolls = reliableTalent ? input.rolls.map((roll) => Math.max(10, roll)) : input.rolls
+  const checkEffects = dnd5ePassiveSkillCheckEffects(input.character as Character, input.character.dnd5eCombatState?.activeEffects)
+  const minimum = Math.max(
+    reliableTalent ? 10 : 1,
+    dnd5eActiveMinimumAbilityCheckD20(checkEffects, input.ability),
+    dnd5eActiveMinimumSkillCheckD20(checkEffects, { ...input.context, ability: input.ability }),
+  )
+  const rolls = input.rolls.map(roll => Math.max(minimum, roll))
   const resolvedRoll = rules.resolveD20({
     rolls,
     mode,

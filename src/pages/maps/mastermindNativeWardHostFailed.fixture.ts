@@ -1,0 +1,4 @@
+import{expect}from'vitest'
+import{genuineHostWardWorld}from'./mastermindNativeWardHost.fixture'
+import{settleMastermindNativeMonsterWard}from'./mastermindMisdirectionNativeParent'
+export async function genuineFailed(){const f=await genuineHostWardWorld(),issued=await f.api.post('mastermind-native-ward-original/register',{parentId:f.prompt.id,wardEffectId:f.requirements[0].effect.id,mode:f.requirements[0].mode});expect(issued.status).toBe(200);const id=issued.payload.request.id;for(const[operation,values]of[['raw',[16]],['confirm',[1]]]as const)expect((await f.api.post('mastermind-native-ward-original/'+operation,{requestId:id,rollerTokenId:'caster-token',values})).status).toBe(200);expect((await f.api.post('mastermind-native-ward-original/complete',{requestId:id})).status).toBe(200);const ward=await settleMastermindNativeMonsterWard(f.decision);expect(ward.status).toBe('blocked');return{...f,id,ward}}

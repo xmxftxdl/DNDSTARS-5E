@@ -5654,6 +5654,33 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
   })
 
+  it('restricts Sneak Attack to eligible weapon attacks even when a spell supplies weapon-like context', () => {
+    const rogue = fighter('rogue', 20, { classId: 'rogue', level: 17 })
+    const state = startDnd5eHeadlessCombat('sneak-weapon-boundary', [rogue, fighter('enemy', 10)])
+    for (const { spellAttack, spellDeliveredByWeapon } of [
+      { spellAttack: false, spellDeliveredByWeapon: false },
+      { spellAttack: true, spellDeliveredByWeapon: false },
+      { spellAttack: true, spellDeliveredByWeapon: true },
+    ]) {
+      for (const mode of ['melee', 'ranged'] as const) {
+        for (const finesse of [false, true]) {
+          for (const effectiveMode of ['normal', 'advantage', 'disadvantage'] as const) {
+            const definitions = dnd5eWeaponClassDamageDefinitions({
+              state, actorId: 'rogue', targetId: 'enemy', effectiveMode, critical: false,
+              context: {
+                mode, finesse, spellAttack, spellDeliveredByWeapon, strengthBased: false,
+                weaponDamageSides: 8, damageType: 'piercing', adjacentEnemyOfTarget: true,
+              },
+            })
+            expect(definitions.some(definition => definition.source === 'sneak-attack'),
+              JSON.stringify({ spellAttack, spellDeliveredByWeapon, mode, finesse, effectiveMode }),
+            ).toBe((!spellAttack || spellDeliveredByWeapon) && (mode === 'ranged' || finesse) && effectiveMode !== 'disadvantage')
+          }
+        }
+      }
+    }
+  })
+
   it('uses turn-slot identity for once-per-turn features on a Thief Reflexes turn', () => {
     const rogue = fighter('rogue', 20, { classId: 'rogue', subclassId: 'thief', level: 17 })
     const state = startDnd5eHeadlessCombat('reflexes', [rogue, fighter('enemy', 10)])
@@ -7608,7 +7635,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(recovered.state.initiativeIndex).toBe(0)
   })
 
-  it('applies unconscious and prone at 0 HP, including player overkill', () => {
+  it('applies unconscious and prone at 0 HP and instant death for massive player damage', () => {
     const dropped = resolveDnd5eHeadlessAction(
       startDnd5eHeadlessCombat('drop-to-zero', [
         fighter('attacker', 20, { controller: 'dm' }),
@@ -7643,8 +7670,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(killed.ok).toBe(true)
     if (!killed.ok) return
-    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 0, dead: false })
-    expect(killed.events).not.toContainEqual(expect.objectContaining({
+    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
+    expect(killed.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'attacker', targetId: 'target',
     }))
   })
@@ -7697,12 +7724,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(heavyDamageAtZero.ok).toBe(true)
     if (!heavyDamageAtZero.ok) return
     expect(heavyDamageAtZero.state.combatants.target.deathSaves).toMatchObject({
-      failures: 1, dead: false,
+      failures: 3, dead: true,
     })
     expect(heavyDamageAtZero.events).toContainEqual(expect.objectContaining({
-      type: 'death-save-failure', targetId: 'target', failures: 1,
+      type: 'instant-death', targetId: 'target',
     }))
-    expect(heavyDamageAtZero.events.some((event) => event.type === 'instant-death')).toBe(false)
+    expect(heavyDamageAtZero.events.some((event) => event.type === 'instant-death')).toBe(true)
   })
 
   it('ends concentration immediately when an incapacitating condition is present', () => {

@@ -4,7 +4,7 @@ import type { Character } from '../../../types/character'
 import type { Dnd5eCombatant } from '../headlessCombatEngine'
 import type { Dnd5eActivityDefinitionV1, Dnd5eActivityTriggerContextV1 } from './dnd5eActivityContracts'
 import { dnd5eCharacterBuildSpellGrantsV1 } from '../buildChoices'
-import { dnd5eCharacterHasPluginFeature, registeredDnd5ePluginFeatures } from '../plugins/pluginContentCatalog'
+import { dnd5ePluginSubclassCurrentEnvelopeFullV1, dnd5eCharacterHasPluginFeature, registeredDnd5ePluginFeatures, registeredDnd5ePluginFeats } from '../plugins/pluginContentCatalog'
 
 /** Resolve the source tuple through registered metadata, not punctuation replacement. */
 export function dnd5eRegisteredSubclassActivityFeature(packageId: string, sourceId: string) {
@@ -85,10 +85,14 @@ export function dnd5eCombatantEntitledToActivityV1(input: {
   if (input.activity.requiresEffectGrant) return false
   const candidates = identityCandidates(input.packageId, source.id)
   const featureIds = input.combatant.pluginFeatureIds
+  if (source.kind === 'feat') {
+    const feats = registeredDnd5ePluginFeats().filter(feat => feat.ownerPluginId === input.packageId && candidates.has(feat.id))
+    if (feats.length === 1 && featureIds.includes(feats[0].featureId)) return true
+  }
   if (source.kind === 'subclass-ability') {
     const feature = dnd5eRegisteredSubclassActivityFeature(input.packageId, source.id)
     const classId = feature?.sourceClassId
-    if (!feature || !classId || !featureIds.includes(feature.id)) return false
+    if (!feature || !classId || !featureIds.includes(feature.id) || !dnd5ePluginSubclassCurrentEnvelopeFullV1(feature.sourceSubclassId!)) return false
     const actor = input.combatant
     const classLevel = actor.classLevels?.[classId] ?? (actor.classId === classId ? actor.level : 0)
     const subclassId = actor.subclassIds?.[classId] ?? (actor.classId === classId ? actor.subclassId : undefined)
@@ -104,6 +108,7 @@ export function dnd5eCombatantEntitledToActivityV1(input: {
     source.kind === 'feature' || source.kind === 'feat' || source.kind === 'class' ||
     source.kind === 'subclass'
   ) {
+    if(source.kind==='subclass'&&![...candidates].some(id=>dnd5ePluginSubclassCurrentEnvelopeFullV1(id)))return false
     if (includesIdentity(featureIds, candidates)) return true
     if (source.kind === 'feat' && includesIdentity(input.character?.dnd5eFeatIds, candidates)) return true
     if (source.kind === 'class') {

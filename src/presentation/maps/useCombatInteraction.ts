@@ -35,6 +35,8 @@ export interface Dnd5ePluginAreaTargetingSession extends MapActivityTargetingAct
 }
 
 export interface Dnd5eItemCreatureTargetingSession {
+  attackTargetCount?: 3
+  selectedAttackTargetIds?: string[]
   characterId: string
   instanceId: string
   useActionId?: string

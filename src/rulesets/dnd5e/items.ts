@@ -1,3 +1,5 @@
+import { projectPactWeaponPhysicalTemplate, validPactWeaponPhysicalIdentity } from './pactWeaponPhysicalIdentity'
+import { pactWeaponHasPhysicalIdentity } from './pactWeaponIdentity'
 import {normalizeDnd5eMapObjectSurface,type Dnd5eMapObjectSurface} from './mapObjectSurface'
 import { normalizeDnd5eStructureObjectBinding, type Dnd5eStructureObjectBinding } from './structureObjectBinding'
 import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
@@ -525,7 +527,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
       (entry.surfaceProfile == null || !!normalizeDnd5eMapObjectSurface(entry.surfaceProfile)) &&
       (entry.structureBinding == null || !!normalizeDnd5eStructureObjectBinding(entry.structureBinding)))
     .map((entry) => {
-      const item = cloneItemTemplate(inventoryTemplateForStoredEntry(entry))
+      const item = projectPactWeaponPhysicalTemplate(entry, cloneItemTemplate(inventoryTemplateForStoredEntry(entry)))
       if (item.equipment?.dnd5e?.kind === 'weapon' && item.equipment.dnd5e.usesSourceSpellcastingAbility && Number.isInteger(entry.sourceSpellcastingModifier)) {
         item.equipment = {...item.equipment,dnd5e:{...item.equipment.dnd5e,sourceSpellcastingModifier:entry.sourceSpellcastingModifier}}
       }
@@ -1695,7 +1697,8 @@ function applyDnd5eInventoryMutationInternal(
     const target = withNormalizedInventory(characters[targetIndex])
     const boundLifetime = characters.some(owner => owner.dnd5eCombatState?.activeEffects?.some(effect =>
       effect.removal?.onInventoryInstanceDestroyed === entry.instanceId))
-    if (boundLifetime || entry.spellAlteration || entry.linkedSpellAuthorityRecordId || entry.linkedSpellFocusAuthorityRecordId || source.dnd5eCombatState?.activeEffects?.some(effect => !effect.modifiers?.weaponEnchantment?.ammunitionStack && (effect.modifiers?.weaponEnchantment?.inventoryInstanceId ?? effect.modifiers?.armorEnchantment?.inventoryInstanceId) === entry.instanceId)) {
+    const boundPactIdentity = !!validPactWeaponPhysicalIdentity(entry) || characters.some(owner => pactWeaponHasPhysicalIdentity(owner, entry.instanceId))
+    if (boundPactIdentity || boundLifetime || entry.spellAlteration || entry.linkedSpellAuthorityRecordId || entry.linkedSpellFocusAuthorityRecordId || source.dnd5eCombatState?.activeEffects?.some(effect => !effect.modifiers?.weaponEnchantment?.ammunitionStack && (effect.modifiers?.weaponEnchantment?.inventoryInstanceId ?? effect.modifiers?.armorEnchantment?.inventoryInstanceId) === entry.instanceId)) {
       // A spell link belongs to one physical object, never to a duplicated or
       // merged template stack. Preserve its stable instance and Host markers.
       if (quantity !== entry.quantity) return failed(characters, 'invalid-quantity')
@@ -2053,7 +2056,7 @@ function applyDnd5eInventoryMutationInternal(
       ...source.dnd5eCombatState, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: projection.activeEffects,
     } }
     nextTarget = nextSource
-  } else if (use.effect.kind === 'spell-cast') {
+  } else if (use.effect.kind === 'spell-cast' || use.effect.kind === 'tentacle-rod-2014') {
     // Item spells must use dnd5e-spell-cast so targeting, range, visibility,
     // saves, damage, concentration and resource spending remain one Host
     // transaction. Direct inventory-use requests fail closed.

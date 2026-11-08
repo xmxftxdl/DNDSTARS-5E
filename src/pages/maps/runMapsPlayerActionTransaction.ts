@@ -1,3 +1,11 @@
+import{ArcaneMovementMapsSettlementSignal,verifyArcaneMovementMapsSettlement}from'./arcaneMovementMapsSettlement'
+import {ArcaneNativeMapsSettlementSignal,verifyArcaneNativeMapsSettlement} from './arcaneNativeMapsSettlement'
+import {ArmorNativeMapsSettlementSignal,verifyArmorNativeMapsSettlement} from './armorNativeMapsSettlement'
+import {BountifulOriginalParentPending} from '../../rulesets/dnd5e/bountifulLuckPersistentRoomDriver'
+import {BountifulOriginalParentPublished,verifyBountifulMapsSettlement} from '../../rulesets/dnd5e/bountifulLuckMapsSettlement'
+import {SecondChanceMapsSettlementSignal,verifySecondChanceMapsSettlement}from'./secondChanceMapsSettlement'
+import {ActivityDeathMapsSettlementSignal,verifyActivityDeathMapsSettlement} from './activityDeathMapsSettlement'
+import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
 import {
   DmActionTransactionCoordinator,
   type DmAuthoritativeActionOutcome,
@@ -14,6 +22,21 @@ export interface RunMapsPlayerActionTransactionInput {
   setTransactionActive: (active: boolean, transactionId: string | null) => void
   recover: (error: unknown) => Promise<void>
   rejectAfterRecovery?: (error: unknown) => Promise<void> | void
+  arcaneMovementSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPublished:()=>Promise<void>}
+  arcaneNativeSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>}
+  armorNativeSettlement?:{
+    gateway:Pick<SharedRoomGatewayPort,'loadResource'>
+    onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>
+  }
+  bountifulSettlement?:{gateway:Pick<SharedRoomGatewayPort,'loadResource'>;onPending?:()=>void;onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>}
+  secondChanceSettlement?:{
+    gateway:Pick<SharedRoomGatewayPort,'loadResource'>
+    onPublished:(result:import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult)=>Promise<void>
+  }
+  activityDeathSettlement?:{
+    gateway:Pick<SharedRoomGatewayPort,'loadResource'>
+    onPublished:(result:Extract<import("../../application/combat/dnd5eCombatRules").Dnd5eActionResult,{ok:true}>)=>Promise<void>
+  }
   now?: number
 }
 
@@ -55,7 +78,44 @@ export function runMapsPlayerActionTransaction(input: RunMapsPlayerActionTransac
       input.clearOutcome(action.id)
       input.setTransactionActive(true, action.id)
       try {
-        await input.run()
+        try{await input.run()}catch(error){
+          if((error instanceof BountifulOriginalParentPending||error instanceof BountifulOriginalParentPublished)&&input.bountifulSettlement){
+            const verified=await verifyBountifulMapsSettlement({error,action},input.bountifulSettlement.gateway)
+            if(verified.kind==='pending'){input.bountifulSettlement.onPending?.();return {status:'ignored'}}
+            await input.bountifulSettlement.onPublished(verified.result);return {status:'accepted'}
+          }
+          if(error instanceof ActivityDeathMapsSettlementSignal&&input.activityDeathSettlement){
+            const settlement=await verifyActivityDeathMapsSettlement({settlement:error.settlement,mapId:action.mapId,combatId:action.combatId,parentTransactionId:action.id},input.activityDeathSettlement.gateway)
+            if(settlement.kind==='activity-death-parent-pending')return{status:'ignored'}
+            await input.activityDeathSettlement.onPublished(settlement.result)
+            return{status:'accepted'}
+          }
+          if(error instanceof ArcaneMovementMapsSettlementSignal&&input.arcaneMovementSettlement){
+            const verified=await verifyArcaneMovementMapsSettlement({signal:error,action},input.arcaneMovementSettlement.gateway)
+            if(verified.kind==='pending')return{status:'ignored'}
+            await input.arcaneMovementSettlement.onPublished();return{status:'accepted'}
+          }
+          if(error instanceof ArcaneNativeMapsSettlementSignal&&input.arcaneNativeSettlement){
+            if(!action.combatId)throw Error('arcane-maps:combat-scope-required')
+            const saved=await verifyArcaneNativeMapsSettlement({settlement:error.settlement,mapId:action.mapId,combatId:action.combatId,parentTransactionId:action.id},input.arcaneNativeSettlement.gateway)
+            if(saved.kind==='arcane-native-parent-pending')return{status:'ignored'}
+            if(!saved.result)throw Error('arcane-maps:publication-result-required')
+            await input.arcaneNativeSettlement.onPublished(saved.result);return{status:'accepted'}
+          }
+          if(error instanceof ArmorNativeMapsSettlementSignal&&input.armorNativeSettlement){
+            if(!action.combatId)throw Error('armor-native-maps:combat-scope-required')
+            const saved=await verifyArmorNativeMapsSettlement({settlement:error.settlement,mapId:action.mapId,combatId:action.combatId,parentTransactionId:action.id},input.armorNativeSettlement.gateway)
+            if(saved.kind==='armor-native-parent-pending')return{status:'ignored'}
+            if(!saved.result)throw Error('armor-native-maps:publication-result-required')
+            await input.armorNativeSettlement.onPublished(saved.result)
+            return{status:'accepted'}
+          }
+          if(!(error instanceof SecondChanceMapsSettlementSignal)||!input.secondChanceSettlement)throw error
+          const settlement=await verifySecondChanceMapsSettlement({settlement:error.settlement,mapId:action.mapId,combatId:action.combatId,parentTransactionId:action.id},input.secondChanceSettlement.gateway)
+          if(settlement.kind==='second-chance-parent-pending')return {status:'ignored'}
+          await input.secondChanceSettlement.onPublished(settlement.result)
+          return {status:'accepted'}
+        }
         await input.waitForAuthorityCommit()
         const outcome = input.readOutcome(action.id)
         if (!outcome) throw new Error('missing-player-action-authority-outcome')

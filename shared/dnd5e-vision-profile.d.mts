@@ -7,7 +7,7 @@ export interface Dnd5eProjectedCharacterVision {
   darkvisionIfAbsentFeet: number
   darkvisionExistingBonusFeet: number
   classState: { activeEffects: Array<{ id?: string; source: { actorId?: string; magical?: true }; modifiers: {
-    sightRangeLimitFeet?: number;
+    sightRangeLimitFeet?: number; throughSolidObjectsRangeFeet?: number;
     darkvisionRangeFeet: number; darkvisionIfAbsentFeet: number; darkvisionExistingBonusFeet: number
     darkvisionRacialFallbackFeet: number; darkvisionRacialBonusFeet: number
   } }> }
@@ -38,6 +38,7 @@ export interface Dnd5eEffectiveVisionProfileV1 {
   tremorsenseRangeFeet: number
   truesightRangeFeet: number
   sightRangeLimitFeet?: number
+  throughSolidObjectsRangeFeet?: number
 }
 
 export const DND5E_EFFECTIVE_VISION_PROFILE_SCHEMA_VERSION: 1
@@ -49,6 +50,7 @@ export function normalizeDnd5eProjectedCharacterVision(value: unknown): Dnd5ePro
 
 export function dnd5eCharacterHasDevilsSight(character: unknown): boolean
 export function dnd5eCharacterDarkvisionRangeFeet(character: unknown): number
+export function projectDnd5ePersonalSolidSight<T extends object>(value: T, allowed: boolean): T
 export function compileDnd5eEffectiveVisionProfile(input?: {
   token?: unknown
   character?: unknown

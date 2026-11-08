@@ -1,5 +1,14 @@
+import {dnd5eExecutionEventKey} from './dnd5eActivityIdentity'
+import {listRegisteredContentDefinitionPackages} from '../../../domain/content/contentDefinitionRegistry'
+import {ensureDnd5eCoreSpellActivitiesRegisteredV1} from './dnd5eCoreSpellActivities'
+import {encodeSecondChanceParentWire,decodeSecondChanceParentWire,type SecondChanceParentWire} from '../../../lib/secondChanceParentWire'
+import {copyDnd5eOrdinaryWeaponScene,dnd5eWeaponActivityTurnKey} from '../ordinaryWeaponScene'
+import {registeredDnd5eRulesPlugins} from '../plugins/pluginRuntimeIndex'
+import {collectDnd5eActivitySpellDamageDieChoices} from './dnd5eSpellDamageGroups'
+import {dnd5eOwnedCurseDeathTransferTargets,dnd5eHasOwnedCurseDeathSource} from '../ownedCurseDeathTransfer'
+import type {Dnd5eSpellDamageDiceChoice} from '../spellDamageDieRerolls'
 import { collectDnd5eActivityNegationDice } from './dnd5eActivityNegationDice'
-import { dnd5eBoundHpRetaliationGrant } from './dnd5eAutonomousRetaliationContract'
+import { dnd5eAutonomousRetaliationGrant } from './dnd5eAutonomousRetaliationContract'
 import { dnd5eInterruptedFeatureSpellActivity } from './dnd5eInterruptedFeatureSpell'
 import { previewDnd5eFeatureSpellInvocation } from '../headlessCombatEngine'
 import type { Dnd5eActivityNegationChoice } from './dnd5eActivityDisadvantageNegation'
@@ -37,7 +46,7 @@ import { materializeDnd5eEventWeaponDice } from './dnd5eEventWeaponDice'
 import type { Dnd5eActivityConfirmedByV1 } from './dnd5eActivityInvocation'
 import { dnd5eContextPredicateSatisfiedV1 } from './dnd5eActivityInvocation'
 import type { AvailableRegisteredDnd5eActivityV1 } from './dnd5eActivityRegistry'
-import { listDnd5eActivityTriggerWindowsV1 } from './dnd5eActivityTriggerWindows'
+import { listDnd5eActivityTriggerWindowsV1,type Dnd5eActivityTriggerWindowV1 } from './dnd5eActivityTriggerWindows'
 import type { Dnd5eFormulaRollResult, Dnd5eFormulaV1 } from './dnd5eFormula'
 import type { AbilityKey } from '../../../lib/dnd'
 import { dnd5eCombatantPairKey } from '../headlessCombatPrimitives'
@@ -128,6 +137,53 @@ export interface Dnd5eActivityTriggerMapHandoffRequestV1 {
   committed: Extract<Dnd5eActivityAuthorityCommitResult, { ok: true }>
 }
 
+type TriggerBatch={id:string;events:readonly import('../headlessCombatEngine').Dnd5eCombatEvent[];ancestry:ReadonlySet<string>}
+interface Dnd5eKilledSummonContinuationCommonV1 {
+ schemaVersion:1
+ definitionSignature:string
+ initial:{state:Dnd5eHeadlessCombatState;events:readonly import('../headlessCombatEngine').Dnd5eCombatEvent[];eventBatchId:string;combatRevision:number}
+ state:Dnd5eHeadlessCombatState
+ combatRevision:number
+ appendedEvents:Extract<Dnd5eActionResult,{ok:true}>['events']
+ diagnostics:Dnd5eActivityTriggerDiagnosticV1[]
+ consumed:string[]
+ batches:TriggerBatch[]
+ currentBatch:TriggerBatch
+ currentWindows:readonly Dnd5eActivityTriggerWindowV1[]
+ maximumResolutions:number
+ resolutions:number
+}
+export type Dnd5eKilledSummonContinuationDataV1=Dnd5eKilledSummonContinuationCommonV1&(
+ |{phase?:'map-handoff';pending:Dnd5eActivityTriggerMapHandoffRequestV1;pendingChoice?:never}
+ |{phase:'owner-choice';pendingChoice:Dnd5eActivityTriggerChoiceRequestV1;pending?:never}
+)
+declare const killedSummonContinuationBrand:unique symbol
+export interface Dnd5eKilledSummonContinuationV1 {readonly [killedSummonContinuationBrand]:true}
+const killedSummonContinuations=new WeakMap<object,Dnd5eKilledSummonContinuationDataV1>()
+function killedSummonSourceSignature():string{return JSON.stringify(listRegisteredContentDefinitionPackages().map(pkg=>({...pkg,definitions:[...pkg.definitions].sort((a,b)=>`${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`))})).sort((a,b)=>a.packageId.localeCompare(b.packageId)))}
+function issueKilledSummonContinuation(data:Dnd5eKilledSummonContinuationDataV1):Dnd5eKilledSummonContinuationV1 {
+ const frame=Object.freeze({}) as Dnd5eKilledSummonContinuationV1
+ killedSummonContinuations.set(frame,decodeSecondChanceParentWire(encodeSecondChanceParentWire(data)) as Dnd5eKilledSummonContinuationDataV1)
+ return frame
+}
+export function readDnd5eKilledSummonContinuationV1(frame:Dnd5eKilledSummonContinuationV1):Dnd5eKilledSummonContinuationDataV1 {
+ const data=killedSummonContinuations.get(frame)
+ if(!data)throw Error('killed-summon:unissued-continuation')
+ return decodeSecondChanceParentWire(encodeSecondChanceParentWire(data)) as Dnd5eKilledSummonContinuationDataV1
+}
+export function assertDnd5eKilledSummonContinuationSourceV1(frame:Dnd5eKilledSummonContinuationV1):void{ensureDnd5eCoreSpellActivitiesRegisteredV1();if(readDnd5eKilledSummonContinuationV1(frame).definitionSignature!==killedSummonSourceSignature())throw Error('killed-summon:changed-source-definitions')}
+export function encodeDnd5eKilledSummonContinuationV1(frame:Dnd5eKilledSummonContinuationV1):SecondChanceParentWire{return encodeSecondChanceParentWire(readDnd5eKilledSummonContinuationV1(frame))}
+/** Data recovery only. The room adapter must first authenticate its private
+ * journal and original dependency revisions; this is never a player command. */
+export function restoreDnd5eKilledSummonContinuationFromHostV1(wire:SecondChanceParentWire):Dnd5eKilledSummonContinuationV1 {
+ const data=decodeSecondChanceParentWire(wire) as Dnd5eKilledSummonContinuationDataV1
+ const validPending=data?.phase==='owner-choice'
+  ?data.pendingChoice?.triggerContext.event==='creature-killed'&&data.pendingChoice.confirmation==='actor-choice'&&data.pendingChoice.activity.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='summon'&&operation.placementOrigin==='killed-target'))
+  :data?.pending?.triggerContext.event==='creature-killed'&&data.pending.committed.ok&&data.pending.committed.state.combatId===data.state.combatId&&data.pending.committed.activityHandoffs?.summons.some(row=>!!row.killedCreatureOriginId)
+ if(data?.schemaVersion!==1||typeof data.definitionSignature!=='string'||!validPending||!Array.isArray(data.consumed)||!Array.isArray(data.batches)||!Array.isArray(data.currentWindows)||!Array.isArray(data.appendedEvents)||!Array.isArray(data.diagnostics)||!Number.isSafeInteger(data.resolutions)||data.resolutions<0||!Number.isSafeInteger(data.maximumResolutions)||data.maximumResolutions<1||data.resolutions>=data.maximumResolutions)throw Error('killed-summon:invalid-continuation')
+ return issueKilledSummonContinuation(data)
+}
+
 export interface Dnd5eActivityTriggerSettlementResultV1 {
   state: Dnd5eHeadlessCombatState
   /** Only events appended by Activity commits; the caller retains its source batch. */
@@ -212,7 +268,7 @@ function inheritedActivityCastLevel(
 ): number | undefined {
   const actor = state.combatants[actorId]
   if (!actor) return undefined
-  const poolGrant = dnd5eBoundHpRetaliationGrant(actor, packageId, activity)
+  const poolGrant = dnd5eAutonomousRetaliationGrant(actor, packageId, activity)
   if (poolGrant) return poolGrant.source.spellLevel
   if (dnd5eActivityUsesExecutionGrant(activity)) return dnd5eActivityExecutionGrant({
     packageId, activity, combatant: actor, triggerContext: context,
@@ -226,7 +282,7 @@ function inheritedActivityCastLevel(
   if (requiredEffects.length === 0) return undefined
   const matchingLevels = (actor.classState.activeEffects ?? []).flatMap((effect) =>
     requiredEffects.some(requirement => dnd5eActivityEffectMatches(requirement, {
-      definitionId: effect.definitionId, sourceActorId: effect.source.actorId, sourceCharacterId:effect.source.characterId, tags: effect.tags,
+      definitionId: effect.definitionId, sourceActorId: effect.source.actorId, sourceCharacterId:effect.source.characterId,sourceRulesId:effect.source.rulesId,sourcePluginId:effect.source.pluginId,sourcePluginAvailable:registeredDnd5eRulesPlugins().some(plugin=>plugin.id===effect.source.pluginId), tags: effect.tags,
       suspended: !!effect.suspendedBy?.length,
     }, actorId,undefined,actor.classState.wardingBondParticipantCharacterId)) && effect.source.spellLevel != null
       ? [effect.source.spellLevel]
@@ -246,6 +302,8 @@ function selectedSavingThrowAbility(
 }
 
 export async function rollDnd5eActivityTriggerDiceV1(input: {
+  chooseSpellDamageDice?:Dnd5eSpellDamageDiceChoice
+  charactersByCombatantId?:Readonly<Record<string,Character>>
   actionId?: string
   state: Dnd5eHeadlessCombatState
   available: AvailableRegisteredDnd5eActivityV1
@@ -478,7 +536,8 @@ export async function rollDnd5eActivityTriggerDiceV1(input: {
       }
     }
   }
-  return { rolls, checkRollModes, disadvantageNegationChoices: { ...previous?.choices } }
+  const spellRolls=await collectDnd5eActivitySpellDamageDieChoices({state:input.state,actorId:input.actorId,targetIds:input.targetIds,packageId:input.available.packageId,activity:input.available.activity,choices:input.choices,rolls,transactionId:input.actionId??input.triggerContext.eventId,charactersByCombatantId:input.charactersByCombatantId,choose:input.chooseSpellDamageDice})
+  return { rolls:spellRolls, checkRollModes, disadvantageNegationChoices: { ...previous?.choices } }
 }
 
 /**
@@ -487,6 +546,12 @@ export async function rollDnd5eActivityTriggerDiceV1(input: {
  * and every die is requested from the Host callback.
  */
 export async function settleDnd5eActivityTriggerWindowsV1(input: {
+  resumeKilledSummon?:Dnd5eKilledSummonContinuationV1
+  /** Captured before an actor may answer unknown/wait; prior mechanics must
+   * survive even though this summon has not yet been committed. */
+  onBeforeKilledSummonChoice?:(frame:Dnd5eKilledSummonContinuationV1,request:Dnd5eActivityTriggerChoiceRequestV1)=>Promise<void>
+  onPendingKilledSummon?:(frame:Dnd5eKilledSummonContinuationV1,reason:string)=>Promise<never>
+  chooseSpellDamageDice?:Dnd5eSpellDamageDiceChoice
   state: Dnd5eHeadlessCombatState
   events: Extract<Dnd5eActionResult, { ok: true }>['events']
   eventBatchId: string
@@ -522,30 +587,54 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
     candidates: readonly { id: string; name: string }[]
   }) => Promise<readonly string[] | undefined>
 }): Promise<Dnd5eActivityTriggerSettlementResultV1> {
-  let state = input.state
-  let combatRevision = input.combatRevision
-  const appendedEvents: Extract<Dnd5eActionResult, { ok: true }>['events'][number][] = []
-  const diagnostics: Dnd5eActivityTriggerDiagnosticV1[] = []
-  const consumed = new Set<string>()
-  const batches: Array<{ id: string; events: typeof input.events; ancestry: ReadonlySet<string> }> = [
-    { id: input.eventBatchId, events: input.events, ancestry: new Set() },
-  ]
-  const maximumResolutions = input.maximumResolutions ?? 32
-  let resolutions = 0
+  const resume=input.resumeKilledSummon?readDnd5eKilledSummonContinuationV1(input.resumeKilledSummon):undefined
+  const initial=resume?.initial??(input.onPendingKilledSummon||input.onBeforeKilledSummonChoice?decodeSecondChanceParentWire(encodeSecondChanceParentWire({state:input.state,events:input.events,eventBatchId:input.eventBatchId,combatRevision:input.combatRevision})) as Dnd5eKilledSummonContinuationDataV1['initial']:undefined)
+  if(resume&&JSON.stringify(encodeSecondChanceParentWire({state:input.state,events:input.events,eventBatchId:input.eventBatchId,combatRevision:input.combatRevision}))!==JSON.stringify(encodeSecondChanceParentWire(initial)))throw Error('killed-summon:changed-initial-parent')
+  let state = resume?.state??input.state
+  let combatRevision = resume?.combatRevision??input.combatRevision
+  const appendedEvents: Extract<Dnd5eActionResult, { ok: true }>['events'][number][] = [...(resume?.appendedEvents??[])]
+  const diagnostics: Dnd5eActivityTriggerDiagnosticV1[] = resume?.diagnostics??[]
+  const consumed = new Set<string>(resume?.consumed??[])
+  const batches: TriggerBatch[] = resume?.batches??[{ id: input.eventBatchId, events: input.events, ancestry: new Set() }]
+  const maximumResolutions = resume?.maximumResolutions??input.maximumResolutions??32
+  let resolutions = resume?.resolutions??0
+  let restoredWindows=resume?.currentWindows
+  if(resume){
+    assertDnd5eKilledSummonContinuationSourceV1(input.resumeKilledSummon!)
+    if(resume.phase==='owner-choice'){
+      const choice=resume.pendingChoice
+      consumed.delete(`${choice.eventId}:${choice.packageId}:${choice.activity.id}`)
+      batches.unshift(resume.currentBatch)
+    }else{
+    const handoff=input.settleMapHandoffs?await input.settleMapHandoffs(resume.pending):{ok:false as const,reason:'map-handoff-requires-placement'}
+    if(!handoff.ok){
+      if(input.onPendingKilledSummon)await input.onPendingKilledSummon(input.resumeKilledSummon!,handoff.reason)
+      throw Error('killed-summon:placement-still-pending')
+    }
+    state=resume.pending.committed.state;combatRevision++;resolutions++
+    appendedEvents.push(...resume.pending.committed.events)
+    diagnostics.push({eventId:resume.pending.eventId,packageId:resume.pending.packageId,activityId:resume.pending.activity.id,status:'resolved'})
+    if(resume.pending.committed.events.length)batches.push({id:`${input.eventBatchId}:nested-${resolutions}`,events:resume.pending.committed.events,ancestry:new Set([...resume.currentBatch.ancestry,`${resume.pending.packageId}:${resume.pending.activity.id}`])})
+    batches.unshift(resume.currentBatch)
+    }
+  }
 
   while (batches.length > 0 && resolutions < maximumResolutions) {
     const batch = batches.shift()!
-    const windows = listDnd5eActivityTriggerWindowsV1({
+    const windows = restoredWindows??listDnd5eActivityTriggerWindowsV1({
       state,
       events: batch.events,
       eventBatchId: batch.id,
       charactersByCombatantId: input.charactersByCombatantId,
     })
+    restoredWindows=undefined
     for (const window of windows) {
       for (const available of window.available) {
         const activityKey = `${available.packageId}:${available.activity.id}`
         if (batch.ancestry.has(activityKey)) continue
         const receiptId = `${window.triggerContext.eventId}:${available.packageId}:${available.activity.id}`
+        const rawTriggerCommandId = `activity-trigger:${receiptId}`
+        const triggerCommandId = rawTriggerCommandId.length <= 160 ? rawTriggerCommandId : `activity-trigger:${dnd5eExecutionEventKey(receiptId)}`
         if (consumed.has(receiptId)) continue
         consumed.add(receiptId)
         const actorId = window.triggerContext.eligibleActorIds[0]
@@ -554,7 +643,7 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
         if ((available.activity.requirements ?? []).some(requirement =>
           requirement.kind === 'once-per-turn' &&
           state.combatants[actorId]?.classState.declarativeUsedTurnKeys?.[requirement.key] ===
-            dnd5eHeadlessTurnKey(state, actorId))) continue
+            dnd5eWeaponActivityTurnKey(state, dnd5eHeadlessTurnKey(state, actorId)))) continue
         const receipts = state.combatants[actorId]?.classState.activityTriggerReceipts
         if (receipts?.combatId === state.combatId && receipts.ids.includes(receiptId)) continue
         let targetIds = activityTargetIds(available.activity, window.triggerContext)
@@ -581,7 +670,7 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
         // Only actor-local gates independent of target/choice/roll selection can
         // safely run before prompts. Final authority still checks all requirements.
         const preRollRequirements = (available.activity.requirements ?? []).filter(requirement => {
-          if (['combat-active', 'turn-owner', 'minimum-level', 'class-level'].includes(requirement.kind)) return true
+          if (['combat-active', 'combat-round', 'turn-owner', 'minimum-level', 'class-level'].includes(requirement.kind)) return true
           if (requirement.kind === 'resource') return actorFormulaReadyBeforeSelection(requirement.minimum)
           if (requirement.kind === 'resource-capacity') return actorFormulaReadyBeforeSelection(requirement.minimumMissing)
           if (requirement.kind === 'condition' || requirement.kind === 'hp-percentage') return requirement.subject === 'actor'
@@ -598,12 +687,37 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
         if (!hostActor || !dnd5eActivityRootRequirementsSatisfiedV1({
           activity: { ...available.activity, requirements: preRollRequirements },
           actor: preRollActor!, targets: [], rolls: {},
-          combatActive: state.active, currentTurnActorId: state.active ? state.initiativeOrder[state.initiativeIndex] : undefined,
+          combatActive: state.active, combatRound: state.round, currentTurnActorId: state.active ? state.initiativeOrder[state.initiativeIndex] : undefined,
           triggerContext,
         })) {
           diagnostics.push({ eventId: window.triggerContext.eventId, packageId: available.packageId,
             activityId: available.activity.id, status: 'rejected', reason: 'requirements-not-met' })
           continue
+        }
+        const ownedDeath=available.activity.outcomes.flatMap(outcome=>outcome.operations).find(operation=>
+          operation.kind==='transfer-owned-curse-on-bearer-death'||operation.kind==='heal-owned-curse-on-bearer-death')
+        if(ownedDeath&&(triggerContext.event!=='effect-bearer-died'||!targetIds?.length||
+          !dnd5eHasOwnedCurseDeathSource(state,actorId,targetIds[0],available.packageId,ownedDeath.sourceActivityId))){
+          diagnostics.push({eventId:window.triggerContext.eventId,packageId:available.packageId,activityId:available.activity.id,status:'rejected',reason:'source-curse-not-live'})
+          continue
+        }
+        // The ended creature is already fixed by the Host event. Do not ask
+        // the observer to spend a reaction for a known ineligible target.
+        if (triggerContext.event === 'other-turn-end' && available.activity.target.kind === 'creature') {
+          const target = available.activity.target
+          const origin = dnd5eActivityEffectOriginId(state, actorId, available.activity)
+          const invalidRelation = targetIds?.some(id => {
+            const other = state.combatants[id]
+            return !other || target.relation === 'enemy' && other.controller === hostActor.controller ||
+              target.relation === 'ally' && other.controller !== hostActor.controller
+          })
+          const invalidRange = target.rangeFeet != null && (!origin || targetIds?.some(id => id !== origin &&
+            (state.distanceFeetByCombatantPair?.[dnd5eCombatantPairKey(origin, id)] ?? Number.POSITIVE_INFINITY) > target.rangeFeet!))
+          if (invalidRelation || invalidRange) {
+            diagnostics.push({eventId:window.triggerContext.eventId,packageId:available.packageId,
+              activityId:available.activity.id,status:'rejected',reason:invalidRelation?'invalid-target':'target-out-of-range'})
+            continue
+          }
         }
         const actorChoices = dnd5eActivityLanguageChoicesV1(
           available.activity, preRollActor!.languages, hostActor.hitPointDice, Object.values(state.combatants),
@@ -613,14 +727,17 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
               ...actorChoices,
               choices: actorChoices.choices.map((choice) => ({
                 ...choice,
-                options: choice.options.filter((option) => option.requirements?.every((requirement) => {
+                options: choice.options.filter((option) => {
+                  const transfer=available.activity.outcomes.flatMap(outcome=>outcome.operations).find(operation=>operation.kind==='transfer-owned-curse-on-bearer-death'&&operation.destinationChoiceId===choice.id)
+                  return (!transfer||dnd5eOwnedCurseDeathTransferTargets(state,actorId,targetIds?.[0]??'').some(target=>target.id===option.id))&& (option.requirements?.every((requirement) => {
                   if (requirement.kind === 'resource-capacity') {
                     const resource = state.combatants[actorId]?.classResources[requirement.resourceId]
                     return !!resource && requirement.minimumMissing.kind === 'constant' &&
                       resource.max - resource.current >= requirement.minimumMissing.value
                   }
                   return dnd5eContextPredicateSatisfiedV1(requirement, triggerContext) !== false
-                }) ?? true),
+                }) ?? true)
+                }),
               })),
             }
           : actorChoices
@@ -655,6 +772,10 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
           confirmation: available.confirmation,
           triggerContext,
         }
+        if(input.onBeforeKilledSummonChoice&&available.confirmation==='actor-choice'&&triggerContext.event==='creature-killed'&&available.activity.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='summon'&&operation.placementOrigin==='killed-target'))){
+          const frame=issueKilledSummonContinuation({schemaVersion:1,phase:'owner-choice',definitionSignature:killedSummonSourceSignature(),initial:initial!,state,combatRevision,appendedEvents,diagnostics,consumed:[...consumed],batches,currentBatch:batch,currentWindows:windows,maximumResolutions,resolutions,pendingChoice:choiceRequest})
+          await input.onBeforeKilledSummonChoice(frame,choiceRequest)
+        }
         const confirmation = available.confirmation === 'automatic'
           ? { accepted: true, choices: Object.fromEntries((available.activity.choices ?? []).flatMap((choice) =>
               choice.defaultOptionId ? [[choice.id, choice.defaultOptionId] as const] : [])) }
@@ -667,17 +788,17 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
           // receipt without charging resources or mutating the caller's state.
           const decliningActor = state.combatants[actorId]
           const prior = decliningActor.classState.activityTriggerReceipts
-          state = { ...state, combatants: { ...state.combatants, [actorId]: {
+          state = copyDnd5eOrdinaryWeaponScene(state, { ...state, combatants: { ...state.combatants, [actorId]: {
             ...decliningActor, classState: { ...decliningActor.classState, activityTriggerReceipts: {
               combatId: state.combatId,
               ids: [...(prior?.combatId === state.combatId ? prior.ids : []), receiptId],
             } },
-          } } }
+          } } })
           combatRevision += 1
           if (available.activity.invocation?.kind === 'triggered' &&
             available.activity.invocation.releaseSingleUseGrantOnDecline) {
             const beforeDecline = state
-            state = structuredClone(state)
+            state = copyDnd5eOrdinaryWeaponScene(state, structuredClone(state))
             const requiresExecution = dnd5eActivityUsesExecutionGrant(available.activity)
             const grant = requiresExecution ? dnd5eActivityExecutionGrant({
               packageId: available.packageId, activity: available.activity,
@@ -822,9 +943,10 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
           continue
         }
         const rolled = await rollDnd5eActivityTriggerDiceV1({
+          chooseSpellDamageDice:input.chooseSpellDamageDice,charactersByCombatantId:input.charactersByCombatantId,
           state, available: spellAllowed ? available : {...available,activity:dnd5eInterruptedFeatureSpellActivity(available.activity)},
           triggerContext, actorId, targetIds, choices: activityChoices, roll: input.roll,
-          actionId: `activity-trigger:${receiptId}`.slice(0, 160), chooseDisadvantageNegation: input.chooseDisadvantageNegation,
+          actionId: triggerCommandId, chooseDisadvantageNegation: input.chooseDisadvantageNegation,
         })
         if ('unsupported' in rolled) {
           diagnostics.push({
@@ -853,7 +975,7 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
           combatRevision,
           command: {
             schemaVersion: 1,
-            commandId: `activity-trigger:${receiptId}`.slice(0, 160),
+            commandId: triggerCommandId,
             actorId,
             packageId: available.packageId,
             packageVersion: available.packageVersion,
@@ -929,35 +1051,24 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
         const hasMapHandoffs = committed.result.activityHandoffs &&
           Object.entries(committed.result.activityHandoffs).some(([kind, entries]) =>
             kind === 'areaSpellDamageTypes' ? (entries as readonly string[] | undefined)?.includes('cold') : (entries?.length ?? 0) > 0)
+        const handoffRequest:Dnd5eActivityTriggerMapHandoffRequestV1={receiptId,eventId:window.triggerContext.eventId,packageId:available.packageId,activity:available.activity,actorId,castLevel:inheritedCastLevel,triggerContext,committed:committed.result}
+        const suspendKilledSummon=async(reason:string)=>{
+          if(input.onPendingKilledSummon&&triggerContext.event==='creature-killed'&&committed.result.activityHandoffs?.summons.some(row=>!!row.killedCreatureOriginId)){
+            const frame=issueKilledSummonContinuation({schemaVersion:1,definitionSignature:killedSummonSourceSignature(),initial:initial!,state,combatRevision,appendedEvents,diagnostics,consumed:[...consumed],batches,currentBatch:batch,currentWindows:windows,maximumResolutions,resolutions,pending:handoffRequest})
+            await input.onPendingKilledSummon(frame,reason)
+            throw Error('killed-summon:continuation-must-suspend')
+          }
+        }
         if (hasMapHandoffs && input.settleMapHandoffs) {
-          const handoff = await input.settleMapHandoffs({
-            receiptId,
-            eventId: window.triggerContext.eventId,
-            packageId: available.packageId,
-            activity: available.activity,
-            actorId,
-            castLevel: inheritedCastLevel,
-            triggerContext,
-            committed: committed.result,
-          })
+          const handoff = await input.settleMapHandoffs(handoffRequest)
           if (!handoff.ok) {
-            diagnostics.push({
-              eventId: window.triggerContext.eventId,
-              packageId: available.packageId,
-              activityId: available.activity.id,
-              status: 'unsupported',
-              reason: handoff.reason,
-            })
+            await suspendKilledSummon(handoff.reason)
+            diagnostics.push({eventId:window.triggerContext.eventId,packageId:available.packageId,activityId:available.activity.id,status:'unsupported',reason:handoff.reason})
             continue
           }
         } else if (hasMapHandoffs) {
-          diagnostics.push({
-            eventId: window.triggerContext.eventId,
-            packageId: available.packageId,
-            activityId: available.activity.id,
-            status: 'unsupported',
-            reason: 'map-handoff-requires-placement',
-          })
+          await suspendKilledSummon('map-handoff-requires-placement')
+          diagnostics.push({eventId:window.triggerContext.eventId,packageId:available.packageId,activityId:available.activity.id,status:'unsupported',reason:'map-handoff-requires-placement'})
           continue
         }
         state = committed.result.state
@@ -995,4 +1106,17 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
     }
   }
   return { state, events: appendedEvents, diagnostics, combatRevision }
+}
+
+/** Pure mechanical reconstruction for this one automatic spell-resolved area.
+ * No book, physical die, owner decision or world permission is issued here. */
+export function prepareDnd5eIceKnifeBurstCommitV1(input:{state:Dnd5eHeadlessCombatState;events:readonly Dnd5eActionResult['events'][number][];eventBatchId:string;combatRevision:number;charactersByCombatantId:Readonly<Record<string,Character>>}){
+ const windows=listDnd5eActivityTriggerWindowsV1(input),matches=windows.flatMap(window=>window.available.filter(available=>available.activity.id==='ice-knife-burst'&&available.confirmation==='automatic'&&window.triggerContext.event==='spell-resolved'&&window.triggerContext.source.kind==='spell'&&window.triggerContext.source.id==='ice-knife').map(available=>({window,available})))
+ if(matches.length!==1)throw Error('ice-knife-burst:one-actual-automatic-spell-window-required')
+ const{window,available}=matches[0],activity=available.activity,actorId=window.triggerContext.eligibleActorIds[0],area=eventTargetAreaSelection(activity,input.state,window.triggerContext)
+ if(!actorId||!area||activity.checks?.length!==1||activity.checks[0].kind!=='saving-throw'||activity.checks[0].ability!=='dex'||activity.checks[0].abilityOptions?.length||activity.choices?.length||activity.spellInvocation||activity.requiresEffectGrant)throw Error('ice-knife-burst:closed-current-area-saving-required')
+ const targetIds=area.targetIds,triggerContext={...window.triggerContext,eligibleTargetIds:[...new Set([...window.triggerContext.eligibleTargetIds,...targetIds])]},receiptId=triggerContext.eventId+':'+available.packageId+':'+activity.id,rawCommandId='activity-trigger:'+receiptId,commandId=rawCommandId.length<=160?rawCommandId:'activity-trigger:'+dnd5eExecutionEventKey(receiptId),check=activity.checks[0],checkRollModes:Record<string,'normal'|'advantage'|'disadvantage'>={}
+ for(const id of targetIds){const target=input.state.combatants[id];if(!target)throw Error('ice-knife-burst:actual-area-actor-required');checkRollModes[check.scope==='per-target'?check.id+':'+id:check.id]=check.rollMode&&check.rollMode!=='host-derived'?check.rollMode:dnd5eSavingThrowMode(target,check.ability,{effectVisible:true,sourceCreatureType:input.state.combatants[actorId]?.creatureType,sourceIsSpell:true})}
+ const command={schemaVersion:1 as const,commandId,actorId,packageId:available.packageId,packageVersion:available.packageVersion,activityId:activity.id,targetIds,areaPlacement:area.areaPlacement,choices:{},castLevel:inheritedActivityCastLevel(input.state,actorId,activity,triggerContext,available.packageId),expectedRevision:input.combatRevision,triggerEventId:triggerContext.eventId}
+ return{activity,receiptId,descriptor:{command,checkRollModes,areaTargetIds:area.targetIds,areaPlacementDistanceFeet:area.areaPlacementDistanceFeet,triggerContext,confirmedBy:'system' as const,dmApproved:false},commit:(authoritativeRolls:Parameters<typeof resolveRegisteredDnd5eActivityInCombatV1>[0]['authoritativeRolls'])=>withDnd5eIncapacitatedActivityAuthority(input.state,available.packageId,activity,triggerContext,actorId,()=>resolveRegisteredDnd5eActivityInCombatV1({allowInactiveDeathReactionCommit:false,state:input.state,combatRevision:input.combatRevision,command,authoritativeRolls,disadvantageNegationChoices:{},checkRollModes,areaPlacementDistanceFeet:area.areaPlacementDistanceFeet,areaTargetIds:area.targetIds,parentDamageType:undefined,triggerContext,confirmedBy:'system',dmApproved:false,actorCharacter:input.charactersByCombatantId[actorId],inventoryOwner:input.charactersByCombatantId[actorId],inventoryRoster:[...new Map(Object.values(input.charactersByCombatantId).map(character=>[character.id,character])).values()]}))}
 }

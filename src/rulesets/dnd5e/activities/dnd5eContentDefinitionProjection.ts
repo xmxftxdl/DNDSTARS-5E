@@ -1,7 +1,7 @@
 import { automationCapabilityFromLegacyStatus, type AutomationCapability } from '../../../domain/automation/automationCapability'
 import type { RegisteredContentDefinition } from '../../../domain/content/contentDefinitionRegistry'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../conditions'
-import type { Dnd5eContentPackageV2 } from '../contentPackageV2'
+import { dnd5eContentPackageAutomationCoverageV2, type Dnd5eContentPackageV2 } from '../contentPackageV2'
 import type {
   Dnd5ePluginFeatureDefinition,
   Dnd5ePluginItemDefinition,
@@ -425,12 +425,26 @@ export function dnd5eContentDefinitionsFromPackageV2(
       { description: classDefinition.summary, activities: classActivities, advancements },
     ))
   }
+  // Reuse the package validator's structural proof; never trust a summary's full label.
+  const subclassCoverage = value.content.subclasses.length ? dnd5eContentPackageAutomationCoverageV2(value) : undefined
+  const linkedSneakCoverage = subclassCoverage
   for (const subclass of value.content.subclasses) {
     const grants: Dnd5eAdvancementDefinitionV1[] = [...(subclass.advancements ?? [])]
     const subclassActivities: Dnd5eActivityDefinitionV1[] = []
     for (const ability of subclass.abilities) {
       const sourceId = `${subclass.id}:${ability.id}`
-      const activities = activitiesBySource.get(`subclass-ability:${sourceId}`) ?? []
+      const hasExplicitActivity = value.content.activities?.some(activity => activity.legacySource?.kind === 'subclass-ability' && activity.legacySource.id === sourceId)
+      // Native mechanics and structurally verified build/upgrade summaries do not execute a synthetic DM-adjudication Activity.
+      // Metadata-only spell-list associations retain their authored execution capability.
+      // Verified native build references remain eligible; linked real Activities are handled separately.
+      const nativeImplemented = !hasExplicitActivity && !(ability.mechanic == null && ability.passiveImplementationReferences?.some(ref => ref.kind === 'spell-list' || ref.kind === 'additional-known-spell')) && (ability.trigger.kind === 'passive' || ability.mechanic != null) &&
+        subclassCoverage?.entries.some(entry => entry.category === 'subclass-ability' && entry.id === sourceId && entry.status === 'full') === true
+      const linkedSneak = ability.passiveImplementationReferences?.every(ref => ref.kind === 'sneak-target-bonus') &&
+        linkedSneakCoverage?.entries.some(entry => entry.category === 'subclass-ability' && entry.id === sourceId && entry.status === 'full')
+      const linkedActivities = linkedSneak ? (ability.passiveImplementationReferences ?? []).flatMap(ref =>
+        value.content.activities?.filter(activity => activity.id === ref.id) ?? []) : []
+      // A passive upgrade is executed by the referenced effect, without a second action.
+      const activities = linkedSneak ? [] : activitiesBySource.get(`subclass-ability:${sourceId}`) ?? []
       subclassActivities.push(...activities)
       const abilityContentId = definitionId('feature', `subclass-ability.${subclass.id}.${ability.id}`)
       const aquatic = ability.mechanic?.kind === 'passive-defense' ? permanentEffect(abilityContentId, ability.name, {
@@ -439,7 +453,7 @@ export function dnd5eContentDefinitionsFromPackageV2(
         opportunityAttackHitStopsMovement: ability.mechanic.opportunityAttackHitStopsMovement,
       }) : undefined
       definitions.push(definition(value, 'feature', `subclass-ability.${subclass.id}.${ability.id}`, ability.name, ability,
-        activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(ability.automation), {
+        nativeImplemented ? automationCapabilityFromLegacyStatus('full') : linkedActivities.length ? combinedCapability(linkedActivities) : activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(ability.automation), {
           description: ability.description, activities, effects: aquatic ? [aquatic] : undefined,
         }))
       grants.push({
@@ -454,7 +468,10 @@ export function dnd5eContentDefinitionsFromPackageV2(
     })
     const directSubclassActivities = activitiesBySource.get(`subclass:${subclass.id}`) ?? []
     definitions.push(definition(value, 'subclass', subclass.id, subclass.name, subclass,
-      combinedCapability([...subclassActivities, ...directSubclassActivities]), {
+      subclass.abilities.length > 0 && subclass.abilities.every(ability => subclassCoverage?.entries.some(entry =>
+        entry.category === 'subclass-ability' && entry.id === `${subclass.id}:${ability.id}` && entry.status === 'full')) &&
+        (directSubclassActivities.length === 0 || combinedCapability(directSubclassActivities).level === 'full')
+        ? automationCapabilityFromLegacyStatus('full') : combinedCapability([...subclassActivities, ...directSubclassActivities]), {
         description: subclass.summary, activities: directSubclassActivities, advancements: grants,
       }))
   }

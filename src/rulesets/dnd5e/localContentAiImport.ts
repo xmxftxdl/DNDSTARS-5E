@@ -2,7 +2,7 @@ import type { AiProviderSelectionV1 } from '../../../shared/ai-provider.mjs'
 import { DND5E_DAMAGE_TYPES } from './damageTypes'
 import { dnd5eLocalContentAiSdkGuide } from './localContentAiSdkGuide'
 import { dnd5eLocalContentSourceConstraintIssues } from './localContentSourceConstraints'
-import { DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS } from './declarativeSubclassAbility'
+import { DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS } from './passiveSubclassMechanicKinds'
 import { planDnd5eLocalContentMechanisms } from './localContentMechanismPlan'
 import {
   AiProviderRegistryV1,

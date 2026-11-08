@@ -3137,7 +3137,7 @@ describe('plugin spell CombatTransaction', () => {
     }))
   })
 
-  it('accepts the Passwall cast while leaving mapped wall changes to the DM', () => {
+  it("rejects Passwall until the live map object boundary is supported", () => {
     const actor = wizard('passwall')
     actor.level = 20
     actor.classResources = {
@@ -3164,6 +3164,7 @@ describe('plugin spell CombatTransaction', () => {
       },
       round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
     }
+    const resourcesBefore = structuredClone(actor.classResources)
     const prepared = prepareDnd5ePluginSpellCast({
       action, map, characters: [actor, ally],
       initiativeOrder: [actorToken, allyToken].map((entry, index) => ({
@@ -3171,70 +3172,13 @@ describe('plugin spell CombatTransaction', () => {
       })),
       roomRequiredPlugins: [],
     })
-    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
-    if (!prepared.ok) return
-    expect(prepared.prepared.activityAreaPlacement).toMatchObject({
-      x: 75, y: 25, angleDegrees: 90, widthFeet: 5, heightFeet: 8,
-    })
-    const directActivity = resolveDnd5eActivity({
-      activity: prepared.prepared.activity!,
-      actor: dnd5eActivityActorSnapshotFromCombatantV1(
-        prepared.prepared.state.combatants[actorToken.id],
-      ),
-      targets: prepared.prepared.targets.map((target) =>
-        dnd5eActivityActorSnapshotFromCombatantV1(
-          prepared.prepared.state.combatants[target.token.id],
-        )),
-      rolls: {}, areaPlacement: prepared.prepared.activityAreaPlacement,
-      areaPlacementDistanceFeet: prepared.prepared.activityAreaPlacementDistanceFeet,
-      castLevel: 5,
-    })
-    expect(directActivity.ok, directActivity.ok ? undefined : directActivity.details.join('; ')).toBe(true)
-    const resolved = resolvePreparedDnd5ePluginSpellCast({ currentRoom: { maps: [prepared.prepared.map], characters: prepared.prepared.characters }, prepared: prepared.prepared, rolls: {} })
-    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
-    if (!resolved.result.ok) throw new Error(resolved.result.reason)
-    expect(resolved.result.activityAreaInstance).toMatchObject({
-      angleDegrees: 90, lengthFeet: 20, widthFeet: 5, heightFeet: 8,
-    })
-    expect(resolved.result.activityHandoffs?.persistentAreas).toContainEqual(expect.objectContaining({
-      durationRounds: 600, concentration: false,
-      blocking: { suppressesMappedBarriers: true },
-    }))
-    const applied = applyDnd5eActivityMapHandoffsV1({
-      map: resolved.application!.map,
-      activity: resolved.result.activityDefinition!,
-      packageId: prepared.prepared.spell.ownerPluginId,
-      actionId: action.id, actorId: actorToken.id,
-      sourceSaveDc: prepared.prepared.saveDc, round: 1, combatId: action.combatId,
-      handoffs: resolved.result.activityHandoffs!,
-      areaSelection: {
-        anchorCell: prepared.prepared.activityTargetCell!,
-        cells: prepared.prepared.activityTargetCells,
-        targetIds: prepared.prepared.targets.map((target) => target.token.id),
-        areaPlacement: resolved.result.activityAreaInstance!,
-        areaPlacementDistanceFeet: prepared.prepared.activityAreaPlacementDistanceFeet ?? 0,
-      },
-      selection: {},
-    })
-    expect(applied.ok, applied.ok ? undefined : applied.reason).toBe(true)
-    if (!applied.ok) return
-    const geometry = {
-      ...createEmptyMapGeometry(map.id, 1),
-      walls: [{
-        id: 'stone-wall', kind: 'wall' as const, label: '石墙',
-        points: [{ x: 75, y: 0 }, { x: 75, y: 150 }],
-        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
-        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
-      }],
-    }
-    expect(mapGeometryMovementBlocked({
-      geometry, map: applied.map, token: actorToken, to: { x: 125, y: 25 },
-    }).blocked).toBe(true)
-    expect(applied.map).toEqual(resolved.application!.map)
-    expect(applied.changedTokenIds).toEqual([])
+    // Proposal handlers exist, but the live map boundary cannot yet apply these object changes.
+    // Reject before spending an action or a spell slot rather than reporting a successful cast.
+    expect(prepared).toEqual({ ok: false, reason: 'spell-not-headless' })
+    expect(actor.classResources).toEqual(resourcesBefore)
   })
 
-  it('prepares Knock against a mapped door cell without fabricating a creature target', () => {
+  it("rejects Knock until the live map object boundary is supported", () => {
     const actor = wizard('knock')
     const actorToken = token('knock-caster', 'player', 25, actor.id)
     const map: BattleMap = {
@@ -3253,6 +3197,7 @@ describe('plugin spell CombatTransaction', () => {
       },
       round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
     }
+    const resourcesBefore = structuredClone(actor.classResources)
     const prepared = prepareDnd5ePluginSpellCast({
       action, map, characters: [actor],
       initiativeOrder: [{
@@ -3260,20 +3205,13 @@ describe('plugin spell CombatTransaction', () => {
       }],
       roomRequiredPlugins: [],
     })
-    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
-    if (!prepared.ok) return
-    expect(prepared.prepared.activityTargetCell).toEqual({ col: 5, row: 2 })
-    expect(prepared.prepared.targets).toEqual([])
-    expect(prepared.prepared.activity?.outcomes.flatMap((outcome) => outcome.operations))
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'modify-map-object-lock', mode: 'knock', suppressionMinutes: 10,
-        }),
-        expect.objectContaining({ kind: 'emit-sound', audibleRadiusFeet: 300 }),
-      ]))
+    // Proposal handlers exist, but the live map boundary cannot yet apply these object changes.
+    // Reject before spending an action or a spell slot rather than reporting a successful cast.
+    expect(prepared).toEqual({ ok: false, reason: 'spell-not-headless' })
+    expect(actor.classResources).toEqual(resourcesBefore)
   })
 
-  it('carries Arcane Lock designated creatures and a normalized password into the map handoff', () => {
+  it("rejects Arcane Lock until the live map object boundary is supported", () => {
     let actor = wizard('arcane-lock')
     actor.classResources = { 'dnd5e-spell-slot-3': { current: 1, max: 3 } }
     const granted = applyDnd5eInventoryMutation([actor], {
@@ -3300,6 +3238,7 @@ describe('plugin spell CombatTransaction', () => {
       },
       round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
     }
+    const resourcesBefore = structuredClone(actor.classResources)
     const prepared = prepareDnd5ePluginSpellCast({
       action, map, characters: [actor],
       initiativeOrder: [
@@ -3308,18 +3247,10 @@ describe('plugin spell CombatTransaction', () => {
       ],
       roomRequiredPlugins: [],
     })
-    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
-    if (!prepared.ok) return
-    expect(prepared.prepared.activityAreaExemptTargetIds).toEqual([designatedToken.id])
-    expect(prepared.prepared.activityHeadlessAction?.payload).toMatchObject({ secretPhrase: '星痕开门' })
-    const resolved = resolvePreparedDnd5ePluginSpellCast({ currentRoom: { maps: [prepared.prepared.map], characters: prepared.prepared.characters }, prepared: prepared.prepared, rolls: {} })
-    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
-    if (!resolved.result.ok) throw new Error(resolved.result.reason)
-    expect(resolved.result.activityHandoffs?.mapObjectLocks?.[0]).toMatchObject({
-      mode: 'arcane-lock', spellLevel: 3, authorizedTargetIds: [designatedToken.id],
-    })
-    expect(resolved.result.activityHandoffs?.mapObjectLocks?.[0]?.passwordDigest)
-      .toMatch(/^fnv1a32:/)
+    // Proposal handlers exist, but the live map boundary cannot yet apply these object changes.
+    // Reject before spending an action or a spell slot rather than reporting a successful cast.
+    expect(prepared).toEqual({ ok: false, reason: 'spell-not-headless' })
+    expect(actor.classResources).toEqual(resourcesBefore)
   })
 
   it('keeps Mislead invisibility after its own cast event, switches senses both ways, and breaks invisibility on a later spell cast', async () => {

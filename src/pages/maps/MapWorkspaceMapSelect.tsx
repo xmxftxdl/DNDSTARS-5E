@@ -1,6 +1,7 @@
 import { memo, type Dispatch, type SetStateAction } from 'react'
 import { useMapStore } from '../../store/maps'
 import { selectMapWorkspaceMenuItems } from './mapWorkspaceMenuProjection'
+import { getMapImage } from '../../lib/imageStore'
 
 interface MapWorkspaceMapSelectProps {
   activeMapId: string
@@ -18,6 +19,9 @@ function MapWorkspaceMapSelect({
     <select
       value={activeMapId}
       onChange={(event) => {
+        // Start the image read before publishing scene state and rendering the
+        // combat workspace. MapCanvas joins this request instead of restarting it.
+        void getMapImage(event.target.value).catch(() => undefined)
         select(event.target.value)
         setSelectedTokenId(null)
       }}

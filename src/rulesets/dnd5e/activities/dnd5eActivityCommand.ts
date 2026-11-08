@@ -88,10 +88,15 @@ export interface Dnd5eActivityAuthorityInput {
   cancelledCriticalCheckKeys?: ReadonlySet<string>
   weaponCounterattackSuccessCheckKeys?: Dnd5eActivityExecutionInput['weaponCounterattackSuccessCheckKeys']
   allowCriticalDiceSuperset?: boolean
+  resolveSpellDamageFeatureIds?: Dnd5eActivityExecutionInput['resolveSpellDamageFeatureIds']
   resolveDamageRollBonus?: Dnd5eActivityExecutionInput['resolveDamageRollBonus']
   /** Derived from the active combat turn by the Host, not the wire command. */
   /** Host-owned combat scope; never read from the submitted command. */
   combatActive?: boolean
+  /** Host snapshot only; never read from Activity command payload. */
+  combatRound?: number
+  attackActionUsed?: boolean
+  actionEconomyAvailable?: Partial<Record<'action' | 'bonus-action' | 'reaction', boolean>>
   currentTurnActorId?: string
   /** Host-provided continuation history, absent from the wire command. */
   continuationTargetIds?: readonly string[]
@@ -103,6 +108,8 @@ export interface Dnd5eActivityAuthorityInput {
   combatants?: readonly Dnd5eActivityActorSnapshot[]
   /** Rolls are supplied by the Host/authority, never copied from the command. */
   authoritativeRolls: Readonly<Record<string, Dnd5eFormulaRollResult>>
+  /** Host-only original healing-role replacements; absent from wire commands. */
+  healingRolls?: Readonly<Record<string,Dnd5eFormulaRollResult>>
   /** Host-owned prepared equipment profile; never copied from the submitted command. */
   equipmentWeaponDamage?: import('./dnd5eEquipmentWeaponDamage').Dnd5eEquipmentWeaponDamageSnapshot
   /** Caller supplies Host-confirmed qualifications outside the serialized intent. */
@@ -371,9 +378,11 @@ export function resolveDnd5eActivityCommand(
     companionGuardAreas: input.command.companionGuardAreas,
     castLevel: input.command.castLevel,
     rolls: input.authoritativeRolls,
+    healingRolls: input.healingRolls,
     equipmentWeaponDamage: input.equipmentWeaponDamage,
     checkRollModes: input.checkRollModes,
     negateDisadvantage: input.negateDisadvantage,
+    resolveSpellDamageFeatureIds: input.resolveSpellDamageFeatureIds,
     resolveDamageRollBonus: input.resolveDamageRollBonus,
     cancelledCriticalCheckKeys: input.cancelledCriticalCheckKeys,
     weaponCounterattackSuccessCheckKeys: input.weaponCounterattackSuccessCheckKeys,
@@ -395,6 +404,9 @@ export function resolveDnd5eActivityCommand(
     continuationTargetIds: input.continuationTargetIds,
     usedTurnKeys: input.usedTurnKeys,
     combatActive: input.combatActive,
+    combatRound: input.combatRound,
+    attackActionUsed: input.attackActionUsed,
+    actionEconomyAvailable: input.actionEconomyAvailable,
     currentTurnActorId: input.currentTurnActorId,
     dmApproved: input.dmApproved,
     triggerContext: input.triggerContext,

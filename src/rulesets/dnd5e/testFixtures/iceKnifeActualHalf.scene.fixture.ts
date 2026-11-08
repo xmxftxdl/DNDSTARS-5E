@@ -1,0 +1,35 @@
+import{createDnd5eEffectiveRulesContextV1,restoreDnd5eEffectiveRulesContextForCombat}from'../effectiveRulesContext'
+import{buildDnd5eLevelAdvancementPlan,applyDnd5eLevelAdvancement}from'../levelAdvancement'
+import{trueMultiHumanBSource}from'./bountifulMultiSaving.scene.fixture'
+import{normalizeCharacter}from'../../../store/characters'
+import{dnd5eClassDefinition}from'../classes'
+import{syncDnd5eHitPoints}from'../hitPoints'
+import{buildDnd5eSpellAdvancementPlanFromSelections,applyDnd5eSpellAdvancement}from'../spellAdvancement'
+import{dnd5eEffectiveSpellcastingSourceForClassSnapshot,dnd5ePatchEffectiveSpellSelections}from'../subclassSpellcasting'
+import{applyDnd5eContentBuildChoicesV1}from'../buildChoices'
+import{applyDnd5eInventoryMutation,normalizeDnd5eInventory}from'../items'
+import{restoreClassResources}from'../../../lib/classResources'
+import{prepareDnd5ePluginSpellCast}from'../pluginSpellTransaction'
+import{activeDnd5eRulesPluginRequirements,dnd5ePluginSubclassDefinition}from'../pluginApi'
+export async function actualFiniteSavingHalfSource(kind:'frostbite'|'ice-knife'|'storm-cause-fear'){
+ const installed=await trueMultiHumanBSource();try{
+ const original=installed.source.prepared,classId=kind==='storm-cause-fear'?'sorcerer':'wizard',subclassId=classId==='sorcerer'?'local.xge.repaired.archer93:storm-sorcery':undefined,spellId='local.xge.repaired.archer93:'+(kind==='storm-cause-fear'?'cause-fear':kind),acquiredSpellId=kind==='storm-cause-fear'?'mage-armor':spellId
+ let caster=syncDnd5eHitPoints(normalizeCharacter({id:'support',name:'Lawful finite '+kind,roomId:'room',roomMemberId:'first-member',charClass:classId==='wizard'?'法师':'术士',level:1,hitPointMaximumMode:'fixed',dnd5eClassLevels:{[classId]:1},savingThrows:[...dnd5eClassDefinition(classId)!.savingThrows],dnd5eRaceId:'halfling',abilities:{str:10,dex:12,con:14,int:16,wis:10,cha:16},...(subclassId?{dnd5eClassChoices:{classes:{sorcerer:{subclass:subclassId,selections:{'class-skills':['arcana','persuasion']}}}}}:{})}))
+ const plan=buildDnd5eSpellAdvancementPlanFromSelections({classId,fromClassLevel:0,toClassLevel:1,...(subclassId?{subclassId,selections:caster.dnd5eClassChoices!.classes!.sorcerer!.selections}:{})});if(!plan)throw Error('Actual initial caster spell plan required')
+ const prefer=(options:readonly{id:string}[],id:string,count:number)=>[...options.filter(s=>s.id===id),...options.filter(s=>s.id!==id)].slice(0,count).map(s=>s.id),cantrips=prefer(plan.cantripOptions,acquiredSpellId,plan.targetCantripCount),spells=prefer(plan.spellOptions,acquiredSpellId,classId==='wizard'?plan.targetWizardSpellbookCount??0:plan.targetKnownSpellCount??0)
+ if(kind==='frostbite'?!cantrips.includes(acquiredSpellId):!spells.includes(acquiredSpellId))throw Error('Actual registered spell must be acquired through the lawful plan:'+kind)
+ const learned=applyDnd5eSpellAdvancement(caster,plan,{cantrips,...(classId==='wizard'?{wizardSpellbook:spells}:{knownSpells:spells})},subclassId);if(!learned.ok)throw Error(learned.reason);caster=learned.character
+ if(subclassId){const sub=dnd5ePluginSubclassDefinition(subclassId);if(!sub)throw Error('Actual full Storm subclass required');const built=applyDnd5eContentBuildChoicesV1({character:caster,contentId:sub.id,advancements:sub.advancements?.filter(a=>a.level<=1)});if(!built.ok)throw Error(built.reason);caster=built.character}
+ if(classId==='wizard'&&kind!=='frostbite'){const source=dnd5eEffectiveSpellcastingSourceForClassSnapshot('wizard',1);if(!source)throw Error('Actual Wizard prepared source required');caster=normalizeCharacter({...caster,...dnd5ePatchEffectiveSpellSelections(caster,source,{'spell-prepared':[spellId]})})}
+ const pouch=applyDnd5eInventoryMutation([caster],{type:'grant',characterId:caster.id,templateId:'srd-5.1:item:component-pouch',quantity:1});if(!pouch.ok)throw Error(pouch.reason);caster=pouch.characters[0];const weapon=normalizeDnd5eInventory(caster).entries.find(e=>e.equippedSlot==='mainWeapon');if(weapon){const freed=applyDnd5eInventoryMutation([caster],{type:'unequip',characterId:caster.id,instanceId:weapon.instanceId});if(!freed.ok)throw Error(freed.reason);caster=freed.characters[0]}caster=syncDnd5eHitPoints(restoreClassResources(caster,'long-rest'))
+ if(kind==='storm-cause-fear'){
+  const adv=buildDnd5eLevelAdvancementPlan(caster,'wizard',1);if(!adv?.spellAdvancement)throw Error('Lawful Wizard1 multiclass plan required');const sp=adv.spellAdvancement,book=prefer(sp.spellOptions,spellId,sp.targetWizardSpellbookCount??0);if(!book.includes(spellId))throw Error('Wizard1 actual CauseFear option required');const next=applyDnd5eLevelAdvancement(caster,{schemaVersion:1,classId:'wizard',levelsGained:1,hitPointMethod:'fixed',hitPointRolls:[],asiChoices:[],classChoiceSelections:Object.fromEntries(adv.choiceRequirements.map(r=>[r.key,[...r.currentSelections,...r.options.map(o=>o.id).filter(id=>!r.currentSelections.includes(id))].slice(0,r.targetLimit)])),contentChoiceSelections:Object.fromEntries(adv.contentAdvancements.map(row=>[row.contentId,Object.fromEntries(row.requirements.map(r=>[r.id,r.options.slice(0,r.count).map(o=>o.id)]))])),spellSelections:{cantrips:sp.cantripOptions.slice(0,sp.targetCantripCount).map(s=>s.id),wizardSpellbook:book}});if(!next.ok)throw Error(next.reason);caster=syncDnd5eHitPoints(restoreClassResources(next.character,'long-rest'));const source=dnd5eEffectiveSpellcastingSourceForClassSnapshot('wizard',1);if(!source)throw Error('Actual Wizard prepared source required');caster=normalizeCharacter({...caster,...dnd5ePatchEffectiveSpellSelections(caster,source,{'spell-prepared':[spellId]})})
+ }
+
+ if(caster.dnd5ePluginFeatureIds?.length||caster.level!==(kind==='storm-cause-fear'?2:1))throw Error('No copied plugin feature ids or prebuilt caster levels')
+ const characters=original.characters.map(c=>c.id===caster.id?caster:c),map={...original.map,id:'actual-finite-'+kind,tokens:original.map.tokens.map(t=>({...t,dnd5eSide:'player'as const,...(t.characterId===caster.id?{hp:caster.currentHp,maxHp:caster.maxHp}:{})}))},action={...original.action,id:'actual-finite-'+kind,combatId:'actual-finite-'+kind,mapId:map.id,dnd5eSpellCast:{...original.action.dnd5eSpellCast!,spellId,castingClassId:'wizard'as const,slotLevel:kind==='frostbite'?0:1,targetTokenId:'caster-token',targetTokenIds:['caster-token']}}
+ restoreDnd5eEffectiveRulesContextForCombat(action.combatId,createDnd5eEffectiveRulesContextV1({requiredPlugins:activeDnd5eRulesPluginRequirements()}))
+ const prepared=prepareDnd5ePluginSpellCast({map,characters,roomRequiredPlugins:activeDnd5eRulesPluginRequirements(),effectiveRules:createDnd5eEffectiveRulesContextV1({requiredPlugins:activeDnd5eRulesPluginRequirements()}),initiativeOrder:map.tokens.map((t,i)=>({tokenId:t.id,slotId:t.id+':normal',label:t.label,roll:30-i,color:'',emoji:''})),action});if(!prepared.ok)throw Error('Genuine '+kind+' preparation:'+prepared.reason)
+ return{source:{prepared:prepared.prepared,currentRoom:{maps:[map],characters},rolls:{activityRolls:{}}},dispose:installed.dispose,spellId}
+ }catch(error){installed.dispose();throw error}
+}

@@ -1,3 +1,4 @@
+import { escapeSaveAbility } from './escapeSaveAbility'
 import type { Dnd5eActiveEffectSavingThrowRoll } from './activeEffects'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import {resolveDnd5eActionWithEscapeEjection,type Dnd5eEscapeEjectionRolls} from './persistentAreaEscapeEjection'
@@ -98,8 +99,8 @@ export function prepareDnd5eMonsterEscapeActiveEffect(input: {
   if (!effect) return { ok: false, reason: 'invalid-effect' }
   const removalCheck = effect.escapeCheck || effect.escapeSavingThrow ? undefined : effect.removal?.action?.abilityCheck
   const option = effect.escapeSavingThrow
-    ? { ability: effect.escapeSavingThrow.ability, skill: undefined,
-        mode: dnd5eSavingThrowMode(combatant, effect.escapeSavingThrow.ability, { effectVisible: true,
+    ? { ability: escapeSaveAbility(combatant,effect.escapeSavingThrow), skill: undefined,
+        mode: dnd5eSavingThrowMode(combatant, escapeSaveAbility(combatant,effect.escapeSavingThrow), { effectVisible: true,
           sourceIsSpell: effect.source.kind === 'spell', sourceIsMagical: effect.source.magical === true }) }
     : effect.escapeCheck
     ? dnd5eBestActiveEffectEscapeOption(combatant, effect.escapeCheck, effect.standardCondition === 'grappled')

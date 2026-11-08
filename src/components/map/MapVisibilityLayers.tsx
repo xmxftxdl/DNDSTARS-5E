@@ -6,19 +6,7 @@ import { rectangularLightHasClippedCells } from '../../../shared/clipped-prism-o
 import { ContinuousSpellLightMask } from './ContinuousSpellLightMask'
 import { Circle, Group, Line, Rect } from 'react-konva'
 import type { BattleMap, Token } from '../../store/maps'
-import {
-  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
-  mapGeometryAbsoluteElevationAtPoint,
-  mapGeometryLightPolygon,
-  mapGeometryMagicalDarknessObstacleIsSuppressed,
-  mapGeometryObstacleAffectsElevation,
-  mapGeometrySpellLightingSources,
-  mapGeometryTokenElevation,
-  mapGeometryVisibilityPolygon,
-  mapGeometryVisibleTargets,
-  type MapGeometryPoint,
-  type MapGeometryState,
-} from '../../lib/mapGeometry'
+import { DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET, mapGeometryAbsoluteElevationAtPoint, mapGeometryLightPolygon, mapGeometryMagicalDarknessObstacleIsSuppressed, mapGeometryObstacleAffectsElevation, mapGeometrySpellLightingSources, mapGeometrySourceCanSeeThroughDarkness, mapGeometryTokenElevation, mapGeometryVisibilityPolygon, mapGeometryVisibleTargets, type MapGeometryPoint, type MapGeometryState, } from '../../lib/mapGeometry'
 import { campaignLightIsActive } from '../../lib/campaignTime'
 import {
   type FogShape,
@@ -460,6 +448,16 @@ export function LightingLayer({
         ))}
         {spellDarkness.map((source) => (
           <Group key={`magical-darkness-top:${source.id}`} listening={false} clipFunc={(context) => {
+            // The caster's sight clips only this original SP-created darkness,
+            // using the same walls/blindness/range polygon as ordinary vision.
+            if (!isDM) for (const viewer of viewers) {
+              if (!mapGeometrySourceCanSeeThroughDarkness(map,source.areaId,viewer)) continue
+              const polygon=mapGeometryVisibilityPolygon({map,geometry,viewer,forceEnabled:true,worldMinute})
+              if(polygon.length<3)continue
+              context.beginPath();context.rect(0,0,map.width,map.height);context.moveTo(polygon[0].x,polygon[0].y)
+              for(const point of polygon.slice(1))context.lineTo(point.x,point.y)
+              context.closePath();context.clip('evenodd')
+            }
             // Clip each eligible light out of this darkness only. Sequential
             // inverse clips form a union of holes, including overlapping lights.
             if (source.lightSuppressionScope === 'within-area') {

@@ -1,3 +1,4 @@
+import { dnd5eActiveObjectCreatureTraversal } from './activeEffects'
 import { dnd5eCharacterRageDeathDeferralActive } from './pluginApi'
 import {dnd5eTempleEntryRequirements} from './templeEntry'
 import { dnd5eJumpLaunchPoint } from './jumpLaunchPoint'
@@ -322,6 +323,7 @@ export function prepareDnd5eExplorationMove(input: {
     },
     geometry,
     token: actorGeometryToken,
+    passThroughObjectsAndCreatures: dnd5eActiveObjectCreatureTraversal(actorCombatant.classState.activeEffects),
     passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects)
       .flatMap(source => source.rule.materials),
     to,
@@ -548,7 +550,7 @@ export function prepareDnd5ePlayerMove(input: {
   const toGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
   const solidMaterials = dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects)
     .flatMap(source => source.rule.materials)
-  const undergroundWalk = traversalMode === 'walk' && solidMaterials.length > 0 &&
+  const undergroundWalk = traversalMode === 'walk' && (solidMaterials.length > 0 || dnd5eActiveObjectCreatureTraversal(actorCombatant.classState.activeEffects)) &&
     Number.isFinite(action.targetElevationFeet) && requestedElevationFeet < toGroundElevationFeet
   const toElevationFeet = undergroundWalk ? requestedElevationFeet : ignoresMaterialCollision && traversalMode !== 'fly'
     ? fromElevationFeet
@@ -558,6 +560,7 @@ export function prepareDnd5ePlayerMove(input: {
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorGeometryToken, to,
     passThroughSolidMaterials: solidMaterials,
+    passThroughObjectsAndCreatures: dnd5eActiveObjectCreatureTraversal(actorCombatant.classState.activeEffects),
     climbVerticalSurfaces: traversalMode === 'climb',
     canClimb: traversalMode === 'climb' || traversalMode === 'fly',
     canSwim: traversalMode === 'swim' || environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
@@ -622,6 +625,7 @@ export function prepareDnd5ePlayerMove(input: {
         const expectedElevation = draggedElevationStart +
           (path.elevationsFeet[index] ?? sourceElevationStart) - sourceElevationStart
         const draggedSegment = findMapGeometryPath({
+          passThroughObjectsAndCreatures: dnd5eActiveObjectCreatureTraversal(snapshot.state.combatants[draggedTarget.id]?.classState.activeEffects),
           passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(snapshot.state.combatants[draggedTarget.id]?.classState.activeEffects)
             .flatMap(source => source.rule.materials),
           geometry,
@@ -953,7 +957,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
   fallingDamageRolls?: readonly number[]
   fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; prepared?: PreparedDnd5ePlayerMove;
+}, execution: { now?: number } = {}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; prepared?: PreparedDnd5ePlayerMove;
   solidExitReactionState?: Dnd5eHeadlessCombatState;
   airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[] } {
   const { prepared } = input
@@ -983,7 +987,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     movementRepeatSavingThrows: input.movementRepeatSavingThrows,
     fallingDamageRolls: input.fallingDamageRolls,
     fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
-  }, { transactionId: input.transactionId }, {deferMovementRepeatSavingThrows:input.deferMovementRepeatSavingThrows})
+  }, { transactionId: input.transactionId, now: execution.now }, {deferMovementRepeatSavingThrows:input.deferMovementRepeatSavingThrows})
   if (!result.ok) return { result }
   if (!result.movementBlocked && !input.deferSolidMaterialExit) {
     const exit = settleDnd5eSolidMaterialExit({ state: result.state, map: prepared.map,

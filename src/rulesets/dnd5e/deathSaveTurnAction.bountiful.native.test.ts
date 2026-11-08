@@ -1,0 +1,16 @@
+import{it,expect}from'vitest'
+import{genuineFirstDeathSavingTurn}from'./deathSaveTurnAction.bountiful.native.fixture'
+import{prepareDnd5eDeathSavingTurn,resolvePreparedDnd5eDeathSavingTurn}from'./deathSaveTurnAction'
+import{withAllyNaturalOneCheckpoints}from'./allyNaturalOneCheckpoint'
+import{dnd5eHalflingLuckySuppressed}from'./headlessCombatEngine'
+it.each([undefined,17,20])('the true zero-HP turn original one reaches B before any death outcome; replacement=%s',async replacement=>{
+ const f=await genuineFirstDeathSavingTurn();try{expect(f.initialFoeHp).toBe(10);expect(f.helperProof).toEqual({level:4,copied:[]});const before=structuredClone(f.prepared),original=f.prepared.state.combatants['foe-token'];expect(original.currentHp).toBe(0);expect(original.classState.deathSaveTurn).toMatchObject({eligible:true,resolved:false});let seen=0;
+ const native=withAllyNaturalOneCheckpoints((request,state)=>{seen++;expect(request).toMatchObject({actorId:'foe-token',kind:'saving-throw',originalRolls:[1],dieIndex:0});expect(state.combatants['foe-token'].deathSaves).toMatchObject({failures:0,successes:0,dead:false,stable:false});expect(state.combatants['foe-token'].classState.deathSaveTurn?.resolved).toBe(false);const owner=request.options.find(o=>o.ownerId==='helper-token');expect(owner).toBeTruthy();return replacement===undefined?undefined:{...owner!,replacement}},()=>resolvePreparedDnd5eDeathSavingTurn({prepared:f.prepared,command:f.command}));expect(native.result.ok,native.result.ok?'':native.result.reason).toBe(true);expect(seen).toBe(1);expect(f.prepared).toEqual(before);const target=native.result.state.combatants['foe-token'],helper=native.result.state.combatants['helper-token'];expect(target.currentHp).toBe(replacement===20?1:0);expect(target.deathSaves.failures).toBe(replacement===undefined?2:0);expect(target.deathSaves.successes).toBe(replacement===17?1:0);expect(helper.turn.reactionAvailable).toBe(replacement===undefined);expect(dnd5eHalflingLuckySuppressed(helper)).toBe(replacement!==undefined);expect(native.result.events.filter(e=>e.type==='death-save-resolved')).toHaveLength(1);expect(native.result.events.find(e=>e.type==='death-save-resolved')).toMatchObject({d20:replacement??1});expect(native.application).toBeTruthy();if(replacement!==20)expect(native.result.state.initiativeOrder[native.result.state.initiativeIndex]).toBe('helper-token')
+ }finally{f.dispose()}
+})
+it('rejects an ordinary skill parent, a foreign turn actor and nonzero HP instead of inventing a death-save source',async()=>{const f=await genuineFirstDeathSavingTurn();try{
+ expect(prepareDnd5eDeathSavingTurn({...f.preparationInput,action:{...f.preparationInput.action,type:'dnd5e-ability-check'}}).ok).toBe(false)
+ expect(prepareDnd5eDeathSavingTurn({...f.preparationInput,action:{...f.preparationInput.action,actorTokenId:'helper-token',characterId:'helper'}}).ok).toBe(false)
+ expect(prepareDnd5eDeathSavingTurn({...f.preparationInput,characters:f.preparationInput.characters.map(c=>c.id==='foe'?{...c,currentHp:1}:c)}).ok).toBe(false)
+ expect(()=>resolvePreparedDnd5eDeathSavingTurn({prepared:f.prepared,command:{...f.command,actorId:'helper-token'}})).toThrow('death-turn:actual-eligible-current-original-required')
+ }finally{f.dispose()}})

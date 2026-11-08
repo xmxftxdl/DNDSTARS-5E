@@ -1,3 +1,4 @@
+import { explicitCharacterCanBreatheWater } from './explicit-water-breathing-policy.mjs'
 import { advanceSubmergedBreathingStep } from './submerged-breathing-step.mjs'
 import { normalizeSubmergedBreathingEffectDeadlines } from './submerged-breathing-state.mjs'
 import { monsterBreathingProfiles } from './monster-breathing-profiles.mjs'
@@ -21,7 +22,7 @@ function combatCreditsBridgeCursor(clock, cursor, to, actorKey) {
 }
 
 /** Plan breathing before the time transaction discards expired area instances. */
-export function planCampaignSubmergedBreathing({ maps, characters, previousClock, nextClock }) {
+export function planCampaignSubmergedBreathing({ maps, characters, previousClock, nextClock, explicitWaterBreathingPolicies = [], explicitSummonedMonsterConstitutions = [] }) {
   const from = clockSeconds(previousClock), to = clockSeconds(nextClock), elapsed = to - from
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || elapsed <= 0)
     return { updates: [], endedSourceIds: [] }
@@ -36,7 +37,11 @@ export function planCampaignSubmergedBreathing({ maps, characters, previousClock
     if (character) seenCharacters.add(character.id)
     const entity = character ?? token, state = entity.dnd5eCombatState ?? {}, effects = state.activeEffects ?? []
     if (!state.submergedBreathing && !effects.some(effect => effect.modifiers?.submerged === true)) return []
-    const profile = monsterBreathingProfiles[state.wildShapeFormId ?? token.poolId]
+    const profileKey = state.wildShapeFormId ?? token.poolId
+    // Only a genuinely issued summon from the same installed source may use
+    // its declared base Constitution. Preserve SRD and existing form precedence.
+    const issuedProfile = explicitSummonedMonsterConstitutions.find(p => p.monsterId === profileKey && p.pluginId === token.dnd5eSummon?.pluginId)
+    const profile = monsterBreathingProfiles[profileKey] ?? issuedProfile
     const baseCon = profile?.constitutionScore ?? token.dnd5eSimulacrum?.abilities?.con ?? character?.abilities?.con ?? 10
     // Native actors persist their base scores; the combat bridge subtracts this
     // ledger when it constructs their effective abilities. Match that boundary.
@@ -60,7 +65,7 @@ export function planCampaignSubmergedBreathing({ maps, characters, previousClock
       // must not be extended every time the campaign clock catches up.
       return [previous ?? { effectId: effect.id, appliedAt: effect.appliedAt, expiresAtSeconds: from + credit + effect.duration.remainingRounds * 6 }]
     })
-    return [{ mapId: map.id, tokenId: token.id, characterId: character?.id, entity, effects, con, profile,
+    return [{ mapId: map.id, tokenId: token.id, characterId: character?.id, entity, effects, con, profile, intrinsicCanBreatheWater: explicitCharacterCanBreatheWater(character, explicitWaterBreathingPolicies),
       originalCon: state.wildShapeOriginalAbilities?.con ?? monsterBreathingProfiles[state.wildShapeOriginalStatBlockId]?.constitutionScore ?? character?.abilities?.con ?? 10,
       deadlines, credit: cursor === to ? elapsed : credit, breathing: state.submergedBreathing, collapsedAt: undefined }]
   }))
@@ -90,7 +95,7 @@ export function planCampaignSubmergedBreathing({ maps, characters, previousClock
       (effect.source?.magical === true) === rule.sourceMagical && rule.conditions.includes(effect.standardCondition)))
     const caps = effective.flatMap(effect => effect.modifiers?.environmentalCapabilities ?? [])
     return { constitutionScore: actor.con,
-      canBreathe: !effective.some(effect => effect.modifiers?.submerged === true) || actor.profile?.canBreatheWater === true ||
+      canBreathe: !effective.some(effect => effect.modifiers?.submerged === true) || actor.profile?.canBreatheWater === true || actor.intrinsicCanBreatheWater ||
         caps.some(cap => cap.doesNotNeedAir || cap.breatheIn?.includes('water')),
       holdBreathSeconds: Math.max(actor.profile?.holdBreathSeconds ?? 0, ...caps.map(cap => cap.holdBreathSeconds ?? 0)) || undefined }
   }

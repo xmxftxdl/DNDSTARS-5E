@@ -1,0 +1,17 @@
+import{it,expect}from'vitest'
+import{genuineInitiativePreparation}from'./testFixtures/initiativeOriginal.native.fixture'
+import*as originals from'./initiativeOriginal'
+import{withAllyNaturalOneCheckpoints}from'./allyNaturalOneCheckpoint'
+import{createDnd5eMapCombatSnapshot}from'./mapBridge'
+import{resolveDnd5eHeadlessAction}from'./headlessCombatEngine'
+
+async function completed(){const f=await genuineInitiativePreparation();try{const first=withAllyNaturalOneCheckpoints(()=>({ownerId:'init-helper-token',featureId:f.featureId,replacement:20}),()=>originals.resolvePreparedDnd5eInitiativeOriginal({prepared:f.prepared})),second=originals.prepareDnd5eInitiativeOriginalContinuation(first,'init-helper-token',[8]),last=withAllyNaturalOneCheckpoints(()=>undefined,()=>originals.resolvePreparedDnd5eInitiativeOriginal({prepared:second})),order=f.input.map.tokens.map((token,index)=>({tokenId:token.id,slotId:token.id+':normal',label:token.label,color:'',emoji:'I',roll:index?9:21}));if(!last.application)throw Error('Actual Native application required');return{...f,last,order}}catch(error){f.dispose();throw error}}
+
+it('the actual ordinary start projector resets a pre-combat Native reaction, while its genuine Native start continuation retains the cost until the real helper turn',async()=>{const f=await completed();try{
+ const old=createDnd5eMapCombatSnapshot({map:f.last.application!.map,characters:f.last.application!.characters,combatId:f.input.scene.preparationId,round:1,initiativeOrder:f.order});expect(old.state.combatants['init-helper-token'].turn.reactionAvailable).toBe(true)
+ const actual=originals.prepareDnd5eInitiativeCombatStart(f.last,f.order);expect(actual.state.active).toBe(true);expect(actual.state.initiativeOrder).toEqual(['init-actor-token','init-helper-token']);expect(actual.state.combatants['init-helper-token'].turn.reactionAvailable).toBe(false);expect(actual.state.combatants['init-actor-token'].turn.actionAvailable).toBe(true)
+ const first=resolveDnd5eHeadlessAction(actual.state,{type:'begin-turn',actorId:'init-actor-token'});expect(first.ok).toBe(true);expect(first.state.combatants['init-helper-token'].turn.reactionAvailable).toBe(false)
+ const helperFirst=originals.prepareDnd5eInitiativeCombatStart(f.last,[f.order[1],f.order[0]]),own=resolveDnd5eHeadlessAction(helperFirst.state,{type:'begin-turn',actorId:'init-helper-token'});expect(own.ok).toBe(true);expect(own.state.combatants['init-helper-token'].turn.reactionAvailable).toBe(true)
+ }finally{f.dispose()}})
+
+it('only a complete unchanged real initiative chain may create the combat-start Native snapshot',async()=>{const f=await completed();try{expect(()=>originals.prepareDnd5eInitiativeCombatStart(JSON.parse(JSON.stringify(f.last)),f.order)).toThrow('actual-unchanged-prior-required');expect(()=>originals.prepareDnd5eInitiativeCombatStart(f.last,[f.order[0]])).toThrow('complete-original-roster-required');const start=originals.prepareDnd5eInitiativeCombatStart(f.last,f.order);expect(originals.readPreparedDnd5eInitiativeCombatStart(start)).toBe(start);expect(()=>originals.readPreparedDnd5eInitiativeCombatStart(JSON.parse(JSON.stringify(start)))).toThrow('actual-unchanged-start-required');Reflect.set(start.state.combatants['init-helper-token'].turn,'reactionAvailable',true);expect(()=>originals.readPreparedDnd5eInitiativeCombatStart(start)).toThrow('actual-unchanged-start-required')}finally{f.dispose()}})

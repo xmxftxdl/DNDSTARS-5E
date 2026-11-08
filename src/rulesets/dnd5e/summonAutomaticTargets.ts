@@ -44,6 +44,7 @@ export function dnd5eSummonAutomaticTargets(
   }
   const summon = actor.dnd5eSummon
   if (!summon) return undefined
+  if(summon.illOmenTarget)return {mode:'attack',targets:map.tokens.filter(target=>target.id===summon.illOmenTarget!.targetTokenId && (!summon.illOmenTarget!.targetCharacterId || target.characterId===summon.illOmenTarget!.targetCharacterId) && target.type!=='obstacle' && (characters.find(c=>c.id===target.characterId)?.currentHp??target.hp??target.maxHp??1)>0)}
   const uncontrolled = summon.controlEnded && summon.controlSave
   const order = actor.dnd5eCombatState?.companionCommand
   const protectingSource = summon.autonomousBehavior === 'protect-source' &&

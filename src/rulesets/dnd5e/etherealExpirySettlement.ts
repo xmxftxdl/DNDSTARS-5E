@@ -3,6 +3,7 @@ import type { Character } from '../../types/character'
 import type { MapGeometryState } from '../../lib/mapGeometry'
 import { dnd5eActivePlanarPhase } from './activeEffects'
 import { settleDnd5eEtherealReturns } from './etherealReturnSettlement'
+import {settleDnd5ePendingBanishmentReturns} from './banishingSmiteReturn'
 import { planDnd5eMapResultApplication } from './mapBridge'
 import { replayDnd5eSolidExitFeatherFallChoices, type Dnd5eSolidExitFeatherFallChoice } from './solidMaterialExitSettlement'
 import { previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
@@ -28,12 +29,16 @@ export function resolveDnd5eEtherealExpiry(input: {
     map: input.map, geometry: input.geometry,
   })
   if (!returned.ok) return { ok: false as const, reason: returned.reason }
+  const native=settleDnd5ePendingBanishmentReturns({state:returned.state,map:input.map,geometry:input.geometry,
+    characters:input.characters,characterIdByCombatantId:input.characterIdByCombatantId})
+  if(!native.ok)return{ok:false as const,reason:native.reason}
+  for(const event of native.events)if(event.type==='active-effect-removed'&&!ids.includes(event.targetId))ids.push(event.targetId)
   const reactions = replayDnd5eSolidExitFeatherFallChoices(input.before, returned.state, ids, input.choices)
   if (!reactions.ok) return { ok: false as const, reason: 'invalid-reaction' }
   const falls = previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(input.before, reactions.state, ids)
   const landed = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(input.before, reactions.state, input.rolls, ids)
   if (!landed.ok) return { ok: false as const, reason: landed.reason, falls, reactionState: reactions.state }
-  const events = [...returned.events, ...reactions.events, ...landed.events]
+  const events = [...returned.events, ...native.events, ...reactions.events, ...landed.events]
   return { ok: true as const, state: landed.state, events,
     application: planDnd5eMapResultApplication({ state: landed.state, map: input.map, geometry: input.geometry,
       characters: input.characters, characterIdByCombatantId: input.characterIdByCombatantId, events }) }

@@ -1,0 +1,3 @@
+import type{ActivityAbilityOriginalMissing}from'../rulesets/dnd5e/activities/activityAbilityOriginalMissing';
+export type BountifulActivityOriginalIdentity={parentId:string;mapId:string;combatId:string};
+export interface BountifulActivityOriginalBook extends BountifulActivityOriginalIdentity{ok:true;schemaVersion:1;sourceKind:'activity-original-v1';roomId:string;hostMemberId:string;source:ReturnType<typeof import('../lib/secondChanceParentWire').encodeSecondChanceParentWire>;effectTimestamp:number;rows:(ActivityAbilityOriginalMissing&{request:ActivityAbilityOriginalMissing;index:number;requestId:string;characterId:string;memberId:string;label:string;raw?:{memberId:string;values:number[]};confirmed?:{memberId:string;values:number[]}})[]}

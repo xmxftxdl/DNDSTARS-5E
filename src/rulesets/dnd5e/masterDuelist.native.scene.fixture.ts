@@ -1,0 +1,6 @@
+import{nativeMasterDuelistBundle,growMasterRogue}from'./masterDuelist.native.fixture'
+import{registerDnd5eRulesPlugin}from'./pluginApi'
+import{dnd5eRulesPluginFromUnifiedContentBundleV1}from'./unifiedContent'
+import{createDnd5eMapCombatSnapshot}from'./mapBridge'
+import{normalizeCharacter}from'../../store/characters'
+export async function fixture(){const bundle=await nativeMasterDuelistBundle(),dispose=registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle));const hero=growMasterRogue(bundle.manifest.id),target=normalizeCharacter({id:'target',name:'Target',charClass:'fighter',level:1,dnd5eClassLevels:{fighter:1}}),characters=[hero,target];const map:any={id:'master-map',name:'Master',width:400,height:400,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:characters.map((c,i)=>({id:c.id+'-token',characterId:c.id,type:i?'enemy':'player',label:c.name,x:25+i*50,y:25,size:1,color:'',emoji:''}))};const {state}=createDnd5eMapCombatSnapshot({map,characters,combatId:'master-native-mechanic',round:1,initiativeOrder:map.tokens.map((t:any,i:number)=>({tokenId:t.id,label:t.label,emoji:'',color:'',roll:20-i}))});state.combatants['target-token'].armorClass=16;return{state,dispose,map,characters,ns:bundle.manifest.id}}

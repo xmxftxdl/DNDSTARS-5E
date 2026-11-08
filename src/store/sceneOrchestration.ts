@@ -34,7 +34,7 @@ export interface SceneOrchestrationStore {
   ensureScene: (mapId: string, mapName: string, center?: { x: number; y: number }) => string
   updateGlobalAudio: (patch: Partial<SceneAudioPreset>) => void
   updateScene: (sceneId: string, patch: Partial<Pick<OrchestratedScene,
-    'name' | 'description' | 'environmentLabel' | 'planarPortalSurvey' | 'weather' | 'backgroundCue' | 'backgroundAudioMode' | 'backgroundAudioId' |
+    'name' | 'description' | 'environmentLabel' | 'planarPortalSurvey' | 'sensoryDeceptionSurvey' | 'weather' | 'backgroundCue' | 'backgroundAudioMode' | 'backgroundAudioId' |
     'backgroundAudioLoop' | 'backgroundAudioVolume' | 'backgroundAudioAutoPlay' | 'boundHandoutIds' | 'boundJournalEntryIds'
   >>) => void
   removeScene: (sceneId: string) => void

@@ -1,3 +1,4 @@
+import {dnd5eInherentFeatureFlightEffects} from './inherentFeatureFlight'
 import type { Character } from '../../types/character'
 import { dnd5ePluginBooleanStaticModifierForCharacter } from './plugins/pluginContentCatalog'
 import { dnd5eWalkingSpeed, dnd5eClassDefinition } from './classes'
@@ -47,8 +48,8 @@ export function dnd5eEffectiveCharacterMovementProfile(
   // observed one revision apart. The token carries the same Headless creature
   // form state, so accept it as a projection instead of briefly falling back
   // to the character's original body speeds on the player client.
-  const effects = projectedCombatState?.activeEffects ??
-    character.dnd5eCombatState?.activeEffects
+  const effects = dnd5eInherentFeatureFlightEffects(character as Character, projectedCombatState?.activeEffects ??
+    character.dnd5eCombatState?.activeEffects)
   const creatureFormId = projectedCombatState?.wildShapeFormId ??
     character.dnd5eCombatState?.wildShapeFormId
   const creatureForm = creatureFormId

@@ -10,11 +10,15 @@ describe('explicit DM character dice ownership', () => {
     expect(isDiceCharacterOwnedByCurrentDm({roomId:'room',roomMemberId:'dm',ownerAccountId:'dm-account'},session)).toBe(true)
   })
   it.each([
-    undefined, {}, {roomId:'room'}, {roomId:'room',roomMemberId:'player'},
+    undefined, {roomId:'room',roomMemberId:'player'},
     {roomId:'other-room',roomMemberId:'dm'},
     {roomId:'room',roomMemberId:'dm',ownerAccountId:'player-account'},
   ])('does not claim unknown, other-room or player ownership (%j)', character => {
     expect(isDiceCharacterOwnedByCurrentDm(character,session)).toBe(false)
+  })
+  it('recognizes canonical unassigned DM-created characters without inventing player ownership', () => {
+    expect(isDiceCharacterOwnedByCurrentDm({},session)).toBe(true)
+    expect(isDiceCharacterOwnedByCurrentDm({roomId:'room'},session)).toBe(true)
   })
   it('requires an authenticated DM session, not merely a matching member', () => {
     const character={roomId:'room',roomMemberId:'dm'}

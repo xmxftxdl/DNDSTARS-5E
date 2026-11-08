@@ -7,6 +7,51 @@ import { openAiStrictJsonSchema, startLocalAiBridge } from '../../scripts/local-
 
 const servers: Array<{ close: () => Promise<unknown> } | Server> = []
 
+it('旧网页的 Luna 模型 ID 转发到 6.1 Sol，保留识图能力并按实际模型计费', async () => {
+  const upstream = await fakeRoutedExternalModelApi('compat-test-key')
+  const bridge = await startLocalAiBridge({
+    port: 0,
+    accessToken: 'compat-test-token',
+    externalApiUrl: upstream.apiUrl,
+    externalApiKey: 'compat-test-key',
+    externalModelId: 'gpt-6.1-sol',
+    externalModelDisplayName: 'GPT-6.1 Sol',
+    externalExtractionModelId: 'gpt-6.1-sol',
+    allowedOrigins: ['https://astraltracevtt.com'],
+  })
+  servers.push(bridge)
+  const headers = {
+    Origin: 'https://astraltracevtt.com',
+    Authorization: 'Bearer compat-test-token',
+    'Content-Type': 'application/json',
+  }
+  const response = await fetch(`${bridge.url}/api/models`, { headers })
+  const body = await response.json() as { models: Array<{ id: string }> }
+  expect(body.models).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'external:gpt-6.1-sol', capabilities: expect.arrayContaining(['vision']), supportedTasks: expect.arrayContaining(['map-analysis']) }),
+    expect.objectContaining({ id: 'external:gpt-5.6-luna', displayName: 'GPT-6.1 Sol', capabilities: expect.arrayContaining(['vision']) }),
+    expect.objectContaining({ id: 'external:extraction:gpt-5.6-luna', supportedTasks: ['pdf-extraction'] }),
+  ]))
+  for (const [modelId, task] of [
+    ['external:gpt-5.6-luna', 'resource-structuring'],
+    ['external:extraction:gpt-5.6-luna', 'pdf-extraction'],
+  ]) {
+    const generated = await fetch(`${bridge.url}/api/generate-structured`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ engine: 'external', modelId, request: {
+        schemaVersion: 1, jobId: `compat-${task}`, task,
+        systemPrompt: '只输出 JSON', userPrompt: '测试',
+        outputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      } }),
+    })
+    expect(generated.status).toBe(200)
+    expect(await generated.json()).toMatchObject({
+      output: { name: 'gpt-6.1-sol' }, billing: { modelId: modelId.replace('gpt-5.6-luna', 'gpt-6.1-sol') },
+    })
+  }
+  expect(upstream.requestedModels).toEqual(['gpt-6.1-sol', 'gpt-6.1-sol'])
+})
+
 async function closeServer(server: { close: () => Promise<unknown> } | Server) {
   if ('listening' in server) {
     if (!server.listening) return

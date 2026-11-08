@@ -27,6 +27,7 @@ import {
 } from '../lib/accountSession'
 import { getRoomClientId } from '../lib/roomSession'
 import { showAppConfirm } from '../lib/appDialog'
+import PasswordResetForm from './PasswordResetForm'
 
 interface AccountAuthPanelProps {
   account: AccountSession | null
@@ -51,7 +52,7 @@ export default function AccountAuthPanel({
   onLoggedOut,
   onError,
 }: AccountAuthPanelProps) {
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode)
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>(initialMode)
   const [config, setConfig] = useState<AccountAuthConfig>(EMPTY_CONFIG)
   const [configLoading, setConfigLoading] = useState(true)
   const [channel, setChannel] = useState<AccountVerificationChannel>('email')
@@ -68,6 +69,7 @@ export default function AccountAuthPanel({
   const [cooldownUntil, setCooldownUntil] = useState(0)
   const [now, setNow] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
+  const [verificationError, setVerificationError] = useState<string | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -78,7 +80,10 @@ export default function AccountAuthPanel({
         if (!next.channels.email && next.channels.phone) setChannel('phone')
       })
       .catch((cause) => {
-        if (!disposed) onError?.(accountApiErrorMessage(cause))
+        if (!disposed) {
+          setVerificationError(accountApiErrorMessage(cause))
+          onError?.(accountApiErrorMessage(cause))
+        }
       })
       .finally(() => {
         if (!disposed) setConfigLoading(false)
@@ -112,6 +117,7 @@ export default function AccountAuthPanel({
     if (sending || cooldownSeconds > 0 || !channelAvailable || !destination.trim()) return
     setSending(true)
     setNotice(null)
+    setVerificationError(null)
     onError?.(null)
     try {
       const next = await requestAccountVerification(channel, destination)
@@ -125,6 +131,7 @@ export default function AccountAuthPanel({
         setNotice(`验证码已发送至 ${next.destinationLabel}`)
       }
     } catch (cause) {
+      setVerificationError(accountApiErrorMessage(cause))
       onError?.(accountApiErrorMessage(cause))
     } finally {
       setSending(false)
@@ -274,6 +281,7 @@ export default function AccountAuthPanel({
 
           {mode === 'login' ? (
             <div className="mt-4 space-y-3">
+              {notice && <p role="status" className="text-xs text-emerald-300">{notice}</p>}
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
@@ -304,7 +312,13 @@ export default function AccountAuthPanel({
                 {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
                 登录账号
               </button>
+              <button type="button" disabled={busy} onClick={() => { setMode('reset'); setNotice(null); onError?.(null) }}
+                className="text-xs text-arcane-300 hover:text-arcane-100 disabled:opacity-40">忘记密码？</button>
             </div>
+          ) : mode === 'reset' ? (
+            <PasswordResetForm config={config} configLoading={configLoading}
+              onBack={() => setMode('login')}
+              onSuccess={() => { setLoginPassword(''); setMode('login'); setNotice('密码已重置，请使用新密码登录原账号。') }} />
           ) : (
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-2">
@@ -359,13 +373,16 @@ export default function AccountAuthPanel({
                 />
                 <button
                   type="button"
-                  disabled={sending || cooldownSeconds > 0 || !channelAvailable || !destination.trim()}
+                  disabled={configLoading || sending || cooldownSeconds > 0 || !channelAvailable || !destination.trim()}
                   onClick={() => void sendVerification()}
                   className="min-w-24 rounded-lg border border-arcane-400/25 px-3 py-2 text-xs font-semibold text-arcane-200 hover:bg-arcane-500/10 disabled:opacity-40"
                 >
-                  {sending ? '发送中…' : cooldownSeconds > 0 ? `${cooldownSeconds}s` : '发送验证码'}
+                  {configLoading ? '检查服务…' : sending ? '发送中…' : cooldownSeconds > 0 ? `${cooldownSeconds}s` : '发送验证码'}
                 </button>
               </div>
+
+              {verificationError && <p role="alert" className="text-xs text-red-300">{verificationError}</p>}
+              {notice && <p role="status" className="text-xs text-emerald-300">{notice}</p>}
 
               <input
                 value={verificationCode}
@@ -399,7 +416,6 @@ export default function AccountAuthPanel({
                 placeholder="再次输入密码"
                 className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-arcane-400/50"
               />
-              {notice && <p className="text-xs text-emerald-300">{notice}</p>}
               <button
                 type="button"
                 disabled={

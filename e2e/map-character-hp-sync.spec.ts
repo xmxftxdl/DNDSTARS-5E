@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const portBase = Math.max(1024, Number(process.env.STARS_E2E_PORT_BASE) || 6173)
+const DM = `http://127.0.0.1:${portBase}`
+const PLAYER = `http://127.0.0.1:${portBase + 1}`
 const SESSION_KEY = 'stars-room-session:v1'
 
 interface RoomMembership {
@@ -241,7 +242,7 @@ test('DM 可随时调整双方生命值、状态与位置，并通过 SSE 同步
   await expect(player.getByTestId('quick-character-sheet')).toBeVisible()
   await expect(playerCanvas).toHaveAttribute('data-e2e-mounted-instance', 'preserved')
   await expect(player.getByText('正在加载地图工具…')).toHaveCount(0)
-  await player.getByRole('button', { name: '关闭快捷人物卡' }).click()
+  await player.getByRole('button', { name: '收起单位面板' }).click()
 
   await dmInitiative.click()
   const panel = dm.getByTestId('character-detail-panel')

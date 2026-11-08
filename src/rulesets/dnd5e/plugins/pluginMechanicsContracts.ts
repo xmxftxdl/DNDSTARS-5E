@@ -1,3 +1,4 @@
+import type{Dnd5eAbilityTargetLimit}from'../activities/dnd5eAbilityTargetLimit'
 import type { Dnd5eOwnedCompanionProximity } from '../ownedCompanionProximity'
 import type { SkillAoeTargeting } from '../../../lib/skillTargeting'
 import type { AbilityKey } from '../../../lib/dnd'
@@ -65,6 +66,8 @@ export type Dnd5ePluginTargeting =
       relation?: Dnd5ePluginTargetRelation
       rangeFeet?: number
       maximumTargets: number
+      minimumTargets?: number
+      maximumTargetsAbilityModifier?: Dnd5eAbilityTargetLimit
       includeSelf?: boolean
     }
   | {
@@ -110,6 +113,8 @@ export interface Dnd5eSkillCheckAbilityBonus {
 }
 
 export interface Dnd5ePluginStaticCombatModifiers {
+  /** Owned magical flight, reconstructed from current source qualification. */
+  inherentFlight?: import('../inherentFeatureFlightContract').Dnd5eInherentFeatureFlight
   /** Owned magical illumination, on by default unless its persisted off marker is present. */
   inherentLight?: import('../inherentFeatureLightContract').Dnd5eInherentFeatureLight
   skillCheckAbilityBonuses?: readonly Dnd5eSkillCheckAbilityBonus[]
@@ -123,6 +128,8 @@ export interface Dnd5ePluginStaticCombatModifiers {
   unarmoredArmorClassAllowsShield?: boolean
   armorClassBonus?: number
   initiativeBonus?: number
+  /** Advantage applies only to initiative rolls, not ordinary Dexterity checks. */
+  initiativeAdvantage?: boolean
   /** Add this ability modifier to initiative; evaluated from current ability scores. */
   initiativeBonusFromAbility?: AbilityKey
   speedBonusFeet?: number
@@ -132,6 +139,10 @@ export interface Dnd5ePluginStaticCombatModifiers {
   swimSpeedMinimumFeet?: number
   swimSpeedEqualsWalking?: boolean
   canBreatheWater?: boolean
+  /** Allows eight hours of light activity instead of sleep during a long rest. */
+  doesNotRequireSleep?: boolean
+  /** Sleep-specific immunity; never grants immunity to other unconsciousness. */
+  cannotBeForcedToSleep?: boolean
   savingThrowBonus?: number
   darkvisionRangeFeet?: number
   darkvisionIfAbsentFeet?: number
@@ -161,6 +172,7 @@ export interface Dnd5ePluginStaticCombatModifiers {
   redirectMountedCreatureAttacksToRider?: boolean
   /** While riding, the mount takes no damage on a successful Dexterity save and half on failure. */
   grantMountedCreatureDexterityEvasion?: boolean
+  isolatedTargetSneakAttack?: boolean
   preventOpportunityAttacksFromMeleeAttackTargets?: boolean
   /** Disengage does not suppress opportunity attacks made by this creature. */
   opportunityAttacksIgnoreDisengage?: boolean

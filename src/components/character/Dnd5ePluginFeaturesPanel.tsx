@@ -105,7 +105,7 @@ export default function Dnd5ePluginFeaturesPanel({
         <div>
           <h3 className="text-lg font-bold text-slate-100">扩展规则特性</h3>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            扩展内容按角色规则与怪物规则分开显示。只有角色规则可以加入人物卡并参与 DM Headless 校验。
+            扩展内容按角色规则与怪物规则分开显示。只有角色规则可以加入人物卡并参与自动规则结算。
           </p>
         </div>
       </div>

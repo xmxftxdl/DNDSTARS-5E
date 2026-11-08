@@ -32,6 +32,8 @@ export type PlayerActionAckResourceWriter = <T>(
 ) => Promise<SharedResourceSaveResult>
 
 export interface PublishPlayerActionAckInput {
+  /** Only for a privately issued Host weapon command, with no player request. */
+  hostNativeWeapon?: boolean
   expectedRevisions?: Readonly<Record<string, number>>
   ack: SharedPlayerActionAckState
   snapshots?: PlayerActionAuthoritativeSnapshots
@@ -88,6 +90,7 @@ function sameCombatSettlementBoundary(
 }
 
 export async function publishPlayerActionAckWithSnapshots({
+  hostNativeWeapon,
   expectedRevisions,
   ack,
   snapshots,
@@ -98,6 +101,8 @@ export async function publishPlayerActionAckWithSnapshots({
   loadSharedResource,
   publishAck,
 }: PublishPlayerActionAckInput): Promise<void> {
+  if (hostNativeWeapon && !commitSharedResources) throw new Error('host-native-weapon-atomic-result-required')
+  const resultResource = hostNativeWeapon ? 'host-native-weapon-result' : 'player-action-ack'
   if (expectedRevisions && !commitSharedResources) throw new Error('authoritative-atomic-commit-required')
   const requireSaved = (name: string, result: SharedResourceSaveResult): void => {
     if (result.status === 'saved') return
@@ -105,12 +110,12 @@ export async function publishPlayerActionAckWithSnapshots({
   }
 
   const undoOptions = {
-    undoGroupId: `player-action:${ack.actionId}`,
-    undoLabel: '结算玩家行动',
+    undoGroupId: `${hostNativeWeapon ? 'host-native-weapon' : 'player-action'}:${ack.actionId}`,
+    undoLabel: hostNativeWeapon ? '结算主持人人物攻击' : '结算玩家行动',
   }
   const publishAckBestEffort = async (eventAck: SharedPlayerActionAckState): Promise<void> => {
     try {
-      await publishAck(eventAck)
+      if (!hostNativeWeapon) await publishAck(eventAck)
     } catch {
       // The persisted ACK and combat-command receipt are authoritative. Live
       // delivery may wake polling sooner, but can never invalidate a commit.
@@ -140,10 +145,19 @@ export async function publishPlayerActionAckWithSnapshots({
             : []),
         ]
       : []
+  // A new Host tab has no revision cache for this private result resource.
+  // Read it before the atomic write rather than assuming a first-ever result.
+  const nativePrior = hostNativeWeapon
+    ? await loadSharedResource?.<SharedPlayerActionAckState & {_sync?:{revision?:number}}>(resultResource)
+    : undefined
+  const nativeResultRevision = nativePrior?._sync?.revision ?? 0
+  if (hostNativeWeapon && (!loadSharedResource || !Number.isSafeInteger(nativeResultRevision) || nativeResultRevision < 0)) {
+    throw new Error('host-native-weapon-result-revision-required')
+  }
   const writes: SharedResourceTransactionWrite[] = [
     ...authoritativeWrites,
-    ...(processed ? [{ name: 'player-action-processed', data: processed }] : []),
-    { name: 'player-action-ack', data: ack },
+    ...(!hostNativeWeapon && processed ? [{ name: 'player-action-processed', data: processed }] : []),
+    { name: resultResource, data: ack, ...(hostNativeWeapon ? {expectedRevision:nativeResultRevision} : {}) },
   ]
   for (const write of writes) {
     if (expectedRevisions?.[write.name] != null) write.expectedRevision = expectedRevisions[write.name]
@@ -155,14 +169,14 @@ export async function publishPlayerActionAckWithSnapshots({
       .filter(([name]) => !writtenNames.has(name)))
     const transactionOptions = {
       ...undoOptions,
-      transactionId: `player-action:${ack.actionId}`,
+      transactionId: `${hostNativeWeapon ? 'host-native-weapon' : 'player-action'}:${ack.actionId}`,
       roomJournalMutations,
       ...(Object.keys(readRevisions).length ? { readRevisions } : {}),
     }
     const observeCommittedAck = async (): Promise<SharedPlayerActionAckState | null> => {
       if (!loadSharedResource) return null
       try {
-        const persisted = await loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
+        const persisted = await loadSharedResource<SharedPlayerActionAckState>(resultResource)
         return sameDurablePlayerActionAck(ack, persisted) ? persisted : null
       } catch {
         return null
@@ -224,6 +238,6 @@ export async function publishPlayerActionAckWithSnapshots({
   const resources = await Promise.all(writes.slice(0, -1).map((write) =>
     saveSharedResource(write.name, write.data, undoOptions)))
   resources.forEach((result, index) => requireSaved(writes[index].name, result))
-  requireSaved('player-action-ack', await saveSharedResource('player-action-ack', ack))
+  requireSaved('player-action-ack', await saveSharedResource(resultResource, ack))
   await publishAckBestEffort(ack)
 }

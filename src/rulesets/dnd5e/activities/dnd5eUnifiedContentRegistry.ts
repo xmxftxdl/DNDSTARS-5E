@@ -1,3 +1,5 @@
+import { validateAutomationCapability, type AutomationCapability } from '../../../domain/automation/automationCapability'
+import type { ContentDefinitionKind } from '../../../domain/content/contentDefinition'
 import {
   registerContentDefinitionPackage,
   type RegisteredContentDefinition,
@@ -66,13 +68,41 @@ function resolveDeclaredResourceReferences(value: RegisteredContentPackage): rea
   }))
 }
 
+// Private provenance of the exact validated imported envelope. Derived runtime
+// capability remains unchanged; this map never enters serialized character data.
+const authoredEnvelopes = new Map<string, { isCurrent(): boolean; capabilities: ReadonlyMap<string, AutomationCapability> }>()
+/** Capture the actual installed native registration, never a package-ID
+ * tombstone. A retained feature cannot silently become legacy after removal. */
+export function captureDnd5eSourceEnvelopeAutomationV1(packageId: string, kind: ContentDefinitionKind, id: string): (() => AutomationCapability | undefined) | undefined {
+  const source = authoredEnvelopes.get(packageId), key = `${kind}:${id}`
+  if (!source?.isCurrent() || !source.capabilities.has(key)) return undefined
+  return () => source.isCurrent() ? structuredClone(source.capabilities.get(key)) : undefined
+}
+
+export function dnd5eRegisteredSourceEnvelopeAutomationV1(packageId: string, kind: ContentDefinitionKind, id: string): AutomationCapability | undefined {
+  const source = authoredEnvelopes.get(packageId)
+  if (!source?.isCurrent()) return undefined
+  const capability = source.capabilities.get(`${kind}:${id}`)
+  return capability ? structuredClone(capability) : undefined
+}
+
 /** The sole D&D 5e runtime content registration boundary. */
 export function registerDnd5eUnifiedContentPackageV1(
   value: RegisteredContentPackage,
 ): { dispose(): void } {
-  return registerContentDefinitionPackage({
+  for (const definition of value.definitions) {
+    const errors = validateAutomationCapability(definition.automation)
+    if (errors.length) throw new Error(`Invalid source envelope automation ${definition.kind}:${definition.id}: ${errors.join('; ')}`)
+  }
+  const registration = registerContentDefinitionPackage({
     packageId: value.packageId,
     packageVersion: value.packageVersion,
     definitions: resolveDeclaredResourceReferences(value).map(normalizeDefinition),
   })
+  const source = { isCurrent: registration.isCurrent, capabilities: new Map(value.definitions.map(definition => [`${definition.kind}:${definition.id}`, structuredClone(definition.automation)])) }
+  authoredEnvelopes.set(value.packageId, source)
+  return { dispose() {
+    registration.dispose()
+    if (authoredEnvelopes.get(value.packageId) === source) authoredEnvelopes.delete(value.packageId)
+  } }
 }

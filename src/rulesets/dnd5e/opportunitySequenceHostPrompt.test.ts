@@ -1,0 +1,15 @@
+import{it,expect}from'vitest'
+import{normalizeCharacter}from'../../store/characters'
+import{createCombatInterrupt}from'../../lib/combatInterruptQueue'
+import{buildDmControlledCombatInterruptPromptViews,buildCombatInterruptPromptViews,resolveCombatInterruptPromptSelection}from'../../lib/combatInterruptPrompts'
+it.each(['host',undefined])('actual scoped Host OA prompt follows canonical owner on a player token (%s)',owner=>{
+ const character=normalizeCharacter({id:'first',name:'First',charClass:'战士',level:4,roomMemberId:owner,currentHp:36,maxHp:36}),interrupt=createCombatInterrupt({id:'choice',mapId:'map',transactionId:'original-move',kind:'opportunity-attack',actorCharId:'first',payload:{attackerName:'First',targetName:'Mover',attackerTokenId:'first-token',targetTokenId:'mover-token',trigger:'movement',opportunitySequenceDecision:{parentId:'original-move',actorId:'first-token',windowIndex:0}},now:100,expiresAt:15100}),queue={mapId:'map',interrupts:[interrupt],updatedAt:100,revision:1},tokens=[{id:'first-token',characterId:'first',type:'player' as const,label:'First',x:450,y:375,size:1,color:'',emoji:''}]
+ const host=buildDmControlledCombatInterruptPromptViews({queue,mapId:'map',now:101,characters:[character],tokens,suppressed:{},...{hostMemberId:'host'}});expect(host.opportunityAttack?.id).toBe('choice')
+ const player=buildCombatInterruptPromptViews(resolveCombatInterruptPromptSelection({queue,mapId:'map',now:101,answerContext:{characters:[character],visibleCharacters:[character],tokens,roomMemberId:'other-player',authority:'player'},suppressed:{}}));expect(player.opportunityAttack).toBeUndefined()
+})
+it('actual scoped PC on an enemy token remains PC-owned; unscoped enemy behavior is unchanged',()=>{
+ const character=normalizeCharacter({id:'first',name:'First',charClass:'战士',level:4,roomMemberId:'player',currentHp:36,maxHp:36}),payload={attackerName:'First',targetName:'Mover',attackerTokenId:'first-token',targetTokenId:'mover-token',trigger:'movement' as const},interrupt=createCombatInterrupt({id:'choice',mapId:'map',transactionId:'original-move',kind:'opportunity-attack',actorCharId:'first',payload:{...payload,opportunitySequenceDecision:{parentId:'original-move',actorId:'first-token',windowIndex:0}},now:100,expiresAt:15100}),tokens=[{id:'first-token',characterId:'first',type:'enemy' as const,label:'First',x:450,y:375,size:1,color:'',emoji:''}],queue={mapId:'map',interrupts:[interrupt],updatedAt:100,revision:1}
+ expect(buildDmControlledCombatInterruptPromptViews({queue,mapId:'map',now:101,characters:[character],tokens,suppressed:{},...{hostMemberId:'host'}}).opportunityAttack).toBeUndefined()
+ expect(buildCombatInterruptPromptViews(resolveCombatInterruptPromptSelection({queue,mapId:'map',now:101,answerContext:{characters:[character],visibleCharacters:[character],tokens,roomMemberId:'player',authority:'player'},suppressed:{}})).opportunityAttack?.id).toBe('choice')
+ const legacy={...queue,interrupts:[{...interrupt,payload}]};expect(buildDmControlledCombatInterruptPromptViews({queue:legacy,mapId:'map',now:101,characters:[character],tokens,suppressed:{}}).opportunityAttack?.id).toBe('choice')
+})

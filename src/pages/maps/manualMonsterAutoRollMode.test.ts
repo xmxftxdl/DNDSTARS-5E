@@ -1,10 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { describe, expect, it } from 'vitest'
 
-const workspaceSource = readFileSync(
-  new URL('../MapsWorkspacePage.tsx', import.meta.url),
-  'utf8',
-)
+const workspaceSource = readMapsWorkspaceSource()
 
 describe('manual monster automatic roll mode', () => {
   it('preserves an undefined mode from the automatic detail-panel control', () => {

@@ -1,0 +1,6 @@
+import{it,expect}from'vitest'
+import ts from'typescript'
+import loaderText from'./dnd5eOriginalD20Session.ts?raw'
+import{loadDnd5eOriginalD20Session}from'./dnd5eCombatRules'
+it('loads the exact original Session module through the Application facade',async()=>{const actual=await loadDnd5eOriginalD20Session(),direct=await import('../../rulesets/dnd5e/damageCommitSession');expect(actual).toBe(direct);expect(actual.createDnd5eOriginalD20Session).toBe(direct.createDnd5eOriginalD20Session);expect(actual.createDnd5eAllyOriginalCollectionSession).toBe(direct.createDnd5eAllyOriginalCollectionSession);expect(actual.readDnd5eActualOriginalAllyBoundary).toBe(direct.readDnd5eActualOriginalAllyBoundary)})
+it('keeps runtime Session loading deferred and introduces no eager Native import',()=>{const ast=ts.createSourceFile('Loader.ts',loaderText,ts.ScriptTarget.Latest,true),staticNative=ast.statements.filter(n=>ts.isImportDeclaration(n)),calls:ts.CallExpression[]=[];const visit=(n:ts.Node)=>{if(ts.isCallExpression(n)&&n.expression.kind===ts.SyntaxKind.ImportKeyword)calls.push(n);ts.forEachChild(n,visit)};visit(ast);expect(staticNative).toHaveLength(0);expect(calls).toHaveLength(1);expect(calls[0].arguments[0].getText(ast)).toBe("'../../rulesets/dnd5e/damageCommitSession'");expect(ts.isReturnStatement(calls[0].parent)).toBe(true)})

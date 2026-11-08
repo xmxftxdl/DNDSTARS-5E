@@ -1,6 +1,9 @@
+import{validDnd5eAbilityTargetLimit}from'./dnd5eAbilityTargetLimit'
+import {validDnd5eInherentFeatureFlight} from '../inherentFeatureFlightContract'
+import { normalizeDnd5eMinimumSkillCheckD20, normalizeDnd5eHalfSpeedSkillChecks } from '../contextualSkillChecks'
 import { validDnd5eOptionalBonusDieSourceConstraint } from '../optionalBonusDieEligibility'
 import { validDnd5eInherentFeatureLight } from '../inherentFeatureLightContract'
-import { isDnd5eAutonomousBoundHpRetaliation } from './dnd5eAutonomousRetaliationContract'
+import { isDnd5eAutonomousBoundHpRetaliation,isDnd5eAutonomousMaintainedRetaliation } from './dnd5eAutonomousRetaliationContract'
 import { validDnd5eHeldWeaponBaseIds } from '../heldMeleeWeaponRequirement'
 import { isDnd5eSourceAuraRequirement } from '../sourceAuraRequirement'
 import { dnd5eRestSpellSensorActivity } from './dnd5eRestSpellSensor'
@@ -11,6 +14,7 @@ import { isDnd5eLethalBodyPartDestruction } from '../lethalBodyPart'
 import {validDnd5eFortressFurnishingCatalog} from '../fortressFurnishingDefinition'
 import { validDnd5eEntityMaterial } from '../entityMaterial'
 import { normalizeDnd5eSolidMaterialTraversal } from '../solidMaterialTraversal'
+import { normalizeDnd5eObjectCreatureTraversal } from '../objectCreatureTraversal'
 import { validMapSurfaceMaterials } from '../../../lib/mapSurfaceMaterials'
 import { isDnd5eCompanionTaskCommand } from '../companionTask'
 import { isDnd5eCompanionReadyCommand } from '../companionReady'
@@ -108,6 +112,7 @@ function appendFormulaErrors(errors: string[], value: unknown, label: string): v
 function validateInvocation(invocation: Dnd5eActivityInvocationV1 | undefined, errors: string[]): void {
   if (!invocation) return
   if (invocation.kind === 'active') {
+    if('priority' in invocation)errors.push('activity.invocation.priority requires triggered invocation')
     if ('expireGrantAtWindowEnd' in invocation) errors.push('activity.invocation.expireGrantAtWindowEnd requires triggered invocation')
     if ('effectGrantScope' in invocation) errors.push('activity.invocation.effectGrantScope requires triggered invocation')
     if (invocation.confirmation != null && !['actor-choice', 'dm-approval'].includes(invocation.confirmation)) {
@@ -116,6 +121,7 @@ function validateInvocation(invocation: Dnd5eActivityInvocationV1 | undefined, e
     return
   }
   if (!TRIGGER_EVENTS.has(invocation.event)) errors.push('activity.invocation.event is invalid')
+  if(invocation.priority!=null&&!finiteInteger(invocation.priority,-20,20))errors.push('activity.invocation.priority must be a bounded integer')
   if (invocation.expireGrantAtWindowEnd != null && (invocation.expireGrantAtWindowEnd !== true ||
     invocation.effectGrantScope !== 'trigger-execution' || invocation.retention !== 'single-event' ||
     !['temporary-hit-points-gained', 'feature-used', 'spell-resolved', 'item-used', 'action-resolved'].includes(invocation.event))) {
@@ -144,7 +150,11 @@ function validatePredicate(predicate: Dnd5ePredicateV1, label: string, errors: s
     }
     return
   }
-  if (predicate.kind === 'combat-active') return
+  if ((predicate.kind === 'combat-active' || predicate.kind === 'attack-action-used')) return
+  if (predicate.kind === 'combat-round') {
+    if (!finiteInteger(predicate.round,1,1_000_000)) errors.push(`${label} combat round is invalid`)
+    return
+  }
   if (predicate.kind === 'ethereal-access') {
     if (!['known', 'available', 'unavailable'].includes(predicate.state)) errors.push(`${label} ethereal access is invalid`)
     return
@@ -230,7 +240,8 @@ function validatePredicate(predicate: Dnd5ePredicateV1, label: string, errors: s
       predicate.effectId == null && Array.isArray(predicate.anyOf) && predicate.anyOf.length > 0 && predicate.anyOf.length <= 32 &&
       predicate.anyOf.every(selector => {
         if (!selector || typeof selector !== 'object' || Array.isArray(selector)) return false
-        if (Object.keys(selector).some(key => key !== 'effectId' && key !== 'tags')) return false
+        if (Object.keys(selector).some(key => key !== 'effectId' && key !== 'tags' && key !== 'sourceRulesId' && key !== 'sourcePluginId')) return false
+        if ((selector.sourceRulesId != null && !validId(selector.sourceRulesId)) || (selector.sourcePluginId != null && !validId(selector.sourcePluginId))) return false
         return selector.effectId != null ? validId(selector.effectId) && selector.tags == null :
           Array.isArray(selector.tags) && selector.tags.length > 0 && selector.tags.length <= 32 &&
           new Set(selector.tags).size === selector.tags.length && selector.tags.every((tag: unknown) => validId(tag) && tag.length <= 80)
@@ -284,6 +295,7 @@ function validatePredicate(predicate: Dnd5ePredicateV1, label: string, errors: s
     if (!['melee', 'ranged'].includes(predicate.delivery)) errors.push(`${label}.delivery is invalid`)
     return
   }
+  if (predicate.kind === 'attack-pact-weapon') return
   if (predicate.kind === 'attack-weapon') {
     if (predicate.identity != null && !['instance', 'base'].includes(predicate.identity)) errors.push(`${label}.identity is invalid`)
     if (
@@ -455,6 +467,7 @@ function validatePredicate(predicate: Dnd5ePredicateV1, label: string, errors: s
     return
   }
   if (predicate.kind === 'spell-used') {
+    if(predicate.damageTypes!=null&&(!Array.isArray(predicate.damageTypes)||predicate.damageTypes.length<1||predicate.damageTypes.some(type=>!DND5E_DAMAGE_TYPES.includes(type))||new Set(predicate.damageTypes).size!==predicate.damageTypes.length))errors.push(label+'.damageTypes is invalid')
     if (predicate.spellId != null && !validId(predicate.spellId)) errors.push(`${label}.spellId is invalid`)
     if (predicate.castingClassIds != null && (
       !Array.isArray(predicate.castingClassIds) || predicate.castingClassIds.length < 1 ||
@@ -608,6 +621,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     effect.tags.length < 1 || effect.tags.length > 32 ||
     new Set(effect.tags).size !== effect.tags.length || effect.tags.some((tag) => !validId(tag) || tag.length > 80)
   )) errors.push(`${label}.tags is invalid`)
+  if (effect.captureExecutionIdentity != null && effect.captureExecutionIdentity !== true) errors.push(`${label}.captureExecutionIdentity must be true`)
   if (effect.captureInitialSpace != null && effect.captureInitialSpace !== true) {
     errors.push(`${label}.captureInitialSpace must be true`)
   }
@@ -690,6 +704,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     'casts-spell', 'forces-saving-throw', 'deals-damage', 'moves', 'spends-action', 'spends-action-except-granted', 'spends-bonus-action', 'spends-reaction',
     'attacked-by-source-or-ally', 'damaged-by-source-or-ally', 'forced-save-by-source-or-ally',
     'attacked-by-condition-entity', 'damaged-by-condition-entity', 'forced-save-by-condition-entity',
+    'affected-by-source-ally-spell',
     'attacked-by-source-ally', 'damaged-by-source-ally', 'forced-save-by-source-ally', 'attacked-by-source',
     'witnesses-ally-attacked', 'witnesses-ally-damaged', 'witnesses-source-attack-ally', 'witnesses-source-damage-ally',
     'awakened', 'magical-healing', 'reduced-to-zero', 'short-rest-complete', 'long-rest-complete', 'source-dies', 'source-long-rest-complete',
@@ -775,6 +790,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     if (
       !ABILITIES.has(repeat.ability) ||
       !['normal', 'advantage'].includes(repeat.mode) ||
+      (repeat.optional != null && repeat.optional !== true) ||
       (repeat.sourceFilter != null && !['any', 'source-or-allies'].includes(repeat.sourceFilter)) ||
       (repeat.advantageIfSourceOrAllies != null && repeat.advantageIfSourceOrAllies !== true)
     ) errors.push(`${label}.repeatSaveOnDamage is invalid`)
@@ -920,7 +936,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     effect.planarBanishment.foreignCreatureTypes.some((type) =>
       typeof type !== 'string' || type.trim().length < 1 || type.length > 80)
   )) errors.push(`${label}.planarBanishment is invalid`)
-  if ((effect.modifiers ?? []).filter(modifier => modifier.kind === 'armor-enchantment' || modifier.kind === 'weapon-enchantment').length > 1) {
+  if ((effect.modifiers ?? []).filter(modifier => modifier.kind === 'armor-enchantment' || modifier.kind === 'weapon-enchantment' || modifier.kind==='bound-weapon-ability').length > 1) {
     errors.push(`${label} must bind at most one physical item; use separate effects for separate items`)
   }
   if ((effect.modifiers ?? []).filter(modifier => modifier.kind === 'roll-dice').length > 16) {
@@ -980,7 +996,9 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       appendFormulaErrors(errors, modifier.armorClassBonus, `${modifierLabel}.armorClassBonus`)
       if (modifier.requiresNonmagical != null && modifier.requiresNonmagical !== true) errors.push(`${modifierLabel}.requiresNonmagical is invalid`)
     }
+    if(modifier.kind==='bound-weapon-ability' && (Object.keys(modifier).some(key=>!['kind','ability','requiresProficient','excludeTwoHanded'].includes(key)) || !['str','dex','con','int','wis','cha'].includes(modifier.ability) || modifier.requiresProficient!==true || modifier.excludeTwoHanded!==true))errors.push(`${modifierLabel} bound weapon ability is invalid`)
     if (modifier.kind === 'weapon-enchantment') {
+      if(modifier.attackBonusOnly!=null&&modifier.attackBonusOnly!==true)errors.push(`${modifierLabel} attackBonusOnly must be true when supplied`)
       if (modifier.sourceWielderOnly != null && (modifier.sourceWielderOnly !== true || modifier.weaponSlot === 'ammunition-container')) errors.push(`${modifierLabel}.sourceWielderOnly is invalid`)
       if (modifier.weaponBaseIds != null && (!Array.isArray(modifier.weaponBaseIds) || modifier.weaponBaseIds.length < 1 || modifier.weaponBaseIds.length > 32 ||
         modifier.weaponBaseIds.some(id => typeof id !== 'string' || !/^[a-z0-9][a-z0-9:._-]{0,159}$/.test(id)) || new Set(modifier.weaponBaseIds).size !== modifier.weaponBaseIds.length || modifier.weaponSlot === 'ammunition-container')) {
@@ -1057,6 +1075,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
     )) errors.push(`${modifierLabel} incoming weapon attack mode or delivery is invalid`)
     if (modifier.kind === 'attack-target-lock' && (modifier.attacksAgainstOthersThanSource !== 'disadvantage' ||
       (modifier.notifySourceOnDamage != null && modifier.notifySourceOnDamage !== true) ||
+      (modifier.opportunityAttacksOnlyAgainstSource != null && modifier.opportunityAttacksOnlyAgainstSource !== true) ||
       (modifier.sourceRangeFeet != null && (typeof modifier.sourceRangeFeet !== 'number' ||
         !Number.isFinite(modifier.sourceRangeFeet) || modifier.sourceRangeFeet < 0 || modifier.sourceRangeFeet > 10000)))) {
       errors.push(`${modifierLabel} attack target lock is invalid`)
@@ -1073,6 +1092,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       !finiteInteger(modifier.bonus, -20, 20)) {
       errors.push(`${modifierLabel} attacks-against-source armor class bonus is invalid`)
     }
+    if (modifier.kind === 'notify-source-on-bearer-death' && Object.keys(modifier).some(key => key !== 'kind')) errors.push(`${modifierLabel} bearer death notification has unexpected fields`)
     if (modifier.kind === 'damage-rolls-by-source-bonus') errors.push(...validateDnd5eFormulaV1(modifier.value, `${modifierLabel}.value`))
     if (modifier.kind === 'attacks-by-source-critical-threshold' && !finiteInteger(modifier.threshold, 2, 20)) {
       errors.push(`${modifierLabel} critical threshold is invalid`)
@@ -1108,6 +1128,21 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       (modifier.mundaneTracking != null && modifier.mundaneTracking !== 'impossible') ||
       (modifier.leavesTracks != null && modifier.leavesTracks !== false)
     )) errors.push(`${modifierLabel} skill-check bonus aura is invalid`)
+    if (modifier.kind === 'sneak-attack-target' && (
+      Object.keys(modifier).some(key => !['kind', 'bonusDice'].includes(key)) ||
+      (modifier.bonusDice != null && (
+        typeof modifier.bonusDice !== 'object' || Array.isArray(modifier.bonusDice) ||
+        Object.keys(modifier.bonusDice).some(key => !['minimumRogueLevel', 'count'].includes(key)) ||
+        !finiteInteger(modifier.bonusDice.minimumRogueLevel, 1, 20) ||
+        !finiteInteger(modifier.bonusDice.count, 1, 100)
+      ))
+    )) errors.push(`${modifierLabel} sneak attack target is invalid`)
+    if (modifier.kind === 'minimum-skill-check-d20' || modifier.kind === 'half-speed-skill-check-advantage') {
+      const { kind, ...rule } = modifier
+      const normalized = kind === 'minimum-skill-check-d20'
+        ? normalizeDnd5eMinimumSkillCheckD20([rule]) : normalizeDnd5eHalfSpeedSkillChecks([rule])
+      if (!normalized) errors.push(`${modifierLabel} contextual skill-check rule is invalid`)
+    }
     if (modifier.kind === 'minimum-ability-check-d20' && (
       !ABILITIES.has(modifier.ability) || !finiteInteger(modifier.minimum, 1, 20)
     )) errors.push(`${modifierLabel} minimum ability-check d20 is invalid`)
@@ -1177,6 +1212,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
         Object.keys(modifier.value).length > 0 && Object.entries(modifier.value).every(([mode, bonus]) =>
           ['walk', 'climb', 'swim', 'fly'].includes(mode) && finiteInteger(bonus, 1, 1000))
       const validValue = modifier.capability === 'inherentLight' ? validDnd5eInherentFeatureLight(modifier.value)
+        : modifier.capability === 'inherentFlight' ? validDnd5eInherentFeatureFlight(modifier.value)
         : modifier.capability === 'existingMovementSpeedBonuses' ? validMovementBonuses
         : modifier.capability === 'initiativeBonusFromAbility' ? typeof modifier.value === 'string' && ABILITIES.has(modifier.value as AbilityKey)
         : modifier.capability === 'naturalWeapons' ? validNaturalWeapons : expectsNumber
@@ -1250,6 +1286,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       (modifier.plane === 'ethereal' && (!modifier.ignoresMaterialCollision || !modifier.unrestrictedVerticalMovement)) ||
       (modifier.plane === 'terrain' && (modifier.ignoresMaterialCollision || modifier.unrestrictedVerticalMovement))
     )) errors.push(`${modifierLabel} planar phase is invalid`)
+    if (modifier.kind === 'object-creature-traversal' && !normalizeDnd5eObjectCreatureTraversal({ difficultTerrain: modifier.difficultTerrain, endOwnTurnInsideObjectDamage: modifier.endOwnTurnInsideObjectDamage })) errors.push(`${modifierLabel} object/creature traversal is invalid`)
     if (modifier.kind === 'solid-material-traversal' && !normalizeDnd5eSolidMaterialTraversal({ materials: modifier.materials, endInside: modifier.endInside })) errors.push(`${modifierLabel} solid material traversal is invalid`)
     if (modifier.kind === 'tracking-capability' && (
       modifier.mundaneTracking !== 'impossible' || modifier.leavesTracks !== false
@@ -1276,6 +1313,8 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
       errors.push(`${modifierLabel}.mode is invalid`)
     }
     if (modifier.kind === 'sight-range-limit' && !finiteInteger(modifier.rangeFeet, 1, 10_000)) errors.push(`${modifierLabel}.rangeFeet is invalid`)
+    if (modifier.kind === 'through-solid-objects-sight' && !finiteInteger(modifier.rangeFeet, 1, 10_000)) errors.push(`${modifierLabel}.rangeFeet is invalid`)
+    if (modifier.kind === 'through-solid-objects-sight' && modifier.grantDarkvisionIfAbsentAtActivation != null && modifier.grantDarkvisionIfAbsentAtActivation !== true) errors.push(`${modifierLabel}.grantDarkvisionIfAbsentAtActivation is invalid`)
     if (modifier.kind === 'truesight' && !finiteInteger(modifier.rangeFeet, 1, 10_000)) {
       errors.push(`${modifierLabel}.rangeFeet is invalid`)
     }
@@ -1508,6 +1547,7 @@ function validateTarget(target: Dnd5eActivityTargetV1, errors: string[]): void {
     }
     if(target.effectOrigin && (!validId(target.effectOrigin.effectId)||!finiteNumber(target.effectOrigin.rangeFeet,0,100_000)))errors.push('activity.target.effectOrigin is invalid')
     if (!finiteInteger(target.count, 1, 256)) errors.push('activity.target.count is invalid')
+    if(target.maximumCountAbilityModifier != null&&!validDnd5eAbilityTargetLimit(target.maximumCountAbilityModifier,target.count))errors.push('activity.target.maximumCountAbilityModifier is invalid')
     if (target.minimumCount != null && !finiteInteger(target.minimumCount, 0, target.count)) errors.push('activity.target.minimumCount is invalid')
     if (target.rangeFeet != null && !finiteNumber(target.rangeFeet, 0, 100_000)) errors.push('activity.target.rangeFeet is invalid')
     if (target.requiresInsideGrantingArea != null && target.requiresInsideGrantingArea !== true) errors.push('activity.target.requiresInsideGrantingArea is invalid')
@@ -1706,6 +1746,22 @@ export function dnd5eActivityRequiredPhases(activity: Dnd5eActivityDefinitionV1)
 }
 
 function validateOperation(operation: Dnd5eActivityOperationV1, label: string, errors: string[]): void {
+  if (operation.kind === 'weapon-hit-banishment') {
+    if (!validId(operation.id) || operation.target !== 'target' || operation.maximumHitPoints !== 50 ||
+      Object.keys(operation).some(key => !['id','kind','target','maximumHitPoints'].includes(key)))
+      errors.push(`${label} weapon hit banishment requires the fixed Host post-damage gate`)
+    return
+  }
+  if(operation.kind==='heal-owned-curse-on-bearer-death'){
+    if(!validId(operation.id)||operation.target!=='target'||!validId(operation.sourceActivityId)||
+      Object.keys(operation).some(key=>!['id','kind','target','sourceActivityId'].includes(key)))errors.push(`${label} owned curse death healing is invalid`)
+    return
+  }
+  if(operation.kind==='transfer-owned-curse-on-bearer-death'){
+    if(!validId(operation.id)||operation.target!=='target'||!validId(operation.sourceActivityId)||!validId(operation.destinationChoiceId)||
+      Object.keys(operation).some(key=>!['id','kind','target','sourceActivityId','destinationChoiceId'].includes(key)))errors.push(`${label} owned curse death transfer is invalid`)
+    return
+  }
   if (operation.kind === 'transfer-loose-earth') {
     if (operation.depthFeet != null && !finiteNumber(operation.depthFeet, 0.1, operation.maximumSideFeet)) errors.push(`${label} excavation depth is invalid`)
     if (!validId(operation.id) || !finiteNumber(operation.maximumSideFeet, 0.1, 5) || !finiteNumber(operation.distanceFeet, 0.1, 5)) errors.push(`${label} loose-earth transfer limits are invalid`)
@@ -1724,6 +1780,13 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     return
   }
   if (!validId(operation.id)) errors.push(`${label}.id is invalid`)
+  if (operation.kind === 'read-sensory-deception') {
+    if (operation.target !== 'actor' || operation.rangeFeet !== 30 ||
+      Object.keys(operation).some(key => !['id','kind','target','rangeFeet'].includes(key))) {
+      errors.push(`${label} sensory deception inspection requires the actor and fixed 30 foot range`)
+    }
+    return
+  }
   if (operation.kind === 'reveal-target-location' || operation.kind === 'read-damage-traits') {
     if (operation.target !== 'target' || Object.keys(operation).some(key => !['id','kind','target'].includes(key))) errors.push(`${label} location disclosure must use the Host target`)
     return
@@ -1865,6 +1928,7 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     return
   }
   if (operation.kind === 'apply-standard-condition') {
+    if (operation.sleep != null && (operation.sleep !== 'forced' || operation.condition !== 'unconscious')) errors.push(`${label}.sleep requires forced sleep and unconscious`)
     if (!CONDITIONS.has(operation.condition)) errors.push(`${label}.condition is invalid`)
     validateDuration(operation.duration, `${label}.duration`, errors)
     return
@@ -1925,12 +1989,13 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     if (operation.placement != null && operation.placement !== 'host-automatic-maximum') {
       errors.push(`${label}.placement is invalid`)
     }
+    if (operation.selectedTargetRadiusFeet != null && (operation.mode !== 'teleport' || operation.target !== 'actor' || !finiteNumber(operation.selectedTargetRadiusFeet, 0, 100))) errors.push(`${label}.selectedTargetRadiusFeet is invalid`)
     if (operation.continuationTargetRadiusFeet != null && (operation.mode !== 'teleport' || operation.target !== 'actor' || !finiteNumber(operation.continuationTargetRadiusFeet, 0, 100))) errors.push(`${label}.continuationTargetRadiusFeet is invalid`)
     if (operation.maximumDistanceFromActorFeet != null && (!Number.isFinite(operation.maximumDistanceFromActorFeet) || operation.maximumDistanceFromActorFeet < 0)) errors.push(`${label}.maximumDistanceFromActorFeet is invalid`)
     if (operation.placement === 'host-automatic-maximum' && !['push', 'pull'].includes(operation.mode)) {
       errors.push(`${label}.placement requires push or pull`)
     }
-    if (operation.verticalDestination != null && !['area-top', 'ground'].includes(operation.verticalDestination)) {
+    if (operation.verticalDestination != null && !['area-top', 'ground', 'space'].includes(operation.verticalDestination)) {
       errors.push(`${label}.verticalDestination is invalid`)
     }
     if (operation.stopAtMappedObstacle != null && (operation.stopAtMappedObstacle !== true || operation.mode !== 'ascend')) {
@@ -1939,6 +2004,7 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     if (operation.verticalDestination === 'area-top' && operation.mode !== 'ascend') {
       errors.push(`${label}.verticalDestination area-top requires ascend`)
     }
+    if (operation.verticalDestination === 'space' && (operation.mode !== 'teleport' || operation.target !== 'actor')) errors.push(`${label}.verticalDestination space requires teleport`)
     if (operation.verticalDestination === 'ground' && !['descend', 'teleport'].includes(operation.mode)) {
       errors.push(`${label}.verticalDestination ground requires descend or teleport`)
     }
@@ -2291,6 +2357,13 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     ) errors.push(`${label}.contaminants is invalid`)
     return
   }
+  if (operation.kind === 'transfer-effect') {
+    if (Object.keys(operation).some(key => !['id','kind','target','sourceSpellId','tags','timing'].includes(key)) || operation.target !== 'target' ||
+      !validId(operation.sourceSpellId) || operation.timing !== 'later-source-turn-after-bearer-zero' ||
+      !Array.isArray(operation.tags) || operation.tags.length < 1 || operation.tags.length > 8 ||
+      new Set(operation.tags).size !== operation.tags.length || operation.tags.some(tag => !validId(tag) || tag.length > 80)) errors.push(`${label} transfer-effect selector is invalid`)
+    return
+  }
   if (operation.kind === 'remove-effect') {
     if (!validId(operation.effectId) || !['self', 'any'].includes(operation.source)) {
       errors.push(`${label} remove-effect selector is invalid`)
@@ -2382,6 +2455,7 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     if (operation.existingBondPolicy != null && (operation.existingBondPolicy !== 'reject-living' || !operation.bondKey || !operation.persistent)) {
       errors.push(`${label}.existingBondPolicy requires a persistent bond and reject-living`)
     }
+    if(operation.endsOnSourceLongRest!=null && (operation.endsOnSourceLongRest!==true || !operation.bondKey || !operation.persistent || operation.concentration)) errors.push(`${label}.endsOnSourceLongRest requires a nonconcentration persistent bond`)
     if(operation.bondDismissActivityId!=null && (!validId(operation.bondDismissActivityId)||!operation.bondKey))errors.push(`${label}.bondDismissActivityId requires a bond`)
     if(operation.understandsCasterLanguage!=null && typeof operation.understandsCasterLanguage!=='boolean')errors.push(`${label}.understandsCasterLanguage is invalid`)
     if(operation.languageChoiceId!=null && !validId(operation.languageChoiceId))errors.push(`${label}.languageChoiceId is invalid`)
@@ -2412,10 +2486,17 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     if (operation.groupInitiative != null && typeof operation.groupInitiative!=='boolean') errors.push(`${label}.groupInitiative is invalid`)
     if (operation.autonomousBehavior != null && (!['attack-nearest-visible','attack-nearest-other-subtype','protect-source'].includes(operation.autonomousBehavior) || (operation.autonomousBehavior==='attack-nearest-other-subtype' && !operation.requiredCreatureSubtype?.trim()) || (operation.commandPolicy != null && operation.autonomousBehavior !== 'protect-source') || operation.controlSave != null || operation.cannotAttack)) errors.push(`${label}.autonomousBehavior requires an independent attacking summon`)
     if (operation.commandPolicy != null && !['persistent-order','turn-order'].includes(operation.commandPolicy)) errors.push(`${label}.commandPolicy is invalid`)
+    if(operation.illOmenHound!=null && operation.illOmenHound!==true)errors.push(label+' ill-omen policy is invalid')
+    if(operation.illOmenHound===true && (operation.monsterId!=='srd-5.1:dire-wolf' || operation.count.kind!=='constant' || operation.count.value!==1 ||
+      operation.timing!=='immediate' || operation.durationRounds!==50 || operation.concentration!==false || operation.side!=='ally' ||
+      operation.groupInitiative===true || operation.temporaryHitPoints!=null || operation.creatureTypeOverride!=null || operation.autonomousBehavior!=null ||
+      operation.commandPolicy!=null || operation.controlSave!=null || operation.persistent || operation.sourceDeathBehavior!=null || operation.placementOrigin!=null))errors.push(label+' ill-omen policy must retain original Dire Wolf1/50round independent target-bound configuration')
+    if(operation.placementOrigin!=null&&(operation.placementOrigin!=='killed-target'||operation.afterDamageKillOperationId!=null||operation.corpseFormChoiceId!=null||operation.animatedObjectSize!=null||operation.placementRangeFeet!=null||operation.requiresVisiblePlacement!=null))errors.push(`${label}.placementOrigin is invalid`)
     if (operation.spellEffectSourceId != null && !validId(operation.spellEffectSourceId)) errors.push(`${label}.spellEffectSourceId is invalid`)
     if (!validId(operation.monsterId)) errors.push(`${label}.monsterId is invalid`)
     appendFormulaErrors(errors, operation.count, `${label}.count`)
     for (const [field, formula] of Object.entries({
+      temporaryHitPoints: operation.temporaryHitPoints,
       minimumMaximumHitPoints: operation.minimumMaximumHitPoints,
       armorClassBonus: operation.armorClassBonus,
       weaponAttackBonus: operation.weaponAttackBonus,
@@ -2512,6 +2593,12 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     return
   }
   if (operation.kind === 'grant-weapon-attack') {
+    if (operation.allowUnarmedStrikes != null && operation.allowUnarmedStrikes !== true) errors.push(`${label}.allowUnarmedStrikes is invalid`)
+    if (operation.additionalSneakAttackDifferentTarget != null && (
+      operation.additionalSneakAttackDifferentTarget !== true || operation.economy !== 'bonus-action' ||
+      (operation.attacks ?? 1) !== 1 || (operation.available != null && operation.available !== 'immediate') ||
+      operation.inheritTriggerAttackOrigin != null
+    )) errors.push(`${label}.additionalSneakAttackDifferentTarget requires one immediate bonus attack`)
     if (operation.inheritTriggerAttackOrigin != null && (
       operation.inheritTriggerAttackOrigin !== true || operation.economy !== 'none' ||
       (operation.available != null && operation.available !== 'immediate')
@@ -2945,6 +3032,11 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     if (typeof operation.prompt !== 'string' || !operation.prompt.trim() || operation.prompt.length > 2000) errors.push(`${label}.prompt is invalid`)
     return
   }
+  if (operation.kind === 'manual-adjudication' && operation.purpose !== undefined &&
+    (operation.purpose !== 'magical-truth-detection' || operation.target !== 'target')) {
+    errors.push(`${label} has an invalid magical truth adjudication purpose or target`)
+    return
+  }
   if (operation.kind === 'manual-adjudication' && (
     !operation.prompt.trim() || !operation.reason.trim() || operation.requiresDmApproval !== true
   )) {
@@ -2959,6 +3051,8 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
   // particular, declarative subclass abilities are not Activity objects.
   if (!activity || typeof activity !== 'object' || Array.isArray(activity)) return ['activity must be an object']
   const shapeErrors: string[] = []
+  const activationDarkvision = Array.isArray(activity.effects) && activity.effects.some(effect => Array.isArray(effect?.modifiers) && effect.modifiers.some((modifier: {kind?: unknown;grantDarkvisionIfAbsentAtActivation?: unknown} | null) => modifier?.kind === 'through-solid-objects-sight' && modifier.grantDarkvisionIfAbsentAtActivation === true))
+  if (activationDarkvision && (activity.target?.kind !== 'self' || !['feature','feat'].includes(activity.legacySource?.kind ?? '') || activity.invocation?.kind !== 'active')) shapeErrors.push('activation darkvision requires an active self feature or feat')
   const raw = activity as unknown as Record<string, unknown>
   if (activity.usesAttackActionAttack != null && (
     activity.usesAttackActionAttack !== true || activity.activation?.kind !== 'free' ||
@@ -2991,7 +3085,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
     activity.legacySource?.kind !== 'spell')) shapeErrors.push('activity.castingConstraints requires a valid spell casting constraint')
   if (activity.requiresEffectGrant != null && activity.requiresEffectGrant !== true) shapeErrors.push('activity.requiresEffectGrant must be true')
   if (activity.usableWhileIncapacitated != null && (activity.usableWhileIncapacitated !== true ||
-    !isDnd5eAutonomousBoundHpRetaliation(activity) && (activity.activation?.kind !== 'free' || activity.target?.kind !== 'self' ||
+    !isDnd5eAutonomousBoundHpRetaliation(activity) && !isDnd5eAutonomousMaintainedRetaliation(activity) && (activity.activation?.kind !== 'free' || activity.target?.kind !== 'self' ||
     activity.invocation?.kind !== 'triggered' || !['self-dropped-to-zero', 'self-involuntarily-incapacitated'].includes(activity.invocation.event)))) {
     shapeErrors.push('activity.usableWhileIncapacitated requires a free self-drop trigger or automatic effect-granted bound-HP retaliation')
   }
@@ -3002,6 +3096,15 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
   if (activity.effectGrantChargeCost != null && (!activity.requiresEffectGrant ||
     !Number.isSafeInteger(activity.effectGrantChargeCost) || activity.effectGrantChargeCost < 1 || activity.effectGrantChargeCost > 1000)) {
     shapeErrors.push('activity.effectGrantChargeCost requires requiresEffectGrant and an integer from 1 to 1000')
+  }
+  const concentrationProfiles = activity.concentrationCastLevelProfiles
+  if (concentrationProfiles != null && (!Array.isArray(concentrationProfiles) ||
+    activity.legacySource?.kind !== 'spell' || concentrationProfiles.length < 1 || concentrationProfiles.length > 9 ||
+    concentrationProfiles.some(profile => !profile || typeof profile !== 'object' || Array.isArray(profile) ||
+      Object.keys(profile).some(key => !['minimumCastLevel','maximumRounds'].includes(key)) ||
+      !finiteInteger(profile.minimumCastLevel,1,9) || !finiteInteger(profile.maximumRounds,1,14_400)) ||
+    new Set(concentrationProfiles.map(profile => profile.minimumCastLevel)).size !== concentrationProfiles.length)) {
+    shapeErrors.push('activity.concentrationCastLevelProfiles requires unique bounded spell-slot duration declarations')
   }
   if (activity.concentrationRequiresEffect != null && activity.concentrationRequiresEffect !== true) shapeErrors.push('activity.concentrationRequiresEffect must be true')
   for (const key of ['checks', 'outcomes', 'requirements', 'choices', 'triggers', 'consumption', 'scaling', 'castLevelTargetProfiles'] as const) {
@@ -3043,7 +3146,12 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
         activity.legacySource?.kind !== 'spell' || activity.legacySource.id !== binding.spellId
       ) errors.push('activity.authorityBinding is invalid')
     } else {
+      const nativeMastermindKinds = new Set(['mastermind-observation','help-tactics','cover-attack-redirection','soul-of-deceit'])
       const mechanicKinds = new Set([
+      'storm-cast-eruption',
+      'storm-cast-flight',
+      ...nativeMastermindKinds,
+      'rest-temporary-hit-points',
       'combat-maneuver',
       'martial-spell-synergy',
       'rage-feature',
@@ -3053,7 +3161,9 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       'utility-projection-attack-advantage',
       'next-d20-advantage',
       'post-d20-adjustment',
+      'incoming-attack-armor-class',
       'missed-weapon-attack-reroll',
+      'missed-attack-advantage-reroll',
       'd20-choice-reroll',
       'post-spell-random-table',
       'post-spell-random-table-choice',
@@ -3082,6 +3192,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       'weapon-damage-rider',
       'spell-damage-ability-modifier',
   'spell-healing-dice-maximum',
+  'spell-healing-dice-reroll',
   'spell-range-minimum',
   'spell-optional-bonus-action',
       'spell-ability-check-bonus',
@@ -3090,9 +3201,10 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       'damage-roll-maximization',
       'attack-tradeoff',
       'advantage-for-extra-attack',
-      'passive-defense',
+      'passive-defense', 'passive-skill-checks',
       'reaction-weapon-attack',
       'marked-target',
+      'damage-zero-saving-throw',
       'death-prevention',
       'spell-defeat-healing',
       'summoned-creature-bonus',
@@ -3101,6 +3213,10 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       'bonus-weapon-attack',
       'turn-start-saving-throw-aura',
       ])
+      if (nativeMastermindKinds.has(binding.mechanicKind) && binding.execution !== 'headless-event-engine') errors.push('Mastermind authorityBinding requires its native event engine')
+      if(binding.mechanicKind==='storm-cast-flight'&&binding.execution!=='headless-event-engine')errors.push('Storm flight requires its native same-cast engine')
+      if(binding.mechanicKind==='storm-cast-eruption'&&binding.execution!=='headless-event-engine')errors.push('Storm eruption requires its native casting-start event engine')
+      if(binding.mechanicKind==='rest-temporary-hit-points'&&binding.execution!=='headless-event-engine')errors.push('rest-native activity.authorityBinding requires its actual event executor')
       const expectedSourceId = `${binding.subclassId}:${binding.abilityId}`
       const expectedActionId = `decl.${binding.subclassId}.${binding.abilityId}`
       if (
@@ -3130,6 +3246,9 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
     ...(activity.choices ?? []).flatMap(choice => choice.options.flatMap(option => option.targetOverride ? [option.targetOverride] : []))]
   if (placementTargets.some(target => target.kind === 'area' && target.placementQualification != null) && activity.legacySource?.kind !== 'spell') {
     errors.push('placementQualification currently requires a spell Activity with Host spell preparation')
+  }
+  if(activity.target.kind==='creature'&&activity.target.allowObjectSpellDamage!=null){
+    if(activity.target.allowObjectSpellDamage!==true||activity.target.count!==1||activity.target.relation!=='any'||activity.target.requiresWilling||activity.target.roomCompanion||activity.target.requiresTargetSeeActor||activity.checks?.length||activity.invocation?.kind!=='triggered'||activity.invocation.event!=='damage-dealt'||!activity.requirements?.some(p=>p.kind==='spell-used'&&p.castingClassIds?.length)||!activity.outcomes.length||activity.outcomes.some(o=>!o.operations.length||o.operations.some(op=>op.kind!=='damage'||op.target!=='target')))errors.push('activity.target.allowObjectSpellDamage requires one class-spell damage-dealt target and damage only')
   }
   if (activity.target.kind === 'creature' && activity.target.allowObjectAttack != null) {
     if (activity.target.allowObjectAttack !== true || activity.target.count !== 1 || activity.target.relation !== 'any' ||
@@ -3234,7 +3353,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       !CONDITIONS.has(check.automaticSuccessIfConditionImmune)) {
       errors.push(`${label}.automaticSuccessIfConditionImmune is invalid`)
     }
-    for (const key of ['automaticSuccessIfCannotHearSource', 'automaticSuccessIfNoSharedLanguage'] as const) {
+    for (const key of ['automaticSuccessIfCannotHearSource', 'automaticSuccessIfCannotHearOrSeeSource', 'automaticSuccessIfNoSharedLanguage'] as const) {
       if (key in check && (check.kind !== 'saving-throw' || check[key] !== true || check.scope !== 'per-target')) {
         errors.push(`${label}.${key} requires a per-target saving throw and true`)
       }
@@ -3335,7 +3454,13 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
         errors.push(`${label}.delivery is invalid`)
       }
       if (!finiteInteger(check.criticalThreshold ?? 20, 1, 20)) errors.push(`${label}.criticalThreshold is invalid`)
+    } else if (check.kind === 'skill-check' && check.reportTotalOnly === true) {
+      if (check.dc != null) errors.push(`${label}.reportTotalOnly cannot declare a DC`)
+      if (!check.skill) errors.push(`${label}.reportTotalOnly requires a skill`)
     } else appendFormulaErrors(errors, check.dc, `${label}.dc`)
+    if ('reportTotalOnly' in check && (check.kind !== 'skill-check' || check.reportTotalOnly !== true)) {
+      errors.push(`${label}.reportTotalOnly requires a skill check and true`)
+    }
   }
 
   const choiceOptions = new Map<string, Set<string>>()
@@ -3344,6 +3469,17 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
     const label = `activity.choices[${index}]`
     if (!validId(choice.id) || choiceOptions.has(choice.id)) errors.push(`${label}.id is invalid or duplicated`)
     if (!choice.label.trim() || choice.label.length > 160) errors.push(`${label}.label is invalid`)
+    if (choice.dmWorldFact != null) {
+      const fact = choice.dmWorldFact
+      if (typeof fact !== 'object' || Array.isArray(fact) || Object.keys(fact).length !== 1 ||
+        typeof fact.factId !== 'string' || !/^[a-z][a-z0-9.-]{0,63}$/.test(fact.factId) ||
+        choice.optionsFrom != null || choice.dmSelection != null || choice.textInput != null || choice.defaultOptionId != null ||
+        activity.target.kind !== 'creature' || activity.target.count !== 1 || activity.target.includeSelf !== false ||
+        !Array.isArray(choice.options) || choice.options.length < 1 || choice.options.some(option =>
+          option.id === 'unknown' || option.requirements != null || option.targetOverride != null)) {
+        errors.push(`${label}.dmWorldFact requires a bounded, static fact about one other creature`)
+      }
+    }
     const optionIds = new Set<string>()
     if (choice.textInput != null && (typeof choice.textInput !== 'object' ||
       !finiteInteger(choice.textInput.maximumLength, 1, choice.textInput.format==='surface-drawing'?65536:160) ||
@@ -3465,6 +3601,8 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
         continue
       }
       if (condition.kind === 'check' && !checkIds.has(condition.checkId)) errors.push(`${label} references an unknown check`)
+      if (condition.kind === 'check' && activity.checks?.some(check => check.id === condition.checkId &&
+        check.kind === 'skill-check' && check.reportTotalOnly)) errors.push(`${label} cannot adjudicate a report-only check`)
       if (condition.kind === 'check' && !['success', 'failure', 'critical-success', 'critical-failure'].includes(condition.result)) errors.push(`${label}.result is invalid`)
       if (condition.kind === 'check-total') {
         if (!checkIds.has(condition.checkId)) errors.push(`${label} references an unknown check`)
@@ -3681,6 +3819,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
             modifier.kind === 'attacks-against-source-armor-class' ||
             modifier.kind === 'attacks-by-source-critical-threshold' ||
             modifier.kind === 'damage-rolls-by-source-bonus' ||
+            modifier.kind === 'notify-source-on-bearer-death' ||
             (modifier.kind === 'attack-roll' && (modifier.mode === 'advantage' || modifier.mode === 'disadvantage')) ||
             modifier.kind === 'weapon-attack-roll' ||
             modifier.kind === 'weapon-attacks-against-target' ||
@@ -3698,7 +3837,8 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
             modifier.kind === 'ability-check' ||
             modifier.kind === 'perception-target-lock' ||
             modifier.kind === 'skill-check-bonus-aura' ||
-            modifier.kind === 'minimum-ability-check-d20' ||
+            modifier.kind === 'minimum-ability-check-d20' || modifier.kind === 'minimum-skill-check-d20' || modifier.kind === 'half-speed-skill-check-advantage' ||
+            modifier.kind === 'sneak-attack-target' ||
             modifier.kind === 'saving-throw' ||
             modifier.kind === 'death-saving-throw' || modifier.kind === 'maximize-healing-dice' ||
             modifier.kind === 'healing-prevention' ||
@@ -3721,13 +3861,14 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
             modifier.kind === 'maximum-attacks-per-turn' ||
             modifier.kind === 'restricted-extra-action' ||
             modifier.kind === 'darkvision' || modifier.kind === 'climb-speed' || modifier.kind === 'swim-speed' ||
-            modifier.kind === 'sight-range-limit' || modifier.kind === 'truesight' || modifier.kind === 'spell-targeting-immunity' || modifier.kind === 'see-invisible' || modifier.kind === 'darkvision-concealment' ||
+            modifier.kind === 'sight-range-limit' || modifier.kind === 'truesight' || modifier.kind === 'through-solid-objects-sight' || modifier.kind === 'spell-targeting-immunity' || modifier.kind === 'see-invisible' || modifier.kind === 'darkvision-concealment' ||
             modifier.kind === 'emitted-light' ||
             modifier.kind === 'language-capability' ||
             modifier.kind === 'language-restriction' ||
             modifier.kind === 'attack-decoys' ||
             modifier.kind === 'planar-phase' ||
             modifier.kind === 'solid-material-traversal' ||
+            modifier.kind === 'object-creature-traversal' ||
             modifier.kind === 'source-location-awareness' ||
             modifier.kind === 'tracking-capability' ||
             modifier.kind === 'environmental-capability' ||
@@ -3736,7 +3877,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
             modifier.kind === 'hit-point-maximum' ||
             modifier.kind === 'on-hit-bonus-damage' ||
             modifier.kind === 'weapon-damage-multiplier' ||
-            modifier.kind === 'armor-enchantment' || modifier.kind === 'weapon-enchantment' || modifier.kind === 'weapon-damage-replacement' ||
+            modifier.kind === 'armor-enchantment' || modifier.kind === 'weapon-enchantment' || modifier.kind==='bound-weapon-ability' || modifier.kind === 'weapon-damage-replacement' ||
             modifier.kind === 'movement-boundary-save'
           if (!supported) errors.push(`${operationLabel} references an effect modifier that runtime application does not support: ${modifier.kind}`)
           const formulas =
@@ -3771,7 +3912,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       operationIds.add(operation.id)
     })
   }
-  if (!activity.outcomes.length) errors.push('activity.outcomes is empty')
+  if (!activity.outcomes.length && !activity.checks?.some(check => check.kind === 'skill-check' && check.reportTotalOnly)) errors.push('activity.outcomes is empty')
 
   for (const [index, consumption] of (activity.consumption ?? []).entries()) {
     const label = `activity.consumption[${index}]`
@@ -3910,6 +4051,39 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
   // Runtime coverage is derived from operations and registered Host handlers.
   if (errors.length === 0) {
     const operations = activity.outcomes.flatMap(outcome => outcome.operations)
+    if(operations.some(operation=>operation.kind==='weapon-hit-banishment')){
+      const damage=operations[0],banishment=operations[1]
+      const closed=activity.legacySource?.kind==='spell'&&activity.legacySource.magical===true&&
+        activity.requiresEffectGrant===true&&activity.activation.kind==='free'&&
+        activity.invocation?.kind==='triggered'&&activity.invocation.event==='attack-hit'&&
+        activity.invocation.confirmation==='automatic'&&activity.invocation.retention==='single-event'&&
+        activity.target.kind==='creature'&&activity.target.relation==='any'&&activity.target.count===1&&
+        activity.requirements?.length===1&&activity.requirements[0].kind==='attack-category'&&activity.requirements[0].category==='weapon'&&
+        !activity.checks?.length&&!activity.choices?.length&&!activity.effects?.length&&!activity.consumption?.length&&!activity.scaling?.length&&
+        activity.outcomes.length===1&&activity.outcomes[0].when.kind==='always'&&operations.length===2&&
+        damage?.kind==='damage'&&damage.target==='target'&&damage.damageType==='force'&&damage.magical===true&&damage.critical==='double-dice'&&
+        damage.amount.kind==='dice'&&damage.amount.count===5&&damage.amount.sides===10&&
+        Object.keys(damage).every(key=>['id','kind','target','amount','damageType','magical','critical'].includes(key))&&
+        Object.keys(damage.amount).every(key=>['kind','rollId','count','sides'].includes(key))&&
+        banishment?.kind==='weapon-hit-banishment'&&banishment.target==='target'&&banishment.maximumHitPoints===50
+      if(!closed)errors.push('activity weapon hit banishment requires the closed automatic granted 5d10 force weapon-hit continuation')
+    }
+    if(operations.some(operation=>operation.kind==='summon'&&operation.placementOrigin==='killed-target')&&(activity.invocation?.kind!=='triggered'||activity.invocation.event!=='creature-killed'||activity.target.kind!=='creature'||activity.target.count!==1))errors.push('activity killed-target summon requires one Host-bound creature-killed target')
+    if(operations.some(operation=>operation.kind==='heal-owned-curse-on-bearer-death')&&(
+      activity.legacySource?.kind!=='subclass-ability'||activity.activation.kind!=='free'||activity.invocation?.kind!=='triggered'||
+      activity.invocation.event!=='effect-bearer-died'||activity.invocation.confirmation!=='automatic'||activity.invocation.retention!=='single-event'||
+      activity.target.kind!=='creature'||activity.target.count!==1||activity.consumption?.length||activity.checks?.length||activity.effects?.length||activity.choices?.length||
+      activity.outcomes.length!==1||activity.outcomes[0].when.kind!=='always'||operations.length!==1))errors.push('activity owned curse healing requires a closed automatic source-owned death continuation')
+    if(operations.some(operation=>operation.kind==='transfer-owned-curse-on-bearer-death')){
+      const transfer=operations[0]
+      if(activity.legacySource?.kind!=='subclass-ability'||activity.activation.kind!=='free'||activity.invocation?.kind!=='triggered'||
+        activity.invocation.event!=='effect-bearer-died'||activity.invocation.confirmation!=='actor-choice'||activity.invocation.retention!=='single-event'||
+        activity.target.kind!=='creature'||activity.target.count!==1||activity.consumption?.length||activity.checks?.length||activity.effects?.length||
+        activity.outcomes.length!==1||!(activity.outcomes[0].when.kind==='always'||activity.outcomes[0].when.kind==='predicate'&&activity.outcomes[0].when.predicate.kind==='class-level'&&activity.outcomes[0].when.predicate.classId==='warlock'&&activity.outcomes[0].when.predicate.minimum===14&&activity.outcomes[0].when.predicate.maximum==null)||operations.length!==1||transfer?.kind!=='transfer-owned-curse-on-bearer-death'||
+        !activity.requirements?.some(requirement=>requirement.kind==='class-level'&&requirement.classId==='warlock'&&requirement.minimum>=14)||
+        activity.choices?.length!==1||activity.choices[0].id!==transfer.destinationChoiceId||activity.choices[0].optionsFrom!=='combat-creatures')
+        errors.push('activity owned curse transfer requires a closed warlock14 source-owned death decision')
+    }
     if (operations.some(operation => operation.kind === 'damage' && operation.damageSource === 'grant-source') && !activity.requiresEffectGrant) {
       errors.push('activity grant-source damage requires requiresEffectGrant')
     }

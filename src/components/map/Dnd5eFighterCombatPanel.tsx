@@ -1,3 +1,4 @@
+import{dnd5eCharacterHelpTacticsRange}from'../../rulesets/dnd5e/helpTacticsProjection'
 import { Clock3, Crosshair, Footprints, HeartPulse, PackageOpen, RotateCcw, Shield, Sparkles, Sword, Zap } from 'lucide-react'
 import {
   FIGHTER_RESOURCE_KEYS,
@@ -189,6 +190,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
       <Dnd5eBasicActionsPanel
+        helpAsBonusAction={dnd5eCharacterHelpTacticsRange(character)!==undefined}
         attackTeleportRangeFeet={dnd5eCharacterAttackTeleportRange(character)}
         canAct={canAct}
         actionAvailable={turnEconomy.action.current > 0 || canContinueAttackAction}

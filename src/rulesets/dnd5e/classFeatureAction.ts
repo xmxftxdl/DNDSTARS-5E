@@ -999,7 +999,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
   divineInterventionD100?: number
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
   attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
-}): {
+},hostExecution?:Readonly<{now:number}>): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
@@ -1100,6 +1100,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
     prepared.state,
     { ...headlessAction, attackDecoyRolls: input.attackDecoyRolls, shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows },
     input.airborneFallDamageRollsByCombatantId,
+    hostExecution?{transactionId:prepared.action.id,now:hostExecution.now}:undefined,
   )
   if (!result.ok) return { result, airborneFalls }
   return {

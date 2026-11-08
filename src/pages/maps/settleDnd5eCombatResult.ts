@@ -1,33 +1,30 @@
+import{readDnd5eSequenceMovementConcentrationCheckpoint,assertDnd5eSequenceMovementConcentrationCheckpointPrefix}from'./movementHazardsProducer'
+import {capturePostNativeActivitySettlement,capturePostNativeActivityStage, readPostNativeActivityStage, samePostNativeActivityInput, type PostNativeActivityStage} from './postNativeActivityParent'
+import {readCapturedDnd5eOpportunitySequencePostNativeCheckpoint,readStormFuryMoveBaseReplayCheckpoint,prepareDnd5eOpportunityMoveSequence,resolveDnd5eOpportunityMoveSequenceOriginal} from '../../rulesets/dnd5e/opportunityMoveSequence'
+import {readBountifulOpportunitySequenceConcentrationOriginalReplay,readBountifulOpportunitySequenceMovementConcentrationOriginalReplay} from '../../rulesets/dnd5e/bountifulOpportunitySequencePostNativeReplay'
+import {readDnd5eActualOriginalReadyBoundary} from '../../rulesets/dnd5e/damageCommitSession'
+import {encodeSecondChanceParentWire} from '../../lib/secondChanceParentWire'
+import {cloneDnd5eHostTransactionInput} from '../../rulesets/dnd5e/hostTransactionClone'
+import {getRoomSession} from '../../lib/roomSession'
+import {withDnd5eOriginalD20ReadyTailStop} from '../../rulesets/dnd5e/allyNaturalOneCheckpoint'
+import {getDnd5eSrdCombatSpell} from '../../rulesets/dnd5e/spells'
+import {resolveDnd5ePreparedWithDamageReactions,type Dnd5eDamageReactionFlowOptions} from '../../rulesets/dnd5e/damageReactionFlow'
 import { planDnd5eDisadvantageNegation, type DisadvantageNegationRoll } from '../../rulesets/dnd5e/disadvantageNegation'
-import { dnd5eSpellcastingSaveRequirements, previewDnd5eSpellcastingSaves, type Dnd5eSpellcastingSavingThrowRoll } from '../../application/combat/dnd5eCombatRules'
+import type {Dnd5eSpellcastingSavingThrowRoll} from '../../application/combat/dnd5eCombatRules'
+import {dnd5eSpellcastingSaveRequirements,previewDnd5eSpellcastingSaves} from "../../application/combat/dnd5eCombatRules"
 import type {
   BardicInspirationRollType,
   DmAdjudicationInterruptResponse,
 } from '../../lib/combatInterruptProtocol'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
-import {
-  dnd5eCombatantPairKey,
-  dnd5eHellishRebukeReactionOption,
-  dnd5ePendingMonsterMechanicResolutions,
-  dnd5ePendingMonsterDeathAreaEffects,
-  dnd5ePostSpellRandomTablePlan,
-  dnd5eSavingThrowMode,
-  getDnd5eSrdMonster,
-  markDnd5eSummonsDamaged,
-  planDnd5eMapResultApplication,
-  previewDnd5eUnsupportedAirborneFalls,
-  previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
-  resolveDnd5eHeadlessAction,
-  resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
-  type Dnd5eUnsupportedAirborneFallPreview,
-  type Dnd5eAction,
-  type Dnd5eActionResult,
-  type Dnd5eCombatant,
-  type Dnd5eHeadlessCombatState,
-  type Dnd5eMapResultPlan,
-  type Dnd5eSpellTargetSavingThrowRoll,
-} from '../../rulesets/dnd5e'
+import type {Dnd5eUnsupportedAirborneFallPreview,Dnd5eAction,Dnd5eActionResult,Dnd5eCombatant,Dnd5eHeadlessCombatState,Dnd5eMapResultPlan,Dnd5eSpellTargetSavingThrowRoll} from '../../rulesets/dnd5e'
+import {dnd5eCombatantPairKey} from '../../rulesets/dnd5e/headlessCombatPrimitives'
+import {dnd5eHellishRebukeReactionOption,dnd5ePendingMonsterMechanicResolutions,dnd5ePendingMonsterDeathAreaEffects,dnd5ePostSpellRandomTablePlan,previewDnd5eUnsupportedAirborneFalls,previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,resolveDnd5eHeadlessAction,resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange} from "../../application/combat/dnd5eCombatRules"
+import {dnd5eSavingThrowMode} from '../../rulesets/dnd5e/passiveDefenses'
+import {getDnd5eSrdMonster} from '../../rulesets/dnd5e/monsters'
+import {markDnd5eSummonsDamaged} from '../../rulesets/dnd5e/summonedCreatures'
+import {planDnd5eMapResultApplication} from '../../rulesets/dnd5e/mapBridge'
 import { resolveDnd5eRollMode } from '../../rulesets/dnd5e/rollMode'
 import {dnd5eRollDiceRecipes,resolveDnd5eRollDiceModifiers} from '../../rulesets/dnd5e/rollDiceModifiers'
 import {dnd5eRollDiceOccurrenceId} from '../../rulesets/dnd5e/rollDiceTransaction'
@@ -38,7 +35,125 @@ import {
   type Dnd5eOptionalBonusDieInterruptRequest,
 } from './dnd5eRollInterruptPipeline'
 
+
+type CompletedCombatBase = { result: Extract<Dnd5eActionResult,{ok:true}>; application:Dnd5eMapResultPlan }
+const completedCombatBases=new WeakMap<object,{input:object;inputSignature:string;outputSignature:string}>()
+type ActualBaseInput=Parameters<typeof settleDnd5eConcentrationChecks>[0]
+type SequenceConcentrationFact=ReturnType<typeof readCapturedDnd5eOpportunitySequencePostNativeCheckpoint>
+export interface Dnd5eSequenceConcentrationOriginal {readonly actualBaseConcentrationOriginal:unique symbol}
+type MovementConcentrationFact=ReturnType<typeof readDnd5eSequenceMovementConcentrationCheckpoint>
+type ConcentrationBinding={input:ActualBaseInput;signature:string;source:{kind:'opportunity';fact:SequenceConcentrationFact}|{kind:'movement';fact:MovementConcentrationFact};checkpoint:object;roomId:string;memberId:string;unchanged:()=>boolean;originals:Map<string,Dnd5eSequenceConcentrationOriginal>;retained:Map<string,readonly number[]>;resolve:(frame:Dnd5eSequenceConcentrationOriginal)=>Promise<readonly number[]|object|undefined>;resolveResult?: (frame:Dnd5eSequenceConcentrationOriginal)=>Promise<object>}
+const concentrationInputs=new WeakMap<object,ConcentrationBinding>()
+const concentrationOriginals=new WeakMap<object,{binding:ConcentrationBinding;state:Dnd5eHeadlessCombatState;action:Extract<Dnd5eAction,{type:'concentration-save'}>;operationId:string;mode:'normal'|'advantage'|'disadvantage';stage:'original'|'result';signature:string;ready?:string}>()
+const concentrationResults=new WeakMap<object,{frame:object;result:Dnd5eActionResult;signature:string}>()
+let activeConcentrationOriginal:object|undefined
+export const dnd5eSequenceConcentrationOriginalActive=(frame:object)=>concentrationOriginals.has(frame)&&activeConcentrationOriginal===frame
+const concentrationSignature=(value:unknown)=>JSON.stringify(encodeSecondChanceParentWire(value))
+const concentrationReadySignature=(ready:{request:object;snapshot:Dnd5eHeadlessCombatState;events:readonly unknown[]})=>[Object.fromEntries(Object.entries(ready.request).filter(([key])=>key!=='ordinal')),ready.snapshot,ready.events].map(concentrationSignature).join('\n')
+const concentrationBaseMaterial=(input:ActualBaseInput)=>[input.result,input.priorState,input.map,input.characters,input.characterIdByCombatantId,input.priorApplication,input.hostParentTransactionId,input.followupTransactionNow?.()].map(concentrationSignature).join('\n')
+const concentrationPrefix=(fact:SequenceConcentrationFact)=>({prepared:fact.source.prepared,request:fact.request,preceding:fact.preceding,rolls:fact.source.attacks[fact.request.actorTokenId],beforeState:fact.beforeState,resolved:fact.resolved})
+/** Binds services to a genuine native postfix. It issues no operation: only
+ * the actual Base CON loop below can issue an original-dice frame. */
+export function bindDnd5eSequenceConcentrationOriginals(input:ActualBaseInput,checkpoint:object,unchanged:()=>boolean,resolve:ConcentrationBinding['resolve'],resolveResult?:ConcentrationBinding['resolveResult']){
+ const fact=readCapturedDnd5eOpportunitySequencePostNativeCheckpoint(checkpoint),host=getRoomSession()
+ if(host?.role!=='dm'||!unchanged()||!fact.resolved.result.ok||!fact.resolved.application)throw Error('concentration-original:actual-live-base-required')
+ const expected={result:fact.resolved.result,priorState:fact.beforeState,map:fact.resolved.application.map,characters:fact.resolved.application.characters,characterIdByCombatantId:fact.source.prepared.characterIdByCombatantId,priorApplication:fact.resolved.application,hostParentTransactionId:fact.resolved.result.transaction?.id}
+ const supplied={result:input.result,priorState:input.priorState,map:input.map,characters:input.characters,characterIdByCombatantId:input.characterIdByCombatantId,priorApplication:input.priorApplication,hostParentTransactionId:input.hostParentTransactionId}
+ if(Object.keys(expected).some(key=>concentrationSignature(supplied[key as keyof typeof supplied])!==concentrationSignature(expected[key as keyof typeof expected]))||input.followupTransactionNow?.()!==fact.source.prepared.input.firstHostNow)throw Error('concentration-original:exact-native-base-input-required')
+ if(concentrationInputs.has(input))throw Error('concentration-original:input-already-bound')
+ concentrationInputs.set(input,{input,signature:concentrationBaseMaterial(input),source:{kind:'opportunity',fact},checkpoint,roomId:host.roomId,memberId:host.memberId,unchanged,resolve,resolveResult,originals:new Map,retained:new Map})
+}
+const concentrationPrepared=(binding:ConcentrationBinding)=>binding.source.kind==='opportunity'?binding.source.fact.source.prepared:binding.source.fact.prepared
+const concentrationNow=(binding:ConcentrationBinding)=>binding.source.kind==='opportunity'?binding.source.fact.source.prepared.input.firstHostNow:binding.source.fact.firstHostNow
+const movementConcentrationPrefix=(fact:MovementConcentrationFact)=>[fact.prepared,fact.parentId,fact.segmentIndex,fact.operationIndex,fact.areaId,fact.actorId,fact.operationId,fact.native,fact.priorState,fact.application].map(concentrationSignature).join('\n')
+/** Only the real Producer native item result can bind a movement Base input. */
+export function bindDnd5eMovementConcentrationOriginals(input:ActualBaseInput,checkpoint:object,unchanged:()=>boolean,resolve:ConcentrationBinding['resolve'],resolveResult?:ConcentrationBinding['resolveResult']){
+ const fact=readDnd5eSequenceMovementConcentrationCheckpoint(checkpoint),host=getRoomSession();if(host?.role!=='dm'||!unchanged()||!fact.native.ok)throw Error('concentration-original:actual-live-movement-base-required')
+ const expected={result:fact.native,priorState:fact.priorState,map:fact.application.map,characters:fact.application.characters,characterIdByCombatantId:fact.characterIdByCombatantId,priorApplication:fact.application,hostParentTransactionId:fact.operationId},supplied={result:input.result,priorState:input.priorState,map:input.map,characters:input.characters,characterIdByCombatantId:input.characterIdByCombatantId,priorApplication:input.priorApplication,hostParentTransactionId:input.hostParentTransactionId}
+ if(Object.keys(expected).some(key=>concentrationSignature(supplied[key as keyof typeof supplied])!==concentrationSignature(expected[key as keyof typeof expected]))||input.followupTransactionNow?.()!==fact.firstHostNow||concentrationInputs.has(input))throw Error('concentration-original:exact-native-movement-base-input-required')
+ concentrationInputs.set(input,{input,signature:concentrationBaseMaterial(input),source:{kind:'movement',fact},checkpoint,roomId:host.roomId,memberId:host.memberId,unchanged,resolve,resolveResult,originals:new Map,retained:new Map})
+}
+function readConcentrationOriginal(frame:object,checkpoint:object){
+ const row=concentrationOriginals.get(frame),host=getRoomSession()
+ if(!row||host?.role!=='dm'||host.roomId!==row.binding.roomId||host.memberId!==row.binding.memberId||!row.binding.unchanged()||concentrationBaseMaterial(row.binding.input)!==row.binding.signature||concentrationSignature({state:row.state,action:row.action,operationId:row.operationId,mode:row.mode})!==row.signature)throw Error('concentration-original:actual-live-operation-required')
+ if(row.binding.source.kind==='opportunity'){const effectiveCheckpoint=readStormFuryMoveBaseReplayCheckpoint(checkpoint,row.binding.checkpoint)??checkpoint,fact=readCapturedDnd5eOpportunitySequencePostNativeCheckpoint(effectiveCheckpoint);if(concentrationSignature(concentrationPrefix(fact))!==concentrationSignature(concentrationPrefix(row.binding.source.fact)))throw Error('concentration-original:exact-native-prefix-required')}
+ else if(movementConcentrationPrefix(readDnd5eSequenceMovementConcentrationCheckpoint(checkpoint))!==movementConcentrationPrefix(row.binding.source.fact))throw Error('concentration-original:exact-native-movement-prefix-required')
+ return row
+}
+/** Only the actual Base final-CON frame may restore its mechanical Move
+ * preparer. The already-issued Fury result is retained by the real Base proof;
+ * this is neither a source/raw issuer nor a caller data restoration API. */
+export function prepareDnd5eStormFuryMoveConcentrationReplay<T extends Parameters<typeof resolveDnd5eOpportunityMoveSequenceOriginal>[0]&{transactionId?:string}>(frame:object,checkpoint:object,source:T):T|undefined{
+ const row=readConcentrationOriginal(frame,checkpoint)
+ if(row.stage!=='result'||row.binding.source.kind!=='opportunity')return undefined
+ if(!readStormFuryMoveBaseReplayCheckpoint(checkpoint,row.binding.checkpoint))return undefined
+ const original=row.binding.originals.get(row.operationId),raw=original&&concentrationOriginals.get(original),fact=row.binding.source.fact
+ if(!raw?.ready||readBountifulOpportunitySequenceConcentrationOriginalReplay(source)?.at(-1)!==frame||concentrationSignature(source.prepared)!==concentrationSignature(fact.source.prepared)||concentrationSignature(source.attacks)!==concentrationSignature(fact.source.attacks)||source.transactionId!==fact.request.parentId)throw Error('storm-fury-CON:exact-confirmed-base-source-required')
+ const fresh=prepareDnd5eOpportunityMoveSequence(source.prepared.input)
+ if(!fresh.ok||concentrationSignature(fresh.prepared)!==concentrationSignature(fact.source.prepared))throw Error('storm-fury-CON:exact-native-repreparation-required')
+ const replay=cloneDnd5eHostTransactionInput(source);replay.prepared=fresh.prepared;return replay
+}
+/** Read-only identity of an actual operation, never a caller graph issuer. */
+export function readDnd5eSequenceConcentrationOriginal(frame:object,checkpoint:object){
+ const row=readConcentrationOriginal(frame,checkpoint);if(row.binding.source.kind!=='opportunity')throw Error('concentration-original:actual-opportunity-source-required');const fact=row.binding.source.fact
+ return {parentId:fact.request.parentId,windowIndex:fact.request.windowIndex,opportunityActorId:fact.request.actorTokenId,operationId:row.operationId,actorId:row.action.actorId,kind:'saving-throw' as const,mode:row.mode,stage:row.stage,raw:[row.action.d20,...(row.action.d20Second===undefined?[]:[row.action.d20Second])],dc:row.action.dc}
+}
+/** Runs only the original operation held by the actual Base issuer. Callers
+ * cannot substitute a state, action, result, timestamp, or DC. */
+export function resolveDnd5eSequenceConcentrationOriginal(frame:object,checkpoint:object){
+ const row=readConcentrationOriginal(frame,checkpoint)
+ const previous=activeConcentrationOriginal;activeConcentrationOriginal=frame
+ try{return resolveDnd5eHeadlessAction(cloneDnd5eHostTransactionInput(row.state),cloneDnd5eHostTransactionInput(row.action),{transactionId:row.operationId,now:concentrationNow(row.binding)})}finally{activeConcentrationOriginal=previous}
+}
+export function readDnd5eSequenceConcentrationOriginalReplayFacts(frame:object){
+ const row=concentrationOriginals.get(frame)
+ if(!row)throw Error('concentration-original:actual-live-operation-required')
+ readConcentrationOriginal(frame,row.binding.checkpoint)
+ return {...readDnd5eSequenceConcentrationOriginal(frame,row.binding.checkpoint),prepared:concentrationSignature(concentrationPrepared(row.binding))}
+}
+/** The operation is issued by the actual Base over a real native movement item result. */
+export function readDnd5eSequenceMovementConcentrationOriginal(frame:object,checkpoint:object){const row=readConcentrationOriginal(frame,checkpoint);if(row.binding.source.kind!=='movement')throw Error('concentration-original:actual-movement-source-required');const fact=row.binding.source.fact,operation=JSON.parse(row.operationId)as unknown[];if(operation.length!==4||operation[0]!==fact.operationId||operation[1]!=='concentration'||!Number.isSafeInteger(operation[2])||(operation[2]as number)<0||operation[3]!==row.action.actorId)throw Error('concentration-original:actual-movement-CON-operation-required');return{parentId:fact.parentId,segmentIndex:fact.segmentIndex,operationIndex:fact.operationIndex,areaId:fact.areaId,baseOperationId:fact.operationId,checkIndex:operation[2]as number,operationId:row.operationId,actorId:row.action.actorId,kind:'saving-throw' as const,mode:row.mode,stage:row.stage,raw:row.action.d20Second===undefined?[row.action.d20]:[row.action.d20,row.action.d20Second],dc:row.action.dc}}
+export function readDnd5eSequenceMovementConcentrationOriginalReplayFacts(frame:object){const row=concentrationOriginals.get(frame);if(!row)throw Error('concentration-original:actual-live-operation-required');return{...readDnd5eSequenceMovementConcentrationOriginal(frame,row.binding.checkpoint),prepared:concentrationSignature(concentrationPrepared(row.binding))}}
+function movementConcentrationAtMovement(frame:object,movementCheckpoint:object){const row=concentrationOriginals.get(frame);if(!row||row.binding.source.kind!=='movement')throw Error('concentration-original:actual-movement-source-required');readConcentrationOriginal(frame,row.binding.checkpoint);assertDnd5eSequenceMovementConcentrationCheckpointPrefix(row.binding.checkpoint,movementCheckpoint);return row.binding.checkpoint}
+export function observeDnd5eSequenceMovementConcentrationOriginalAtMovement(frame:object,movementCheckpoint:object){observeDnd5eSequenceConcentrationOriginal(frame,movementConcentrationAtMovement(frame,movementCheckpoint))}
+export function throwDnd5eSequenceMovementConcentrationOriginalResultAtMovement(frame:object,movementCheckpoint:object):never{return throwDnd5eSequenceConcentrationOriginalResult(frame,movementConcentrationAtMovement(frame,movementCheckpoint))}
+/** Replay the true original boundary only. The actual Base completion, not
+ * this observer's incomplete save, owns all after-d20 native consequences. */
+export function observeDnd5eSequenceConcentrationOriginal(frame:object,checkpoint:object){
+ const row=readConcentrationOriginal(frame,checkpoint),stopped=new Error('concentration-original:actual-original-boundary-observed')
+ if(row.stage!=='original')throw Error('concentration-original:actual-original-operation-required')
+ try{withDnd5eOriginalD20ReadyTailStop((request,snapshot,events)=>{if(row.ready&&row.ready!==concentrationReadySignature({request,snapshot,events}))throw Error('concentration-original:changed-actual-original-boundary');throw stopped},()=>resolveDnd5eSequenceConcentrationOriginal(frame,checkpoint))}catch(error){if(error===stopped)return;throw error}
+ throw Error('concentration-original:actual-original-ready-not-reached')
+}
+/** The actual whole facade calls this only for a Base-issued final CON frame.
+ * Its opaque exception transports that actual native result through the
+ * existing DamageFlow without presenting a partial move as a final result. */
+export function throwDnd5eSequenceConcentrationOriginalResult(frame:object,checkpoint:object):never{
+ const row=readConcentrationOriginal(frame,checkpoint)
+ if(row.stage!=='result')throw Error('concentration-original:actual-final-operation-required')
+ const result=resolveDnd5eSequenceConcentrationOriginal(frame,checkpoint),receipt=new Error('concentration-original:actual-native-operation-completed')
+ concentrationResults.set(receipt,{frame,result,signature:concentrationSignature(result)});throw receipt
+}
+export function readDnd5eSequenceConcentrationOriginalResult(receipt:object,frame:object,checkpoint:object){
+ const row=readConcentrationOriginal(frame,checkpoint),proof=concentrationResults.get(receipt)
+ if(row.stage!=='result'||!proof||proof.frame!==frame||proof.signature!==concentrationSignature(proof.result))throw Error('concentration-original:actual-native-result-required')
+ return cloneDnd5eHostTransactionInput(proof.result)
+}
+/** Data lineage of this actual Base invocation only. This reader grants no
+ * source ability, consent, or publication permission. JSON copies are rejected. */
+export function readDnd5eCompletedCombatBase(input:object,completed:CompletedCombatBase){
+ const row=completedCombatBases.get(completed)
+ if(!row||row.input!==input||row.inputSignature!==JSON.stringify(input)||row.outputSignature!==JSON.stringify(completed))throw Error('combat-base:actual-unchanged-completion-required')
+ return completed
+}
+
 export async function settleDnd5eConcentrationChecks(input: {
+  /** Host-only stage issued at the native-to-Activity boundary, never player payload. */
+  resumeActivityStage?: PostNativeActivityStage
+  hostParentTransactionId?: string
+  followupTransactionNow?: () => number | undefined
+  damageReactions?: Dnd5eDamageReactionFlowOptions
+  requestOptionalDamageSave?: (request: { mapId: string; targetId: string; characterId?: string; targetName: string; effectId: string; effectName: string; ability: import('../../lib/dnd').AbilityKey; dc: number; transactionId: string }) => Promise<boolean>
   chooseDisadvantageNegation?: (request: { character: Character; roll: DisadvantageNegationRoll; transactionId: string }) => Promise<string | undefined>
   result: Extract<Dnd5eActionResult, { ok: true }>
   /** State immediately before a non-action authority adjustment changed support. */
@@ -89,6 +204,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     total: number
     targetNumber?: number
   }) => Promise<number | undefined>
+  chooseSpellDamageDice?: (input:{transactionId:string;actor:Dnd5eCombatant;character?:Character;spellName:string;group:import('../../rulesets/dnd5e/spellDamageDieRerolls').Dnd5eSpellDamageDiceGroup})=>Promise<readonly import('../../rulesets/dnd5e/spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[]>
   requestHellishRebuke?: (input: {
     reactor: Character
     reactorTokenId: string
@@ -97,6 +213,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     damage: number
     slotLevel: number
     itemName?: string
+    racialInnate?: boolean
   }) => Promise<boolean>
   requestPostSpellRandomTableAdjudication?: (request: {
     actor: Dnd5eCombatant
@@ -121,6 +238,7 @@ export async function settleDnd5eConcentrationChecks(input: {
    * application plan is built, so the whole chain is committed as one result.
    */
   settleActivityTriggers?: (request: {
+    stage?: PostNativeActivityStage
     state: Dnd5eHeadlessCombatState
     events: Extract<Dnd5eActionResult, { ok: true }>['events']
     map: BattleMap
@@ -133,9 +251,16 @@ export async function settleDnd5eConcentrationChecks(input: {
     map?: BattleMap
   }>
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
+  const actualBaseInput=input.result,actualBaseInputSignature=JSON.stringify(input.result)
+  const resuming = input.resumeActivityStage ? readPostNativeActivityStage(input.resumeActivityStage) : undefined
+  if (resuming && (input.result.events.length || !samePostNativeActivityInput(resuming, input))) throw Error('activity-parent:resume-stage-mismatch')
+  const resolveBoundary = (source:Dnd5eHeadlessCombatState,resolve:(state:Dnd5eHeadlessCombatState)=>Dnd5eActionResult) => input.damageReactions
+    ? resolveDnd5ePreparedWithDamageReactions(input.damageReactions,{prepared:{state:source}},value=>resolve(value.prepared.state))
+    : Promise.resolve(resolve(source))
+  let issuedStage=input.resumeActivityStage
   let state = input.result.state
   let transaction = input.result.transaction
-  const followupId = input.result.transaction?.id ?? crypto.randomUUID()
+  const followupId = input.hostParentTransactionId ?? input.result.transaction?.id ?? crypto.randomUUID()
   let map = input.map
   const events = [...input.result.events]
   const collectFallRolls = async (falls: readonly Dnd5eUnsupportedAirborneFallPreview[]) => {
@@ -167,7 +292,8 @@ export async function settleDnd5eConcentrationChecks(input: {
       events.splice(0, events.length, ...mounted.result.events)
     }
     // Derived solely from authoritative result events, never a player-provided claim.
-    const forcedMovementTargetIds=events.flatMap(event=>event.type==='moved' && event.movementKind==='forced' &&
+    // Accepted Activity teleports can also arrive without physical or magical support.
+    const forcedMovementTargetIds=events.flatMap(event=>event.type==='moved' && (event.movementKind==='forced' || event.movementKind==='teleport') &&
       event.toElevationFeet!=null && event.fromElevationFeet!=null && event.toElevationFeet!==event.fromElevationFeet ? [event.actorId] : [])
     const falls = previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
       input.priorState,
@@ -176,12 +302,13 @@ export async function settleDnd5eConcentrationChecks(input: {
     )
     if (falls.length > 0) {
       const fallDamageRollsByCombatantId = await collectFallRolls(falls)
-      const fallen = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
-        input.priorState,
-        state,
+      const prior=input.priorState
+      const fallen = await resolveBoundary(state,current=>resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
+        prior,
+        current,
         fallDamageRollsByCombatantId,
         forcedMovementTargetIds,
-      )
+      ))
       if (!fallen.ok) throw new Error(`unsupported-airborne-fall:${fallen.reason}`)
       state = fallen.state
       events.push(...fallen.events)
@@ -192,19 +319,31 @@ export async function settleDnd5eConcentrationChecks(input: {
     action: Dnd5eAction,
     transactionId?: string,
   ) => {
+    const resolveNative=async(action:Dnd5eAction)=>{
+      const binding=concentrationInputs.get(input),original=transactionId&&binding?.originals.get(transactionId),raw=original&&concentrationOriginals.get(original)
+      if(action.type==='concentration-save'&&binding?.resolveResult&&raw&&transactionId){
+        if(!raw.ready)throw Error('concentration-original:actual-ready-boundary-required')
+        const frame=Object.freeze({}) as Dnd5eSequenceConcentrationOriginal,row={binding,state:cloneDnd5eHostTransactionInput(source),action:{...cloneDnd5eHostTransactionInput(action),d20:raw.action.d20,d20Second:raw.action.d20Second},operationId:transactionId,mode:raw.mode,stage:'result' as const,signature:''}
+        row.signature=concentrationSignature({state:row.state,action:row.action,operationId:row.operationId,mode:row.mode});concentrationOriginals.set(frame,row)
+        const receipt=await binding.resolveResult(frame)
+        return readDnd5eSequenceConcentrationOriginalResult(receipt,frame,binding.checkpoint)
+      }
+      return resolveBoundary(source,current=>resolveDnd5eHeadlessAction(current,action,{transactionId,now:input.followupTransactionNow?.()}))
+    }
     const settleMounted = async (result: Dnd5eActionResult) => input.settleMountedBalance
       ? (await input.settleMountedBalance({ state: source, map: input.map, characters: input.characters,
           characterIdByCombatantId: { ...input.characterIdByCombatantId } }, result)).result
       : result
-    const preview = previewDnd5eUnsupportedAirborneFalls(source, action,{transactionId})
+    const retained=transactionId&&concentrationInputs.get(input)?.retained.get(transactionId),previewAction=action.type==='concentration-save'&&retained?{...action,d20:retained[0]!,d20Second:retained[1]}:action
+    const preview = previewDnd5eUnsupportedAirborneFalls(source, previewAction,{transactionId,now:input.followupTransactionNow?.()})
     if (!preview.ok || preview.falls.length === 0) {
-      return settleMounted(resolveDnd5eHeadlessAction(source, action,{transactionId}))
+      return settleMounted(await resolveNative(action))
     }
     const airborneFallDamageRollsByCombatantId = await collectFallRolls(preview.falls)
-    return settleMounted(resolveDnd5eHeadlessAction(source, {
+    return settleMounted(await resolveNative({
       ...action,
       airborneFallDamageRollsByCombatantId,
-    },{transactionId}))
+    }))
   }
   const resolveSavingThrowInterrupts = (request: {
     effectDiceModifier?: number
@@ -218,6 +357,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     halflingLuckyLabel?: string
     blessLabel?: string
     baneLabel?: string
+    concentrationOriginal?: {operationId:string;action:Omit<Extract<Dnd5eAction,{type:'concentration-save'}>,'d20'|'d20Second'>}
   }) => {
     const characterId = input.characterIdByCombatantId[request.combatant.id]
     const target = characterId
@@ -233,6 +373,24 @@ export async function settleDnd5eConcentrationChecks(input: {
       requestBardicInspiration: input.requestBardicInspiration,
       requestOptionalBonusDie: input.requestOptionalBonusDie,
       requestDarkOnesOwnLuck: input.requestDarkOnesOwnLuck,
+      resolveOriginalDice: request.concentrationOriginal && concentrationInputs.has(input) ? async raw=>{
+        const binding=concentrationInputs.get(input)!
+        const frame=Object.freeze({}) as Dnd5eSequenceConcentrationOriginal
+        const action={...request.concentrationOriginal!.action,...raw}
+        const row:{binding:ConcentrationBinding;state:Dnd5eHeadlessCombatState;action:typeof action;operationId:string;mode:typeof request.mode;stage:'original';signature:string;ready?:string}={binding,state:cloneDnd5eHostTransactionInput(state),action,operationId:request.concentrationOriginal!.operationId,mode:request.mode,stage:'original',signature:''}
+        row.signature=concentrationSignature({state:row.state,action:row.action,operationId:row.operationId,mode:row.mode})
+        concentrationOriginals.set(frame,row)
+        binding.originals.set(row.operationId,frame)
+        const response=await binding.resolve(frame)
+        let retained:readonly number[]|undefined
+        if(response&&!Array.isArray(response)){
+          const proof=readDnd5eActualOriginalReadyBoundary(response)
+          if(proof.resolve!==resolveDnd5eOpportunityMoveSequenceOriginal||(binding.source.kind==='opportunity'?readBountifulOpportunitySequenceConcentrationOriginalReplay(proof.input as Parameters<typeof readBountifulOpportunitySequenceConcentrationOriginalReplay>[0]):readBountifulOpportunitySequenceMovementConcentrationOriginalReplay(proof.input as Parameters<typeof readBountifulOpportunitySequenceMovementConcentrationOriginalReplay>[0]))?.at(-1)!==frame||proof.request.actorId!==row.action.actorId||proof.request.kind!=='saving-throw'||JSON.stringify(proof.request.originalRolls)!==JSON.stringify(row.action.d20Second===undefined?[row.action.d20]:[row.action.d20,row.action.d20Second]))throw Error('concentration-original:exact-actual-ready-boundary-required')
+          row.ready=concentrationReadySignature(proof);retained=proof.request.values
+        }else retained=response as readonly number[]|undefined
+        if(retained)binding.retained.set(row.operationId,[...retained])
+        return retained
+      }:undefined,
     })
   }
   const pendingPostSpellRandomTables = input.result.events.filter((event) =>
@@ -303,6 +461,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     )
     if (!plan) continue
     let resolution: {
+      spellDamageDieRerolls?:readonly import('../../rulesets/dnd5e/spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[]
       schemaVersion: 1
       targetIds: readonly string[]
       targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[]
@@ -351,17 +510,16 @@ export async function settleDnd5eConcentrationChecks(input: {
         })
         if (interrupted.optionalBonusDieUse) optionalBonusDice.push(interrupted.optionalBonusDieUse)
       }
+      const effectRolls=await input.rollDice(plan.effect.damageDice.count,plan.effect.damageDice.sides,'随机表核心法术·伤害',actorName,{rollerTokenId:actor.id})
+      const spell=getDnd5eSrdCombatSpell(plan.effect.spellId),characterId=input.characterIdByCombatantId[actor.id]
+      const spellDamageDieRerolls=spell?.damageType&&input.chooseSpellDamageDice?await input.chooseSpellDamageDice({transactionId:JSON.stringify([followupId,'post-spell-fire-dice',actor.id,check.featureId]),actor,character:input.characters.find(character=>character.id===characterId),spellName:spell.name,group:{id:'post-spell-random-table',sides:plan.effect.damageDice.sides,damageType:spell.damageType,rolls:effectRolls}}):[]
       resolution = {
         schemaVersion: 1,
         targetIds: plan.effect.targetIds,
         targetSavingThrows,
         legendaryResistanceTargetIds,
-        effectRolls: await input.rollDice(
-          plan.effect.damageDice.count,
-          plan.effect.damageDice.sides,
-          '随机表核心法术·伤害',
-          actorName, { rollerTokenId: actor.id },
-        ),
+        effectRolls,
+        spellDamageDieRerolls,
       }
     }
     const resolved = await resolveWithUnsupportedAirborneFalls(state, {
@@ -379,7 +537,8 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (plan.effect) {
       const nested = await settleDnd5eConcentrationChecks({
         ...input,
-        settleActivityTriggers: undefined,
+        resumeActivityStage: undefined,
+      settleActivityTriggers: undefined,
         result: resolved,
       })
       state = nested.result.state
@@ -419,7 +578,8 @@ export async function settleDnd5eConcentrationChecks(input: {
         if (adjudicated.ok) {
           const nested = await settleDnd5eConcentrationChecks({
             ...input,
-            settleActivityTriggers: undefined,
+            resumeActivityStage: undefined,
+      settleActivityTriggers: undefined,
             result: adjudicated,
           })
           state = nested.result.state
@@ -570,6 +730,19 @@ export async function settleDnd5eConcentrationChecks(input: {
       !combatant || !effect?.repeatSave?.onDamage ||
       !combatant.classState.activeEffectDamageSavePendingIds?.includes(check.effectId)
     ) continue
+    if (effect.repeatSave.onDamage.optional === true) {
+      const accepted = await input.requestOptionalDamageSave?.({ mapId: input.map.id, targetId: combatant.id,
+        characterId: input.characterIdByCombatantId[combatant.id], targetName: combatant.name,
+        effectId: effect.id, effectName: effect.label, ability: check.ability, dc: check.dc,
+        transactionId: JSON.stringify([followupId, 'optional-damage-save', checkIndex, combatant.id, effect.id]) })
+      if (accepted !== true) {
+        const declined = await resolveWithUnsupportedAirborneFalls(state, {
+          type: 'active-effect-damage-save', actorId: combatant.id, effectId: effect.id, decline: true,
+        }, JSON.stringify([followupId, 'decline-damage-save', checkIndex, combatant.id, effect.id]))
+        if (declined.ok) { state = declined.state; events.push(...declined.events) }
+        continue
+      }
+    }
     const source = effect.source.actorId ? state.combatants[effect.source.actorId] : undefined
     const baseMode = dnd5eSavingThrowMode(combatant, check.ability, {
       effectVisible: effect.visibility !== 'dm-only',
@@ -654,6 +827,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       dc: check.dc,
       mode,
       label: `专注·体质豁免 DC ${check.dc}`,
+      concentrationOriginal:{operationId:checkTransactionId,action:{type:'concentration-save',actorId:check.targetId,disadvantageNegation,effectRollDice,dc:check.dc}},
     })
     const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'concentration-save', actorId: check.targetId,
@@ -764,7 +938,8 @@ export async function settleDnd5eConcentrationChecks(input: {
       if (resolved.ok) {
         const nested = await settleDnd5eConcentrationChecks({
           ...input,
-          settleActivityTriggers: undefined,
+          resumeActivityStage: undefined,
+      settleActivityTriggers: undefined,
           result: resolved,
         })
         state = nested.result.state
@@ -802,6 +977,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         damage: damageEvent.amount,
         slotLevel: rebukeOption.slotLevel,
         itemName: rebukeOption.itemName,
+        racialInnate: rebukeOption.racialInnate,
       })
       if (!accepted) continue
       const spellcastingSavingThrows: Dnd5eSpellcastingSavingThrowRoll[] = []
@@ -834,9 +1010,10 @@ export async function settleDnd5eConcentrationChecks(input: {
         '炼狱叱喝·火焰伤害',
         sourceName, { rollerTokenId: reactor.id },
       )
+      const spellDamageDieRerolls=castingAllowed&&effectRolls.length&&input.chooseSpellDamageDice?await input.chooseSpellDamageDice({transactionId:JSON.stringify([followupId,'hellish-fire-dice',reactor.id,damageSource.id]),actor:reactor,character:reactorCharacter,spellName:'炼狱叱喝',group:{id:'hellish-rebuke',sides:10,damageType:'fire',rolls:effectRolls}}):[]
       const reaction = await resolveWithUnsupportedAirborneFalls(state, {
         spellcastingSavingThrows,
-        type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
+        type: 'hellish-rebuke', castInstanceId: JSON.stringify([followupId,'hellish-rebuke',reactor.id,damageSource.id]), actorId: reactor.id, targetId: damageSource.id, spellDamageDieRerolls,
         racialInnate: rebukeOption.racialInnate,
         slotLevel: rebukeOption.slotLevel, triggerDamageAmount: damageEvent.amount,
         savingThrowD20: interrupted?.d20 ?? 0,
@@ -855,7 +1032,8 @@ export async function settleDnd5eConcentrationChecks(input: {
       if (!reaction.ok) continue
       const nested = await settleDnd5eConcentrationChecks({
         ...input,
-        settleActivityTriggers: undefined,
+        resumeActivityStage: undefined,
+      settleActivityTriggers: undefined,
         result: reaction,
       })
       state = nested.result.state
@@ -893,14 +1071,22 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (!resolved.ok) continue
     const nested = await settleDnd5eConcentrationChecks({
       ...input,
+      resumeActivityStage: undefined,
       settleActivityTriggers: undefined,
       result: resolved,
     })
     state = nested.result.state
     events.push(...nested.result.events)
   }
+  // A restored stage enters here with no native events, so those effects and
+  // dice are not executed again. Its original events still reach Activity and
+  // the final materializer exactly once.
+  if (resuming) events.push(...resuming.result.events)
   if (input.settleActivityTriggers) {
+    const stage = capturePostNativeActivityStage({parentTransactionId:followupId,result: {...input.result, transaction, state, events}, map, characters: input.characters, characterIdByCombatantId: input.characterIdByCombatantId, priorApplication: input.priorApplication, preserveOffMapParticipants: input.preserveOffMapParticipants})
+    issuedStage=stage
     const triggered = await input.settleActivityTriggers({
+      stage,
       state,
       events,
       map,
@@ -917,7 +1103,8 @@ export async function settleDnd5eConcentrationChecks(input: {
       const nested = await settleDnd5eConcentrationChecks({
         ...input,
         map,
-        settleActivityTriggers: undefined,
+        resumeActivityStage: undefined,
+      settleActivityTriggers: undefined,
         result: { ok: true, state, events: triggered.events },
       })
       state = nested.result.state
@@ -1007,7 +1194,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       ? input.priorApplication.spentReactions.tokenIds : []),
   ])].filter(id => projectedState.combatants[id]?.turn.reactionAvailable === false &&
     application.map.tokens.some(token => token.id === id))
-  return {
+  const completed=capturePostNativeActivitySettlement(issuedStage,{
     result,
     application: {
       ...application,
@@ -1039,6 +1226,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         ...application.changedCharacterIds,
       ])],
     },
-  }
+  })
+  completedCombatBases.set(completed,{input:actualBaseInput,inputSignature:actualBaseInputSignature,outputSignature:JSON.stringify(completed)})
+  return completed
 }
-

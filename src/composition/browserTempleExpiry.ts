@@ -1,3 +1,4 @@
+import {resolveBrowserRelentlessBoundary} from './browserRelentlessBoundary'
 import type {TempleExpirySettlement} from './withStructureExpiry'
 import {createDnd5eMapCombatSnapshot} from '../rulesets/dnd5e/mapBridge'
 import {resolveDnd5eTempleExpiry} from '../rulesets/dnd5e/templeExpirySettlement'
@@ -23,8 +24,8 @@ export const settleBrowserTempleExpiry:TempleExpirySettlement=async input=>{
  let owner=getTempleExpiryInteraction()
  const transactionId=`temple-expiry:${crypto.randomUUID()}`
  for(let attempt=0;attempt<64;attempt++){
-  const result=resolveDnd5eTempleExpiry({...input,state:snapshot.state,characterIdByCombatantId:snapshot.characterIdByCombatantId,
-   solidExitFeatherFallChoices:choices,airborneFallDamageRollsByCombatantId:rolls})
+  const result=await resolveBrowserRelentlessBoundary({state:snapshot.state,map:input.map,resolve:state=>resolveDnd5eTempleExpiry({...input,state,characterIdByCombatantId:snapshot.characterIdByCombatantId,
+   solidExitFeatherFallChoices:choices,airborneFallDamageRollsByCombatantId:rolls})})
   if(result.ok){
    let nextCombat=undefined
    if(combat){

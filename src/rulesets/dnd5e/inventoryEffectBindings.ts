@@ -1,3 +1,4 @@
+import { validPactWeaponPhysicalIdentity } from './pactWeaponPhysicalIdentity'
 import {ammunitionContainerSnapshots, ammunitionKindForWeaponId, dnd5eAmmunitionEntryAccessible} from './ammunitionBindings'
 import type { Character } from '../../types/character'
 import type { BattleMap } from '../../store/maps'
@@ -59,13 +60,24 @@ export function reconcileDnd5eInventoryEffectBindings(
     const ordinary = (character.dnd5eCombatState?.activeEffects ?? []).filter(effect => !instanceId(effect))
     const attached = bindings.flatMap<Dnd5eActiveEffectInstance>(effect => {
       const entry = character.dnd5eInventory?.entries.find(item => item.instanceId === instanceId(effect))
-      if (!entry || entry.quantity <= 0 || entry.condition?.destroyed) return []
+      if (!entry) {
+        // Keep the live effect solely on its existing bearer, suspended by an actual
+        // protected no-modifier anchor. Campaign/turn/concentration clocks still see it.
+        const existing = character.dnd5eCombatState?.activeEffects ?? []
+        const dormant = existing.some(candidate => candidate.id === effect.id) &&
+          effect.suspendedBy?.some(id => existing.some(anchor => anchor.id === id && anchor.definitionId === 'pact-weapon.extradimensional-storage'))
+        return dormant ? [effect] : []
+      }
+      if (entry.quantity <= 0 || entry.condition?.destroyed) return []
       if (effect.modifiers?.armorEnchantment) {
         const worn = entry.equippedSlot === 'armor'
         const suspendedBy = [...(effect.suspendedBy ?? []).filter(id => id !== suspension), ...worn ? [] : [suspension]]
         return [{ ...effect, modifiers: { ...effect.modifiers, armorEnchantment: { ...effect.modifiers.armorEnchantment } }, targetId: character.id, suspendedBy: suspendedBy.length ? suspendedBy : undefined }]
       }
-      const binding=effect.modifiers!.weaponEnchantment!
+      const originalBinding=effect.modifiers!.weaponEnchantment!
+      const physicalIdentity=validPactWeaponPhysicalIdentity(entry)
+      const binding=physicalIdentity && !originalBinding.ammunitionStack && !originalBinding.ammunitionContainer
+        ? {...originalBinding,weaponId:physicalIdentity.equipmentId,weaponIds:undefined} : originalBinding
       if (binding.ammunitionStack) {
         const weapons = [...(character.dnd5eInventory?.entries ?? []).flatMap(item => item.item.equipment ? [item.item.equipment] : []), ...Object.values(character.equipment ?? {}).filter(item => item != null)]
         const held = dnd5eAmmunitionEntryAccessible(entry, character.dnd5eInventory!.entries)

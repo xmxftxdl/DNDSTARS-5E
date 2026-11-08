@@ -180,6 +180,7 @@ export function dnd5eContextPredicateSatisfiedV1(
   if (predicate.kind === 'attack-delivery') {
     return context?.source.kind === 'attack' && context.source.delivery === predicate.delivery
   }
+  if (predicate.kind === 'attack-pact-weapon') return context?.source.kind === 'attack' && context.source.pactWeapon === true
   if (predicate.kind === 'attack-weapon') {
     if (context?.source.kind !== 'attack') return false
     const id = predicate.identity === 'base' ? context.source.weaponBaseId : context.source.weaponId
@@ -257,6 +258,7 @@ export function dnd5eContextPredicateSatisfiedV1(
   if (predicate.kind === 'spell-used') {
     if (!context || context.source.kind !== 'spell') return false
     return (predicate.spellId == null || context.source.id === predicate.spellId) &&
+      (predicate.damageTypes == null || (context.source.damageTypes?.some(type=>predicate.damageTypes!.includes(type)) === true)) &&
       (predicate.castingClassIds == null || (context.source.castingClassId != null && predicate.castingClassIds.includes(context.source.castingClassId))) &&
       (predicate.schools == null || (context.source.school != null && predicate.schools.includes(context.source.school))) &&
       context.source.level >= (predicate.minimumLevel ?? 0) &&
@@ -313,6 +315,16 @@ export function matchDnd5eActivityInvocationV1(input: {
   }
   if (input.targetIds.some((id) => !input.triggerContext!.eligibleTargetIds.includes(id))) return {
     ok: false, reason: 'trigger-mismatch', details: ['one or more targets are not eligible for this Host event'],
+  }
+  // A declared self-trigger remains an additional gate even when the package
+  // also supplies an explicit invocation. Alternative declarations are OR;
+  // each declaration's contextual predicates are AND, before dice or choices.
+  const selfTriggers = input.activity.triggers?.filter(trigger => trigger.activityId === input.activity.id) ?? []
+  if (selfTriggers.length && !selfTriggers.some(trigger =>
+    canonicalDnd5eTriggerEventV1(trigger.event) === canonicalDnd5eTriggerEventV1(input.triggerContext!.event) &&
+    (trigger.predicates ?? []).every(predicate => dnd5eContextPredicateSatisfiedV1(predicate, input.triggerContext) !== false)
+  )) return {
+    ok: false, reason: 'trigger-mismatch', details: ['declared trigger contextual predicates do not match this Host event'],
   }
   for (const predicate of input.activity.requirements ?? []) {
     const contextual = dnd5eContextPredicateSatisfiedV1(predicate, input.triggerContext)

@@ -1,3 +1,5 @@
+import {dnd5eBoundedHostEventId} from './dnd5eActivityIdentity'
+import {validateDnd5eExecuteActivityCommandV1} from './dnd5eActivityCommand'
 import { describe, expect, it } from 'vitest'
 import type { Dnd5eHeadlessCombatState, Dnd5eHeadlessObservedAction } from '../headlessCombatEngine'
 import {
@@ -72,3 +74,13 @@ describe('D&D 5e stable activity identities', () => {
     expect(ids).toContain('dnd5e-2014:srd-5.1:attack:dnd5e-longbow')
   })
 })
+
+// Real nested CON/Shroud original ids must satisfy the Activity command contract.
+it.each([160,161,220,255,256])('keeps a complete nested Host identity valid for command and trigger at length %s',(length)=>{
+ const original='a'.repeat(length-1)+'b',bounded=dnd5eBoundedHostEventId(original);
+ expect(validateDnd5eExecuteActivityCommandV1({schemaVersion:1,commandId:bounded,actorId:'wizard',packageId:'test:package',packageVersion:'1.0.0',activityId:'shroud',targetIds:['goblin'],expectedRevision:0,triggerEventId:bounded})).toEqual([]);
+ expect(dnd5eBoundedHostEventId(original)).toBe(bounded);
+ expect(dnd5eBoundedHostEventId(original.slice(0,-1)+'c')).not.toBe(bounded);
+ if(length===160)expect(bounded).toBe(original);
+ expect(original).toHaveLength(length);
+});

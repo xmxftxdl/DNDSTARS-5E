@@ -1,0 +1,17 @@
+import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
+import type{createBountifulPersistentRoomUI}from'./bountifulLuckPersistentRoomUI'
+import{bountifulPreparedReplayFacts,bountifulOriginalDiePhase,type BountifulOriginalDieReceipt}from'./bountifulLuckReceipt'
+import{createDnd5eDeathRepeatSavingOriginalSession}from'./deathRepeatSavingOriginal'
+import{driveBountifulDeathRepeatOriginal}from'./bountifulDeathRepeatOriginalJournal'
+import type{BountifulDeathRepeatSavingLoader}from'./bountifulDeathRepeatSavingCollector'
+import{createBountifulDeathRepeatDiceRoute,readBountifulDeathRepeatDiceRoute,completeBountifulDeathRepeatDiceRoute,disposeBountifulDeathRepeatDiceRoute,type BountifulDeathRepeatDiceRoute}from'./bountifulDeathRepeatDiceRoute'
+type Source=Parameters<typeof createDnd5eDeathRepeatSavingOriginalSession>[0]
+type Gateway=Pick<SharedRoomGatewayPort,'loadResource'|'saveResourcesAtomically'|'publishEvent'>
+/** Execute the actual supported Native frontier before asking for any extra physical die. The original source is never augmented or stamped here. */
+export async function collectBountifulDeathRepeatForPage(input:{source:Source;load:BountifulDeathRepeatSavingLoader;gateway:Gateway;ui:ReturnType<typeof createBountifulPersistentRoomUI>;roll:(route:BountifulDeathRepeatDiceRoute,spec:Awaited<ReturnType<typeof readBountifulDeathRepeatDiceRoute>>)=>Promise<readonly number[]>}){
+ const p=input.source.prepared,identity={parentId:p.action.id,mapId:p.map.id,combatId:p.state.combatId!},combat=await input.gateway.loadResource<{bountifulOriginalParents?:Record<string,BountifulOriginalDieReceipt>}>('combat'),initial=Object.values(combat?.bountifulOriginalParents??{}).filter(r=>r.identity.parentId===identity.parentId&&!r.rawIssuer?.rollId.startsWith('bountiful-death-repeat-saving:')).sort((a,b)=>a.identity.occurrence-b.identity.occurrence)
+ if(!initial.length||initial.some((r,i)=>r.identity.occurrence!==i||!['ready','declined'].includes(bountifulOriginalDiePhase(r))))throw Error('death-repeat-page:ready-initial-prefix-required')
+ const worker=createDnd5eDeathRepeatSavingOriginalSession({...input.source,hostOriginalD20Replay:bountifulPreparedReplayFacts({parentId:identity.parentId,source:input.source,receipts:initial})})
+ try{const missing=worker.run();if(missing.status==='resolved'){if(!missing.result.result.ok)throw Error('death-repeat-page:actual-native-required');return undefined}if(missing.status!=='missing-death-repeat-saving-original'||!input.gateway.publishEvent)throw Error('death-repeat-page:actual-missing-native-required');const route=await createBountifulDeathRepeatDiceRoute(missing.operation,input.load,input.gateway.publishEvent);try{const spec=await readBountifulDeathRepeatDiceRoute(route);if(!spec.values){const rolled=await input.roll(route,spec),actual=await readBountifulDeathRepeatDiceRoute(route);if(JSON.stringify(rolled)!==JSON.stringify(actual.values))throw Error('death-repeat-page:actual-independent-adoption-required')}await completeBountifulDeathRepeatDiceRoute(route)}finally{disposeBountifulDeathRepeatDiceRoute(route)}}finally{worker.dispose()}
+ const completed=await driveBountifulDeathRepeatOriginal({identity,source:input.source,load:input.load},input.gateway,input.ui);if(completed.status!=='native-death-repeat-collected')throw Error('death-repeat-page:actual-collected-tail-required');return completed.continuation
+}

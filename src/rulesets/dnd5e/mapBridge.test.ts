@@ -1,9 +1,13 @@
+import { migrateMapsState, mergePlayerTokenCombatFields } from '../../store/maps'
 import { afterEach, describe, expect, it } from 'vitest'
 import { applyDnd5eContentBuildChoicesV1, dnd5eCharacterKnownLanguagesV1 } from './buildChoices'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eBestGrappleDefense,
+  dnd5eAbilityCheckRollMode,
+  dnd5eHeadlessTurnKey,
+  dnd5eSkillCheckMovementThisTurn,
   dnd5eCombatantCanSee,
   dnd5eDirectedCombatantPairKey,
   dnd5eEffectiveFlySpeed,
@@ -3343,4 +3347,32 @@ describe('D&D 5e map bridge', () => {
     expect(plan.tokenPatches?.[simulacrum.id]?.dnd5eSimulacrum?.classResources)
       .toMatchObject({ 'dnd5e-spell-slot-1': { current: 1, maximum: 4 } })
   })
+})
+
+it('persists actual half-speed check movement across map application and JSON snapshot reload', () => {
+  const hero = character()
+  hero.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'synthetic:steady', label: 'Steady', targetId: hero.id, source: { kind: 'feature' },
+    modifiers: { skillCheckAdvantagesWithinHalfSpeed: [{ ability: 'wis', skill: 'perception' }] },
+  })] }
+  const map: BattleMap = { id: 'steady-map', name: 'Steady', width: 500, height: 500, gridSize: 50,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [token({ id: 'a', type: 'player', characterId: hero.id }), token({ id: 'b', x: 400 })] }
+  const initiativeOrder = [{ tokenId: 'a', slotId: 'a', label: 'A', emoji: '', color: '', roll: 20 },
+    { tokenId: 'b', slotId: 'b', label: 'B', emoji: '', color: '', roll: 10 }]
+  const args = { combatId: 'steady', round: 1, map, characters: [hero], initiativeOrder, turnSlotId: 'a' }
+  const legacy = createDnd5eMapCombatSnapshot(args)
+  expect(dnd5eSkillCheckMovementThisTurn(legacy.state, 'a')).toBeUndefined()
+  map.dnd5eSkillCheckMovement = { turnKey: dnd5eHeadlessTurnKey(legacy.state, ''), distanceByActor: {} }
+  const initial = createDnd5eMapCombatSnapshot(args)
+  const moved = resolveDnd5eHeadlessAction(initial.state, { type: 'move', actorId: 'a', to: { x: 200, y: 0 }, distance: 20 })
+  expect(moved.ok, JSON.stringify(moved)).toBe(true)
+  const application = planDnd5eMapResultApplication({ state: moved.state, map, characters: [hero],
+    characterIdByCombatantId: initial.characterIdByCombatantId, events: [...moved.events] })
+  const reload = createDnd5eMapCombatSnapshot({ ...args, map: migrateMapsState({ maps: [JSON.parse(JSON.stringify(application.map))] }).maps[0], characters: application.characters })
+  expect(mergePlayerTokenCombatFields([map], [application.map])[0].dnd5eSkillCheckMovement?.distanceByActor.a).toBe(20)
+  expect(dnd5eSkillCheckMovementThisTurn(reload.state, 'a')).toBe(20)
+  expect(dnd5eAbilityCheckRollMode(reload.state.combatants.a, { state: reload.state, ability: 'wis', skill: 'perception' })).toBe('normal')
+  const next = createDnd5eMapCombatSnapshot({ ...args, turnSlotId: 'b', map: application.map, characters: application.characters })
+  expect(dnd5eSkillCheckMovementThisTurn(next.state, 'a')).toBe(0)
+  expect(dnd5eAbilityCheckRollMode(next.state.combatants.a, { state: next.state, ability: 'wis', skill: 'perception' })).toBe('advantage')
 })

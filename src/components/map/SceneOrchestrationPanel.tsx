@@ -1,4 +1,5 @@
 import { ScenePortalSurveyEditor } from './ScenePortalSurveyEditor'
+import { SceneSensoryDeceptionSurveyEditor } from './SceneSensoryDeceptionSurveyEditor'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
@@ -248,6 +249,7 @@ export default function SceneOrchestrationPanel({
                 <textarea value={scene.description} onChange={(event) => updateScene(scene.id, { description: event.target.value })} placeholder="场景说明与 DM 备注" rows={2} className={fieldClass()} />
                 <input value={scene.environmentLabel} onChange={(event) => updateScene(scene.id, { environmentLabel: event.target.value })} placeholder="环境：潮湿地牢、强风……" className={fieldClass()} />
                 <ScenePortalSurveyEditor value={scene.planarPortalSurvey} center={{ x: map.width / 2, y: map.height / 2 }} onChange={planarPortalSurvey => updateScene(scene.id, { planarPortalSurvey })} />
+                <SceneSensoryDeceptionSurveyEditor value={scene.sensoryDeceptionSurvey} center={{ x: map.width / 2, y: map.height / 2 }} onChange={sensoryDeceptionSurvey => updateScene(scene.id, { sensoryDeceptionSurvey })} />
                 <div className="rounded-xl border border-cyan-300/10 bg-cyan-500/[0.035] p-3" data-testid="scene-weather-controls">
                   <div className="mb-2 flex items-center gap-2 text-xs font-bold text-cyan-100">
                     <CloudRain className="h-4 w-4" />场景光照与天气

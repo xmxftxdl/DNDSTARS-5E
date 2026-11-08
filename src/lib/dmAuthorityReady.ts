@@ -31,6 +31,8 @@ export async function persistDmAuthorityReady(
   state: DmAuthorityReadyState,
   persistence: DmAuthorityReadyPersistence,
 ): Promise<DmAuthorityReadyState> {
+  const existing = await persistence.load().catch(() => null)
+  if (sameDmAuthorityReadyState(existing, state)) return existing!
   let lastError: unknown
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

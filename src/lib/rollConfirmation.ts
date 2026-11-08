@@ -1,3 +1,4 @@
+import {validateBountifulReadyD20Followup} from '../../shared/bountiful-ready-d20-host-gate.mjs'
 import {
   createCombatInterrupt,
   isCombatInterruptExpired,
@@ -92,6 +93,7 @@ function rollConfirmationGenerationKey(
     interrupt.payload.visibility,
     interrupt.payload.reason ?? '',
     modifierKey,
+    ...((interrupt.payload.bountifulParent||interrupt.payload.bountifulReadyParent)?['bountiful-original-parent',interrupt.payload.rollId]:[]),
   ].join('\u001f')
 }
 
@@ -164,11 +166,19 @@ export function createD20RollConfirmationInterrupt(input: {
   eligibleModifiers?: readonly D20EnemyModifierOption[]
   allowDmOverride?: boolean
   now?: number
+  bountifulParent?:RollConfirmationInterruptPayload['bountifulParent']
+  bountifulReadyParent?:RollConfirmationInterruptPayload['bountifulReadyParent']
 }): CombatInterruptByKind<'roll-confirmation'> {
   const now = input.now ?? Date.now()
   const mapId = requireText(input.mapId, 'map-id')
-  const rollId = requireText(input.rollId, 'roll-id')
+  const rollId = requireText(input.rollId, 'roll-id', (input.bountifulParent||input.bountifulReadyParent) ? 12000 : 240)
   const label = requireText(input.label, 'label', 160)
+  if(input.bountifulParent){
+    const parent=input.bountifulParent
+    if(rollId!==JSON.stringify(['bountiful-parent-d20-followup',parent.parentId,parent.sourceOccurrence,parent.rawRollId,parent.dieIndex])||parent.parentId.trim()!==parent.parentId||parent.rawRollId.trim()!==parent.rawRollId)throw Error('invalid-bountiful-d20-parent-followup')
+    if(Object.keys(parent).some(key=>!['parentId','sourceOccurrence','dieIndex','rawRollId'].includes(key))||!parent.parentId.trim()||!parent.rawRollId.trim()||parent.parentId.length>500||parent.rawRollId.length>1000||!Number.isSafeInteger(parent.sourceOccurrence)||parent.sourceOccurrence<0||parent.sourceOccurrence>511||!Number.isSafeInteger(parent.dieIndex)||parent.dieIndex<0||parent.dieIndex>1)throw Error('invalid-bountiful-d20-parent-followup')
+  }
+  if(input.bountifulReadyParent&&(input.bountifulParent||!validateBountifulReadyD20Followup(input.bountifulReadyParent,rollId)))throw Error('invalid-bountiful-ready-d20-followup')
   const originalValue = requireD20(input.originalValue)
   const actorId = input.rollerCharacterId?.trim() || 'system'
   const visibility = input.visibility ?? 'public'
@@ -215,6 +225,8 @@ export function createD20RollConfirmationInterrupt(input: {
     timeoutPolicy: playerDecisionExpiresAt ? 'rollback' : 'wait-for-dm',
     expiresAt: playerDecisionExpiresAt,
     payload: {
+      ...(input.bountifulParent?{bountifulParent:{...input.bountifulParent}}:{}),
+      ...(input.bountifulReadyParent?{bountifulReadyParent:{...input.bountifulReadyParent}}:{}),
       rollId,
       label,
       targetName: input.targetName?.trim().slice(0, 120) ?? '',

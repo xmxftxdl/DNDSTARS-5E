@@ -373,7 +373,11 @@ export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   wordOfRecall?: import('./sharedCombatTypes').Dnd5eWordOfRecallResolutionV1
 }
 
+export interface BountifulD20ParentFollowupIdentity {parentId:string;sourceOccurrence:number;dieIndex:number;rawRollId:string}
 export type RollConfirmationInterruptPayload = Record<string, unknown> & {
+  /** Host-issued concrete original parent; player contributions never supply it. */
+  bountifulReadyParent?:{frameId:string;rawRollId:string;dieIndex:number}
+  bountifulParent?:BountifulD20ParentFollowupIdentity
   rollId: string
   label: string
   targetName: string

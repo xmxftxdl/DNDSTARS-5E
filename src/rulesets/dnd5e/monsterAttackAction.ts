@@ -1,4 +1,8 @@
+import {bountifulNativePreparedExecutionIdentity} from './bountifulHostOperation'
+import {cloneDnd5eHostTransactionInput} from './hostTransactionClone'
 import { createDnd5eMapHostilityView } from './mapPerceivedHostility'
+import { multipartActionOriginToken } from './multipartMapGeometry'
+import { refreshDnd5eMapSpatialRelations } from './mapBridge'
 import { dnd5eMonsterWithSceneHeldWeapon, dnd5eHeldHeavyWeaponDisadvantage } from './companionHeldWeapon'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {dnd5eRollDiceRecipes,resolveDnd5eRollDiceModifiers} from './rollDiceModifiers'
@@ -38,6 +42,8 @@ import {
   previewDnd5ePostD20AdjustedAttack,
   previewDnd5eUnsupportedAirborneFalls,
   resolveDnd5eHeadlessAction,
+  dnd5eCoverAttackRedirectEligible,
+  type Dnd5eCoverAttackRedirectUse,
   type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
@@ -129,6 +135,8 @@ export type Dnd5eMonsterAttackRejectStage =
   | 'attack-sequence'
 
 export interface PreparedDnd5eMonsterAttack {
+  /** Explicit canonical geometry override retained for in-flight native previews. */
+  geometry?:import('../../lib/mapGeometry').MapGeometryState|null
   readiedAttack?: true
   map: BattleMap
   characters: readonly Character[]
@@ -228,7 +236,16 @@ function monsterMultiattackResourcesAvailableForPreparation(input: {
     dnd5eMonsterCompositeChildResourceAvailable(child, resources))
 }
 
+type RedirectedMonsterPreparation={sourceTargetId:string;targetTokenId:string;signature:string}
+// Mechanical preparation lineage only. It never authorizes a Room command or
+// world publication; ordinary callers cannot supply this private input context.
+const redirectedMonsterPreparations=new WeakMap<PreparedDnd5eMonsterAttack,RedirectedMonsterPreparation>()
+const redirectedMonsterRefreshInputs=new WeakMap<object,{targetTokenId:string}>()
+function currentRedirectedMonsterPreparation(prepared:PreparedDnd5eMonsterAttack){const found=redirectedMonsterPreparations.get(prepared);if(found&&found.signature!==JSON.stringify(prepared))throw Error('monster-attack:unchanged-redirect-profile-required');return found}
 export function prepareDnd5eMonsterAttack(input: {
+  geometry?:import('../../lib/mapGeometry').MapGeometryState|null
+  /** Mechanical preview only: final native resolution must carry the same validated redirect use. */
+  coverAttackRedirectPreview?: Dnd5eCoverAttackRedirectUse
   combatId: string
   round?: number
   map: BattleMap
@@ -258,9 +275,9 @@ export function prepareDnd5eMonsterAttack(input: {
   /** Narrow internal checkpoint used by the UI to make unsupported actions diagnosable. */
   stage?: Dnd5eMonsterAttackRejectStage
 } {
-  const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type !== 'obstacle')
+  let actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type !== 'obstacle')
   const actorCharacter = actorToken?.characterId
-    ? input.characters.find((character) => character.id === actorToken.characterId)
+    ? input.characters.find((character) => character.id === actorToken?.characterId)
     : undefined
   const statBlockId = actorToken?.type === 'enemy'
     ? actorToken.poolId
@@ -285,21 +302,32 @@ export function prepareDnd5eMonsterAttack(input: {
       })
     : undefined
   const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken })
-  const targetToken = input.map.tokens.find((token) => token.id === input.targetTokenId && token.id !== actorToken.id && token.type !== 'obstacle')
+  const redirectedPreparation=redirectedMonsterRefreshInputs.get(input)
+  const requestedTargetToken = input.map.tokens.find((token) => token.id === (redirectedPreparation?.targetTokenId??input.targetTokenId) && token.id !== actorToken?.id && token.type !== 'obstacle')
+  const originalSourceTarget=redirectedPreparation?input.map.tokens.find(token=>token.id===input.targetTokenId&&token.id!==actorToken?.id&&token.type!=='obstacle'):requestedTargetToken
   if (
-    !targetToken ||
-    (!input.readiedAttack && (summonTargets ? !summonTargets.targets.some(candidate => candidate.id === targetToken.id) : berserkTarget
-      ? targetToken.id !== berserkTarget.id
-      : !perceivesHostile(targetToken)))
+    !requestedTargetToken || !originalSourceTarget ||
+    (!input.readiedAttack && (summonTargets ? !summonTargets.targets.some(candidate => candidate.id === originalSourceTarget.id) : berserkTarget
+      ? originalSourceTarget.id !== berserkTarget.id
+      : !perceivesHostile(originalSourceTarget)))
   ) return { ok: false, reason: 'invalid-target' }
+  let targetToken=requestedTargetToken
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
     round: input.round,
+    geometry:input.geometry,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
-    additionalCreatureTokenIds: [...new Set([input.targetTokenId, ...(input.targetTokenIds ?? [])])],
+    additionalCreatureTokenIds: [...new Set([input.targetTokenId, ...(redirectedPreparation?[redirectedPreparation.targetTokenId]:[]), ...(input.targetTokenIds ?? []), ...(input.coverAttackRedirectPreview?[input.coverAttackRedirectPreview.replacementTargetId]:[])])],
   })
+  const redirectPreview=input.coverAttackRedirectPreview
+  if(redirectPreview){
+    if(redirectPreview.originalTargetId!==requestedTargetToken.id||!dnd5eCoverAttackRedirectEligible(snapshot.state,actorToken.id,requestedTargetToken.id,redirectPreview.replacementTargetId,redirectPreview.featureId))return{ok:false,reason:'invalid-target'}
+    const replacement=input.map.tokens.find(token=>token.id===redirectPreview.replacementTargetId&&token.type!=='obstacle')
+    if(!replacement)return{ok:false,reason:'invalid-target'}
+    targetToken=replacement
+  }
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const target = snapshot.state.combatants[targetToken.id]
   const actorCombatant = snapshot.state.combatants[actorToken.id]
@@ -334,6 +362,15 @@ export function prepareDnd5eMonsterAttack(input: {
   if (!indexedResourceAction || !indexedAction) {
     return { ok: false, reason: 'invalid-action', stage: 'action-lookup' }
   }
+  if (indexedResourceAction.multipartHeadId) {
+    const origin = multipartActionOriginToken(actorToken,input.map,indexedResourceAction)
+    if (!origin) return {ok:false,reason:'invalid-action',stage:'action-lookup'}
+    actorToken=origin
+    actorCombatant.classState.monsterMultipart!.activeHeadId=indexedAction!.multipartHeadId
+    actorCombatant.position={x:origin.x,y:origin.y}
+    actorCombatant.elevationFeet=origin.elevationFeet??0
+    refreshDnd5eMapSpatialRelations(snapshot.state,input.map,undefined,{geometry:input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry??undefined})
+  }
   if (input.multiattackContinuation) {
     const receipt =
       actorCombatant.classState.monsterMultiattackContinuation
@@ -355,7 +392,7 @@ export function prepareDnd5eMonsterAttack(input: {
         indexedAction.id
     ) return { ok: false, reason: 'invalid-action', stage: 'multiattack-continuation' }
   }
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const geometry = input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry??undefined
   const distanceFeet = dnd5eMapTokenDistanceFeet({
     map: input.map,
     geometry,
@@ -543,9 +580,9 @@ export function prepareDnd5eMonsterAttack(input: {
         token.id === targetId &&
         token.id !== actorToken.id &&
         token.type !== 'obstacle' &&
-        (input.readiedAttack ? token.id === input.targetTokenId : summonTargets ? summonTargets.targets.some(entry => entry.id === token.id) : berserkTarget
+        (token.id===redirectPreview?.replacementTargetId || (input.readiedAttack ? token.id === input.targetTokenId : summonTargets ? summonTargets.targets.some(entry => entry.id === token.id) : berserkTarget
           ? token.id === berserkTarget.id
-          : perceivesHostile(token)))
+          : perceivesHostile(token))))
       return candidate ? [candidate] : []
     },
   )
@@ -710,7 +747,7 @@ export function prepareDnd5eMonsterAttack(input: {
         dnd5eEffectiveSizeRank(snapshot.state.combatants[entry.targetToken.id]),
       ),
     }))) return { ok: false, reason: 'projectile-blocked-by-wind-wall' }
-  const environment = dnd5eActiveSubmerged(actorCombatant.classState.activeEffects) ? 'underwater' : mapGeometryRuntimeForMap(input.map.id)?.environment
+  const environment = dnd5eActiveSubmerged(actorCombatant.classState.activeEffects) ? 'underwater' : geometry?.environment
   const underwaterAttacks = attacks.map(({ id, name, attack, distanceFeet: attackDistance }) => {
     const usesRangedAttack = attack.mode === 'ranged'
     return dnd5eUnderwaterWeaponAttack({
@@ -1073,6 +1110,7 @@ export function prepareDnd5eMonsterAttack(input: {
     ok: true,
     prepared: {
       readiedAttack: input.readiedAttack,
+      geometry:input.geometry,
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
@@ -1111,31 +1149,39 @@ export function prepareDnd5eMonsterAttack(input: {
 
 /** Project a speculative Host state into map/character inputs without publishing it. */
 export function projectDnd5eMonsterAttackPreparation(prepared:PreparedDnd5eMonsterAttack,state:Dnd5eHeadlessCombatState):PreparedDnd5eMonsterAttack {
+  const redirected=currentRedirectedMonsterPreparation(prepared)
   const projectedState=structuredClone(state)
   const projection=planDnd5eMapResultApplication({state:projectedState,map:prepared.map,characters:prepared.characters,characterIdByCombatantId:prepared.characterIdByCombatantId})
-  return {...prepared,state:projectedState,map:projection.map,characters:projection.characters,
+  const projected={...prepared,state:projectedState,map:projection.map,characters:projection.characters,
     actorToken:projection.map.tokens.find(token=>token.id===prepared.actorToken.id)!,
-    targetToken:projection.map.tokens.find(token=>token.id===prepared.targetToken.id)!}
+    targetToken:projection.map.tokens.find(token=>token.id===(redirected?.targetTokenId??prepared.targetToken.id))!}
+  if(redirected)redirectedMonsterPreparations.set(projected,{...redirected,signature:JSON.stringify(projected)})
+  return projected
 }
 
 /** Reuse the single-child preparation rules after earlier composite children have resolved. */
-export function refreshDnd5eMonsterAttackOccurrence(prepared:PreparedDnd5eMonsterAttack,state:Dnd5eHeadlessCombatState,index:number) {
+export function refreshDnd5eMonsterAttackOccurrence(prepared:PreparedDnd5eMonsterAttack,state:Dnd5eHeadlessCombatState,index:number,coverAttackRedirectPreview?:Dnd5eCoverAttackRedirectUse) {
   const entry=prepared.attacks[index]
   if(!entry)return {ok:false as const,reason:'attack-sequence' as const}
+  const redirected=currentRedirectedMonsterPreparation(prepared)
   const projected=projectDnd5eMonsterAttackPreparation(prepared,state)
-  const fresh=prepareDnd5eMonsterAttack({combatId:state.combatId,round:state.round,map:projected.map,characters:projected.characters,
+  const refreshInput={geometry:prepared.geometry,coverAttackRedirectPreview,combatId:state.combatId,round:state.round,map:projected.map,characters:projected.characters,
     initiativeOrder:state.initiativeOrder.map(id=>({tokenId:id,label:state.combatants[id].name,emoji:'',color:'',roll:state.combatants[id].initiative})),
-    readiedAttack:prepared.readiedAttack,currentInitiativeIndex:state.initiativeIndex,actorTokenId:prepared.actorToken.id,targetTokenId:entry.targetToken.id,
-    actionIndex:prepared.monster.actions.findIndex(action=>action.id===entry.id)})
+    readiedAttack:prepared.readiedAttack,currentInitiativeIndex:state.initiativeIndex,actorTokenId:prepared.actorToken.id,targetTokenId:redirected?.sourceTargetId??entry.targetToken.id,
+    actionIndex:prepared.monster.actions.findIndex(action=>action.id===entry.id)}
+  if(redirected)redirectedMonsterRefreshInputs.set(refreshInput,{targetTokenId:entry.targetToken.id})
+  const fresh=prepareDnd5eMonsterAttack(refreshInput)
   if(!fresh.ok)return fresh
   const replacement=fresh.prepared.attacks[0]
   if(!replacement)return {ok:false as const,reason:'attack-sequence' as const}
-  return {ok:true as const,prepared:{...projected,
+  const next={...projected,
     blessed:fresh.prepared.blessed,baned:fresh.prepared.baned,sizeDamageD4Mode:fresh.prepared.sizeDamageD4Mode,
     attacks:prepared.attacks.map((attack,i)=>i===index?{...replacement,sequenceIndex:entry.sequenceIndex}:attack),
     attackModes:prepared.attackModes.map((mode,i)=>i===index?fresh.prepared.attackModes[0]:mode),
     attackModeResolutions:prepared.attackModeResolutions?.map((mode,i)=>i===index?(fresh.prepared.attackModeResolutions?.[0]??mode):mode),
-  }}
+  }
+  if(prepared.attacks.length===1&&(coverAttackRedirectPreview||redirected))redirectedMonsterPreparations.set(next,{sourceTargetId:redirected?.sourceTargetId??entry.targetToken.id,targetTokenId:replacement.targetToken.id,signature:JSON.stringify(next)})
+  return {ok:true as const,prepared:next}
 }
 
 export function preparedDnd5eMonsterAttackEffectContext(prepared: PreparedDnd5eMonsterAttack, transactionId:string, occurrence:number) {
@@ -1325,6 +1371,23 @@ export function prepareDnd5eMonsterAfterHitMechanics(
   }))
 }
 
+const actualMonsterFacadeResults=new WeakMap<object,{preparedSignature:string;input:Parameters<typeof resolvePreparedDnd5eMonsterAttack>[0];resultSignature:string;applicationSignature:string}>()
+/** Mechanical provenance only: this facade really resolved this exact source.
+ * The reader grants neither an owner choice nor room publication authority. */
+export function readDnd5eActualMonsterFacadeResult(prepared:PreparedDnd5eMonsterAttack,native:{result:Dnd5eActionResult;application?:Dnd5eMapResultPlan}){
+ const value=actualMonsterFacadeResults.get(native.result)
+ if(!value||value.preparedSignature!==JSON.stringify(prepared)||value.resultSignature!==JSON.stringify(native.result)||value.applicationSignature!==JSON.stringify(native.application))throw Error('monster-attack:actual-unchanged-facade-result-required')
+ return cloneDnd5eHostTransactionInput(value.input)
+}
+const nativeMonsterExecutions=new WeakMap<object,{generation:number;result:Dnd5eActionResult}>()
+let nativeMonsterExecutionGeneration=0
+/** Read only a result actually produced by this concrete facade for this
+ * private native source. There is no exported generic success/result issuer. */
+export function readDnd5eMonsterNativeExecution(input:Parameters<typeof resolvePreparedDnd5eMonsterAttack>[0]){
+ const key=bountifulNativePreparedExecutionIdentity(input),fact=key&&nativeMonsterExecutions.get(key)
+ return fact?cloneDnd5eHostTransactionInput(fact):undefined
+}
+
 export function resolvePreparedDnd5eMonsterAttack(input: {
   savingThrowCounterattacks?: Dnd5eAction['savingThrowCounterattacks']
   shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
@@ -1332,6 +1395,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
   effectRollDice?: Readonly<Record<string,readonly number[]>>
   prepared: PreparedDnd5eMonsterAttack
   rolls: readonly (Omit<Dnd5eMonsterActionRoll, 'targetId'> & { targetId?: string })[]
+  wasteBlockedByWard?:{targetId:string}
   mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   compositeSteps?: readonly Dnd5eMonsterMultiattackStepResolutionV1[]
   settleAttackCount?: number
@@ -1344,12 +1408,14 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
   attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
   optionalBonusDice?: readonly import('./headlessCombatEngine').Dnd5eOptionalBonusDieUse[]
   damageMitigationInterrupts?: readonly import('./headlessCombatEngine').Dnd5eDamageMitigationInterruptUse[]
-}): {
+},hostExecution?:Readonly<{now:number}>): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
 } {
+  if(hostExecution&&(!Number.isSafeInteger(hostExecution.now)||hostExecution.now<=0))throw Error('monster-attack:original-host-clock-required')
   const { prepared } = input
+  if(Object.hasOwn(input,'wasteBlockedByWard')&&(!input.wasteBlockedByWard||typeof input.wasteBlockedByWard!=='object'||Array.isArray(input.wasteBlockedByWard)||Object.keys(input.wasteBlockedByWard).length!==1||typeof input.wasteBlockedByWard.targetId!=='string'||prepared.resourceKind!=='action'||prepared.action.kind!=='weapon-attack'||prepared.attacks.length!==1||prepared.compositeRuntime||prepared.readiedAttack||input.rolls.length!==0||input.multiattackContinuation!==undefined||input.settleAttackCount!==undefined||input.mechanicRolls!==undefined||input.compositeSteps!==undefined||input.effectRollDice!==undefined||input.attackDecoyRolls!==undefined||input.optionalBonusDice!==undefined||input.savingThrowCounterattacks!==undefined||input.shieldSpellcastingSavingThrows!==undefined))return{result:{ok:false,state:prepared.state,events:[],reason:'invalid-monster-action'}}
   const weaponRolls = input.rolls.map((roll, attackIndex) => ({
     ...roll,
     mode: roll.mode ?? dnd5ePreparedMonsterAttackMode(prepared, attackIndex),
@@ -1371,6 +1437,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           steps: input.compositeSteps ?? [],
         }
       : {
+          ...(input.wasteBlockedByWard?{wasteBlockedByWard:input.wasteBlockedByWard}:{}),
           type: prepared.resourceKind === 'bonus-action'
             ? 'monster-bonus-action'
             : prepared.resourceKind === 'legendary-action'
@@ -1393,12 +1460,14 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
     savingThrowCounterattacks: input.savingThrowCounterattacks,
   }
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
-    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action,{transactionId:input.transactionId})
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action,{transactionId:input.transactionId,...hostExecution})
     : undefined
   const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
-  const result = resolveDnd5eHeadlessAction(prepared.state, action,{transactionId:input.transactionId})
+  const result = resolveDnd5eHeadlessAction(prepared.state, action,{transactionId:input.transactionId,...hostExecution})
   if (!result.ok) return { result, airborneFalls }
-  return {
+  const nativeKey=bountifulNativePreparedExecutionIdentity(input)
+  if(nativeKey){nativeMonsterExecutionGeneration+=1;if(!Number.isSafeInteger(nativeMonsterExecutionGeneration))throw Error('native-monster-execution-overflow');nativeMonsterExecutions.set(nativeKey,{generation:nativeMonsterExecutionGeneration,result:cloneDnd5eHostTransactionInput(result)})}
+  const completed={
     result,
     airborneFalls,
     application: planDnd5eMapResultApplication({
@@ -1409,4 +1478,6 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
       events: [...result.events],
     }),
   }
+  actualMonsterFacadeResults.set(result,{preparedSignature:JSON.stringify(prepared),input:cloneDnd5eHostTransactionInput(input),resultSignature:JSON.stringify(result),applicationSignature:JSON.stringify(completed.application)})
+  return completed
 }

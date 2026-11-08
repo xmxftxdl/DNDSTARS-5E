@@ -479,3 +479,6 @@ export function recordServerMovementSightings(input: {
   clock?: { worldMinute?: number; worldSecondRemainder?: number };
   observerIds?: string[];
 }): { map: any; characters: any[] }
+
+export function stampPlayerActionStateForRoomMember<T>(name:string,value:T,member:{memberId:string}):T;
+export function projectSecondChanceCombatForMember(value:any,member:any):any;

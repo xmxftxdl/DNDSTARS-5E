@@ -48,7 +48,7 @@ export function dnd5ePluginFeatureActionFromActivityV1(
   const targeting = activity.target.kind === 'self'
     ? { kind: 'self' as const }
     : activity.target.kind === 'creature'
-      ? activity.target.count === 1
+      ? activity.target.count === 1 && activity.target.minimumCount !== 0 && activity.target.maximumCountAbilityModifier == null
         ? {
             kind: 'single-creature' as const,
             allowObjectAttack: activity.target.allowObjectAttack,
@@ -61,6 +61,8 @@ export function dnd5ePluginFeatureActionFromActivityV1(
             relation: activity.target.relation,
             rangeFeet: legacyRange,
             maximumTargets: activity.target.count,
+            minimumTargets: activity.target.minimumCount,
+            maximumTargetsAbilityModifier: activity.target.maximumCountAbilityModifier ? {...activity.target.maximumCountAbilityModifier} : undefined,
             includeSelf: activity.target.includeSelf,
           }
       : (() => {

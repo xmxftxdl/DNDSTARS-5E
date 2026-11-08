@@ -1,3 +1,4 @@
+import {resolveBrowserRelentlessBoundary} from './browserRelentlessBoundary'
 import type { EtherealExpirySettlement } from '../lib/campaignEtherealReturnCommit'
 import { createDnd5eMapCombatSnapshot } from '../rulesets/dnd5e/mapBridge'
 import { resolveDnd5eEtherealExpiry } from '../rulesets/dnd5e/etherealExpirySettlement'
@@ -29,9 +30,9 @@ export const settleBrowserEtherealExpiry: EtherealExpirySettlement = async input
   let owner = getTempleExpiryInteraction()
   const transactionId = `ethereal-expiry:${crypto.randomUUID()}`
   for (let attempt = 0; attempt < 64; attempt++) {
-    const result = resolveDnd5eEtherealExpiry({ before: before.state, after: after.state, map: input.map,
+    const result = await resolveBrowserRelentlessBoundary({state:after.state,map:input.map,resolve:state=>resolveDnd5eEtherealExpiry({ before: before.state, after: state, map: input.map,
       geometry: input.geometry, characters: input.characters, characterIdByCombatantId: after.characterIdByCombatantId,
-      choices, rolls })
+      choices, rolls })})
     if (result.ok) {
       let nextCombat = undefined
       if (combat) {

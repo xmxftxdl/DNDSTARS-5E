@@ -699,6 +699,47 @@ describe('D&D 5e content package V2', () => {
     }
   })
 
+  it('verifies passive Sneak Attack upgrades against an actual successful same-subclass target mark', () => {
+    const pkg = packageValue()
+    const summary = { schemaVersion: 1 as const, name: 'Synthetic', description: 'Synthetic',
+      trigger: { kind: 'passive' as const }, targeting: { kind: 'self' as const }, effects: [], automation: 'manual' as const }
+    pkg.content.subclasses = [{ schemaVersion: 1, id: 'keeper', classId: 'rogue', name: 'Keeper', summary: 'Synthetic',
+      abilities: [{ ...summary, id: 'mark', level: 3 }, { ...summary, id: 'upgrade', level: 17,
+        passiveImplementationReferences: [{ kind: 'sneak-target-bonus', id: 'mark' }] }] }]
+    pkg.content.activities = [{ schemaVersion: 1, id: 'mark', name: 'Synthetic', activation: { kind: 'bonus-action' },
+      target: { kind: 'creature', relation: 'any', count: 1 }, legacySource: { kind: 'subclass-ability', id: 'keeper:mark' },
+      automation: { schemaVersion: 1, level: 'full', supportedPhases: [], manualPhases: [], limitations: [] },
+      checks: [{ id: 'contest', kind: 'opposed-ability-check', rollId: 'source', opposedRollId: 'target', scope: 'per-target',
+        sourceAbility: 'wis', sourceSkill: 'insight', sourceModifier: { kind: 'constant', value: 0 }, targetOptions: [{ ability: 'cha', skill: 'deception' }] }],
+      effects: [{ schemaVersion: 1, id: 'mark', name: 'Mark', stacking: 'replace', duration: { kind: 'rounds', rounds: 10, expiresAt: 'source-turn-start' },
+        modifiers: [{ kind: 'sneak-attack-target', bonusDice: { minimumRogueLevel: 17, count: 3 } }] }],
+      outcomes: [{ id: 'mark', when: { kind: 'check', checkId: 'contest', result: 'success' },
+        operations: [{ id: 'mark', kind: 'apply-effect', target: 'actor', effectId: 'mark' }] }] }]
+    const status = (value = pkg) => dnd5eContentPackageAutomationCoverageV2(value).entries.find(e => e.id === 'keeper:upgrade')!.status
+    expect(status()).toBe('full')
+    const unified = (value = pkg) => dnd5eContentDefinitionsFromPackageV2(value).find(entry => entry.id === 'feature.subclass-ability.keeper.upgrade')!
+    expect(unified().automation.level).toBe('full')
+    expect(unified().activities).toEqual([])
+    expect(status(parseDnd5eContentPackageV2(new TextEncoder().encode(JSON.stringify(pkg)).buffer)!)).toBe('full')
+    for (const change of ['missing','foreign','class','level','count','effect','target','failure','always','manual','cost','ties'] as const) {
+      const bad = JSON.parse(JSON.stringify(pkg)), activity = bad.content.activities[0]
+      if (change === 'missing') activity.id = 'other'
+      if (change === 'foreign') activity.legacySource.id = 'other:mark'
+      if (change === 'class') bad.content.subclasses[0].classId = 'fighter'
+      if (change === 'level') bad.content.subclasses[0].abilities[1].level = 16
+      if (change === 'count') activity.effects[0].modifiers[0].bonusDice.count = 4
+      if (change === 'effect') activity.outcomes[0].operations[0].effectId = 'other'
+      if (change === 'target') activity.outcomes[0].operations[0].target = 'target'
+      if (change === 'failure') activity.outcomes[0].when.result = 'failure'
+      if (change === 'always') activity.outcomes[0].when = { kind: 'always' }
+      if (change === 'manual') activity.automation.level = 'dm-adjudication'
+      if (change === 'cost') bad.content.subclasses[0].abilities[1].cost = { economy: 'reaction' }
+      if (change === 'ties') activity.checks[0].tiesFavor = 'source'
+      expect(status(bad), change).not.toBe('full')
+      expect(unified(bad).automation.level, change).not.toBe('full')
+    }
+  })
+
   it('requires an applied, source-bound and level-matched bonus for passive effect references', () => {
     const pkg = packageValue()
     const summary = { schemaVersion: 1 as const, name: 'Synthetic', description: 'Synthetic',

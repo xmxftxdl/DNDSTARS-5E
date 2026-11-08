@@ -32,7 +32,7 @@ export function dnd5eDamageCheckpointActivitySupported(activity: Dnd5eActivityDe
   // Personal grants only persist authority for a later Activity; they do not
   // execute that Activity inside this damage checkpoint. Suspension keeps a
   // stored follow-up dormant until its linked defensive effect has ended.
-  const lifetimeKeys = new Set(['schemaVersion', 'id', 'name', 'disposition', 'duration', 'stacking', 'modifiers', 'grants', 'grantsSingleUse', 'suspendWhileEffectId', 'concentration'])
+  const lifetimeKeys = new Set(['schemaVersion', 'id', 'name', 'disposition', 'duration', 'stacking', 'modifiers', 'grants', 'grantsSingleUse', 'suspendWhileEffectId', 'concentration', 'magical'])
   const delayedIds=new Set(activity.outcomes.flatMap(outcome=>outcome.operations.flatMap(operation=>operation.kind==='apply-effect' && operation.timing==='after-triggering-damage'?[operation.effectId]:[])))
   const defenseKinds = new Set(['damage-resistance','conditional-damage-resistance','damage-immunity','damage-vulnerability'])
   return !activity.authorityBinding && activity.activation.kind === 'reaction' &&

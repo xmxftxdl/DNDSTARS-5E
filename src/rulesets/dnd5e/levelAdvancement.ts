@@ -1030,6 +1030,7 @@ export function dnd5eAdvancementLockedChoiceKeys(character: Character): Readonly
         record.decision.subclassId,
       )
       if (plan) {
+        for(const slot of plan.additionalKnownSpells??[])keys.add(`${record.classId}:class:${slot.selectionKey}`)
         keys.add(`${record.classId}:class:${plan.cantripSelectionKey}`)
         if (plan.targetKnownSpellCount != null) {
           keys.add(`${record.classId}:class:${plan.spellSelectionKey}`)

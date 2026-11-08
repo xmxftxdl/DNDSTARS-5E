@@ -1,5 +1,6 @@
 import type { Dnd5eAttackAttemptWard } from '../attackAttemptWard'
 import type { Dnd5eSolidMaterialTraversal } from '../solidMaterialTraversal'
+import type { Dnd5eObjectCreatureTraversal } from '../objectCreatureTraversal'
 import type { MapSurfaceMaterial } from '../../../lib/mapSurfaceMaterials'
 import type { Dnd5eEffectGrantChargeDeclaration } from '../effectGrantCharges'
 import type { AbilityKey } from '../../../lib/dnd'
@@ -21,9 +22,9 @@ export const DND5E_EFFECT_SCHEMA_VERSION = 1 as const
  * consume this modifier; it is projected while a character is built.
  */
 export const DND5E_CHARACTER_CAPABILITY_IDS_V1 = Object.freeze([
-  'inherentLight',
+  'inherentLight', 'inherentFlight',
   'unarmoredArmorClassBase', 'unarmoredArmorClassAllowsShield', 'naturalWeapons',
-  'initiativeBonus',
+  'initiativeBonus', 'initiativeAdvantage',
   'initiativeBonusFromAbility',
   'existingMovementSpeedBonuses', 'swimSpeedMinimumFeet',
   'hitPointsPerLevelBonus',
@@ -44,6 +45,7 @@ export const DND5E_CHARACTER_CAPABILITY_IDS_V1 = Object.freeze([
   'mountedMeleeAdvantageAgainstSmallerUnmounted',
   'redirectMountedCreatureAttacksToRider',
   'grantMountedCreatureDexterityEvasion',
+  'isolatedTargetSneakAttack',
   'preventOpportunityAttacksFromMeleeAttackTargets',
   'opportunityAttacksIgnoreDisengage',
   'opportunityAttackHitStopsMovement',
@@ -66,6 +68,7 @@ export const DND5E_CHARACTER_CAPABILITY_IDS_V1 = Object.freeze([
   'ignoreOccupiedHandsForSomaticComponents',
   'retainHiddenOnRangedWeaponMiss',
   'naturalOneReroll',
+  'doesNotRequireSleep', 'cannotBeForcedToSleep',
 ] as const)
 
 export type Dnd5eCharacterCapabilityIdV1 = typeof DND5E_CHARACTER_CAPABILITY_IDS_V1[number]
@@ -114,6 +117,7 @@ export type Dnd5eEffectDurationV1 =
 export type Dnd5eEffectModifierV1 =
   | { kind: 'attacks-by-source-critical-threshold'; threshold: number }
   | { kind: 'damage-rolls-by-source-bonus'; value: Dnd5eFormulaV1 }
+  | { kind: 'notify-source-on-bearer-death' }
   | { kind: 'roll-dice'; dice: Dnd5eRollDiceModifier }
   | { kind: 'armor-class'; mode: 'add' | 'minimum' | 'maximum' | 'override'; value: Dnd5eFormulaV1;
       /** Host binds the recipients of this Effect; no client-supplied participant IDs. */
@@ -146,7 +150,7 @@ export type Dnd5eEffectModifierV1 =
   /** Take an otherwise legal opportunity attack instead of declining it. */
   | { kind: 'mandatory-opportunity-attacks' }
   | { kind: 'random-visible-creature-targets' }
-  | { kind: 'attack-target-lock'; attacksAgainstOthersThanSource: 'disadvantage'; sourceRangeFeet?: number; notifySourceOnDamage?: true }
+  | { kind: 'attack-target-lock'; attacksAgainstOthersThanSource: 'disadvantage'; sourceRangeFeet?: number; notifySourceOnDamage?: true; opportunityAttacksOnlyAgainstSource?: true }
   | {
       kind: 'ability-check'
       mode: 'advantage' | 'disadvantage'
@@ -173,6 +177,9 @@ export type Dnd5eEffectModifierV1 =
     }
   /** Raises the raw d20 result (before modifiers) for matching ability checks. */
   | { kind: 'minimum-ability-check-d20'; ability: AbilityKey; minimum: number }
+  | ({ kind: 'minimum-skill-check-d20' } & import('../contextualSkillChecks').Dnd5eMinimumSkillCheckD20Rule)
+  | ({ kind: 'half-speed-skill-check-advantage' } & import('../contextualSkillChecks').Dnd5eHalfSpeedSkillCheckRule)
+  | { kind: 'sneak-attack-target'; bonusDice?: { minimumRogueLevel: number; count: number } }
   | { kind: 'weapon-damage-roll'; mode: 'add'; value: Dnd5eFormulaV1; appliesTo?: 'this-weapon' | 'all-weapon-attacks' }
   /** Multiplies the full qualifying weapon damage packet before defenses. */
   | {
@@ -201,6 +208,8 @@ export type Dnd5eEffectModifierV1 =
       /** Held weapons only. Unknown Host magic status fails closed. */
       requiresNonmagical?: true
       attackAndDamageBonus: Dnd5eFormulaV1
+      /** Applies that flat bonus only to attacks; elemental dice remain separate. Legacy omission affects both. */
+      attackBonusOnly?: true
       /** Held inventory weapon only; never substitutes costly/consumed materials. */
       spellcastingFocusClassIds?: readonly string[]
       /** Consumed by resolved attacks, including misses; not by rejected commands. */
@@ -209,6 +218,8 @@ export type Dnd5eEffectModifierV1 =
       consumeOnDraw?: true
       bonusDamage?: { count: number; sides: number; type: Dnd5eDamageType; magical?: boolean }
     }
+  /** Binds an optional attack/damage ability to one exact weapon without enchanting its damage. */
+  | { kind:'bound-weapon-ability'; ability:AbilityKey; requiresProficient:true; excludeTwoHanded:true }
   /** Binds an AC bonus to the concrete body armor worn when applied. */
   | { kind: 'armor-enchantment'; armorClassBonus: Dnd5eFormulaV1; requiresNonmagical?: true; itemSelection?: 'inventory-item' }
   /** Temporarily rewrites a closed portion of a qualifying attack profile. */
@@ -284,7 +295,7 @@ export type Dnd5eEffectModifierV1 =
   | {
       kind: 'character-capability'
       capability: Dnd5eCharacterCapabilityIdV1
-      value: boolean | number | AbilityKey | readonly string[] | NonNullable<Dnd5ePluginStaticCombatModifiers['naturalWeapons']> | NonNullable<Dnd5ePluginStaticCombatModifiers['existingMovementSpeedBonuses']> | NonNullable<Dnd5ePluginStaticCombatModifiers['inherentLight']>
+      value: boolean | number | AbilityKey | readonly string[] | NonNullable<Dnd5ePluginStaticCombatModifiers['naturalWeapons']> | NonNullable<Dnd5ePluginStaticCombatModifiers['existingMovementSpeedBonuses']> | NonNullable<Dnd5ePluginStaticCombatModifiers['inherentLight']> | NonNullable<Dnd5ePluginStaticCombatModifiers['inherentFlight']>
     }
   /** Contextual racial save advantage that cannot be represented by an unconditional save modifier. */
   | {
@@ -316,6 +327,8 @@ export type Dnd5eEffectModifierV1 =
   | { kind: 'swim-speed'; mode: 'walking-speed' }
   /** Grants true sight, including invisible and magically disguised targets, to this range. */
   | { kind: 'truesight'; rangeFeet: number }
+  /** Sight through solids only. The optional darkvision grant is decided once by Host at activation. */
+  | { kind: 'through-solid-objects-sight'; rangeFeet: number; grantDarkvisionIfAbsentAtActivation?: true }
   /** Caps visual perception; nonvisual blindsight is independently evaluated. */
   | { kind: 'sight-range-limit'; rangeFeet: number }
   /** Prevents the target from being selected by spells of the listed schools. */
@@ -416,6 +429,7 @@ export type Dnd5eEffectModifierV1 =
       unrestrictedVerticalMovement: boolean
     }
   | ({ kind: 'solid-material-traversal' } & Dnd5eSolidMaterialTraversal)
+  | ({ kind: 'object-creature-traversal' } & Dnd5eObjectCreatureTraversal)
   | { kind: 'source-location-awareness' }
   | { kind: 'tracking-capability'; mundaneTracking: 'impossible'; leavesTracks: false }
   /** Closed environmental permissions queried by travel and hazard authority. */
@@ -538,6 +552,8 @@ export type Dnd5eTriggerEventV1 =
   | 'self-dropped-to-zero'
   | 'self-involuntarily-incapacitated'
   | 'creature-died'
+  | 'creature-killed'
+  | 'effect-bearer-died'
   | 'before-drop-to-zero'
   | 'short-rest-started'
   | 'long-rest-started'
@@ -555,7 +571,7 @@ export const DND5E_TRIGGER_EVENT_IDS_V1: readonly Dnd5eTriggerEventV1[] = [
   'on-move', 'movement-started', 'movement-completed', 'on-enter-area', 'on-leave-area',
   'on-cast', 'after-cast', 'spell-cast', 'spell-resolved', 'spell-countered', 'spell-dispelled', 'skill-used', 'item-used', 'feature-used',
   'action-resolved', 'd20-roll-resolved', 'reaction-window', 'legendary-action-window', 'lair-action-window',
-  'on-concentration-check', 'on-condition-attempted', 'on-condition-applied', 'on-defeat', 'creature-dropped-to-zero', 'self-dropped-to-zero', 'self-involuntarily-incapacitated', 'creature-died', 'before-drop-to-zero',
+  'on-concentration-check', 'on-condition-attempted', 'on-condition-applied', 'on-defeat', 'creature-dropped-to-zero', 'self-dropped-to-zero', 'self-involuntarily-incapacitated', 'creature-died', 'creature-killed', 'effect-bearer-died', 'before-drop-to-zero',
   'short-rest-complete', 'long-rest-complete',
   'short-rest-started', 'long-rest-started',
   'creature-awakened',
@@ -614,6 +630,8 @@ export const DND5E_ACTIVITY_LIFECYCLE_EVENTS_V1: readonly Dnd5eActivityLifecycle
   ['on-condition-attempted', 'effects', 'before', true], ['on-condition-applied', 'effects', 'after', true],
   ['before-drop-to-zero', 'damage', 'before', true], ['creature-dropped-to-zero', 'damage', 'after', true], ['self-dropped-to-zero', 'damage', 'after', true], ['self-involuntarily-incapacitated', 'effects', 'after', true],
   ['creature-died', 'effects', 'after', true],
+  ['creature-killed', 'effects', 'after', true],
+  ['effect-bearer-died', 'effects', 'after', true],
   ['short-rest-complete', 'rest', 'after', false], ['long-rest-complete', 'rest', 'after', false],
   ['short-rest-started','rest','before',false], ['long-rest-started','rest','before',false],
   ['creature-awakened', 'effects', 'after', true],
@@ -623,6 +641,9 @@ export type Dnd5ePredicateV1 =
   | { kind: 'ethereal-access'; state: 'known' | 'available' | 'unavailable' }
   | { kind: 'upward-clearance'; subject: 'actor' | 'target'; distanceFeet: number | 'area-height'; blocked: boolean }
   | { kind: 'combat-active' }
+  /** Exact current round from the authoritative live encounter. */
+  | { kind: 'combat-round'; round: number }
+  | { kind: 'attack-action-used' }
   /** Requires a live Host turn; missing turn information satisfies neither case. */
   | { kind: 'turn-owner'; owner: 'actor' | 'other' }
   | { kind: 'minimum-level'; level: number }
@@ -661,7 +682,7 @@ export type Dnd5ePredicateV1 =
   | ({ kind: 'active-effect'; subject: 'actor' | 'target'; present: boolean; source: 'any' | 'self' | 'target' } & (
       | { effectId: string; anyOf?: never }
       /** Alternatives match one unsuspended Host effect; all tags in an alternative must belong to that effect. */
-      | { effectId?: never; anyOf: readonly ({ effectId: string; tags?: never } | { effectId?: never; tags: readonly string[] })[] }
+      | { effectId?: never; anyOf: readonly (({ effectId: string; tags?: never } | { effectId?: never; tags: readonly string[] }) & { sourceRulesId?: string; sourcePluginId?: string })[] }
     ))
   | { kind: 'distance'; minimumFeet?: number; maximumFeet?: number }
   | { kind: 'resource'; resourceId: string; minimum: Dnd5eFormulaV1 }
@@ -685,6 +706,7 @@ export type Dnd5ePredicateV1 =
   /** Host delivery distinguishes melee spell attacks from ranged spell attacks. */
   | { kind: 'attack-delivery'; delivery: 'melee' | 'ranged' }
   /** Matches the concrete Host-derived weapon ID of the triggering attack. */
+  | { kind: 'attack-pact-weapon' }
   | { kind: 'attack-weapon'; weaponIds: readonly string[]; identity?: 'instance' | 'base' }
   /** Host equipment classification; unknown, natural and unarmed attacks do not match. */
   | { kind: 'attack-weapon-category'; categories: readonly ('simple' | 'martial')[] }
@@ -719,7 +741,7 @@ export type Dnd5ePredicateV1 =
   | { kind: 'initial-space-exit'; effectTag: string }
   | { kind: 'initial-space-melee-crossing'; effectTag: string }
   | { kind: 'movement-property'; straightLine?: boolean; dashedThisTurn?: boolean; movementKind?: 'voluntary' | 'mounted' | 'forced' | 'teleport' }
-  | { kind: 'spell-used'; spellId?: string; schools?: readonly Dnd5eSpellbookSchoolId[]; castingClassIds?: readonly string[]; minimumLevel?: number; maximumLevel?: number }
+  | { kind: 'spell-used'; spellId?: string; damageTypes?: readonly Dnd5eDamageType[]; schools?: readonly Dnd5eSpellbookSchoolId[]; castingClassIds?: readonly string[]; minimumLevel?: number; maximumLevel?: number }
   | { kind: 'skill-used'; skillId?: string }
   | { kind: 'action-economy-available'; economy: 'action' | 'bonus-action' | 'reaction'; amount?: 1 }
   | {
@@ -811,6 +833,7 @@ export interface Dnd5eEffectDefinitionV1 {
     | 'attacked-by-source-or-ally'
     | 'damaged-by-source-or-ally'
     | 'forced-save-by-source-or-ally'
+    | 'affected-by-source-ally-spell'
     | 'attacked-by-source-ally'
     | 'attacked-by-condition-entity'
     | 'damaged-by-condition-entity'
@@ -866,6 +889,7 @@ export interface Dnd5eEffectDefinitionV1 {
   repeatSaveAtTurnBoundary?: { ability: AbilityKey; dc: Dnd5eFormulaV1; timing: 'target-turn-start' | 'target-turn-end' }
   /** A Host-owned repeat save queued after the affected creature takes damage. */
   repeatSaveOnDamage?: {
+    optional?: true
     ability: AbilityKey
     dc: Dnd5eFormulaV1
     mode: 'normal' | 'advantage'
@@ -986,6 +1010,8 @@ export interface Dnd5eEffectDefinitionV1 {
   bindToGrantingArea?: true
   /** Capture the bearer's original occupied volume from authoritative map geometry. */
   captureInitialSpace?: true
+  /** Opt in to Host execution provenance, including a non-grant concentration controller. */
+  captureExecutionIdentity?: true
   /** The bounded concentration duration completing naturally promotes this effect to permanent. */
   persistAfterConcentrationCompletes?: true
   dispel?: { kind: 'spell-level'; level: number } | { kind: 'dm-adjudication'; reason: string }

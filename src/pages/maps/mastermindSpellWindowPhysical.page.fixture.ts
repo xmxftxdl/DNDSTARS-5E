@@ -1,0 +1,7 @@
+import ts from'typescript'
+import actualPage from'../MapsWorkspacePage.tsx?raw'
+type Scope=Record<string,unknown>
+const source=ts.createSourceFile('MapsWorkspacePage.tsx',actualPage,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+function actualStatement(callee:string){let found:ts.IfStatement|undefined;function walk(node:ts.Node){if(ts.isIfStatement(node)&&node.expression.getText(source).includes("'mm-spell-pool:'")&&node.thenStatement.getText(source).includes(callee+'(')){if(found)throw Error('Duplicate actual Page hook');found=node}ts.forEachChild(node,walk)}walk(source);if(!found)throw Error('Actual Page hook missing: '+callee);return found.getText(source)}
+export async function invokeActualSpellWindowPhysicalHook(callee:string,scope:Scope){const names=Object.keys(scope),execute=new Function(...names,'return async()=>{'+actualStatement(callee)+'}');return execute(...names.map(n=>scope[n]))()}
+export async function invokeActualSpellWindowOwnerRoute(scope:Scope){let expression:ts.Expression|undefined;function walk(node:ts.Node){if(ts.isVariableDeclaration(node)&&node.name.getText(source)==='spellWindowDiceOwner'){if(expression||!node.initializer)throw Error('Actual owner route ambiguous');expression=node.initializer}ts.forEachChild(node,walk)}walk(source);if(!expression)throw Error('Actual owner route missing');const names=Object.keys(scope),execute=new Function(...names,'return async()=>('+expression.getText(source)+')');return execute(...names.map(n=>scope[n]))()}

@@ -1,3 +1,82 @@
+import {mutatePlayerExplorationMoveState} from "./player-exploration-move.mjs"
+import {validateProductionSecurityConfig} from "./application/server-security-config.mjs"
+import {LockTimeoutError} from "./adapters/file-atomic-store.mjs"
+import {atomicWriteJsonStateFreshLocked} from "./adapters/file-atomic-store.mjs"
+import {retryTransientWindowsRename} from "./adapters/file-atomic-store.mjs"
+import {createAccountRoomHandlers} from './application/account-room-handlers.mjs'
+import {mutateEffectEndConfirmedReceipt} from '../shared/effect-end-confirmed-receipt.mjs'
+import { explicitWaterBreathingPoliciesFromPackage, explicitSummonedMonsterConstitutionsFromPackage } from '../shared/explicit-water-breathing-policy.mjs'
+import{recordBountifulDeathAreaOwnInterruptMutationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{projectMastermindSpellWardOwnDice,mutateMastermindSpellWardOwnDice}from'../shared/mastermind-spell-ward-own-dice.mjs'
+import{mutateMastermindSpellWardOwn,recordMastermindSpellWardOwnInterrupt}from'../shared/mastermind-spell-ward-own-ledger.mjs'
+import{readBountifulDeathAreaOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulPluginSpellSavingOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchTempestuousPluginSavingOwned}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulMonsterSavingLateSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulDeathFirstRepeatSavingSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulDeathFirstOriginalSource,inspectBountifulDeathFirstOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulDeathRepeatSavingSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchTempestuousPluginLandingOriginal}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchTempestuousPluginOriginal,recordTempestuousPluginInterruptMutationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchTempestuousHostOriginal}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchTempestuousLandingOriginal,dispatchTempestuousLandingOriginalEvent}from'./application/bountiful-ready-raw-authority.mjs'
+import{dispatchSpellcastingOriginalSaving,dispatchSpellcastingOriginalSavingEvent}from'./application/bountiful-ready-raw-authority.mjs'
+import{bountifulInitiativeConsumptionAllowed,validBountifulInitiativeOriginals,mutateBountifulInitiativeOriginal,projectBountifulInitiativeOriginal}from'../shared/bountiful-initiative-original.mjs'
+import{readBountifulPluginSpellAbilityOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{mastermindNativeWardBountifulConsumptionAllowed,validMastermindNativeWardBountifuls,mutateMastermindNativeWardBountiful,projectMastermindNativeWardBountiful}from'../shared/mastermind-native-ward-bountiful.mjs'
+import{authorizeBountifulNativeLuckyIntake,bountifulNativeLuckyIntakeIdentity}from'../shared/bountiful-native-lucky-intake.mjs'
+import{validMastermindNativeWardOutcomes,mutateMastermindNativeWardOutcomes,projectMastermindNativeWardOutcome}from'../shared/mastermind-native-ward-outcomes.mjs'
+import{validMastermindNativeWardOriginals,mutateMastermindNativeWardOriginals,projectMastermindNativeWardOriginal}from'../shared/mastermind-native-ward-originals.mjs'
+import{validMastermindWardSavingChoices,mutateMastermindWardSavingChoices,projectMastermindWardSavingChoice,listMastermindWardSavingChoices}from'../shared/mastermind-ward-saving-choices.mjs'
+import{dispatchStormFuryOwnerAuthority,dispatchStormFurySavingAuthority,dispatchStormFurySavingDiceEvent,dispatchStormFuryRoomInterruptMutation,dispatchStormFuryPushAuthority}from'./application/storm-fury-owner-storage.mjs'
+import{readBountifulActivityOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{validMastermindWardOriginals,mutateMastermindWardOriginals,projectMastermindWardOriginal}from'../shared/mastermind-ward-originals.mjs'
+import{recordTempestuousAfterInterruptMutationSource,verifyTempestuousAfterOwnerDecisionSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{validDnd5eSceneWeatherFacts}from'../shared/dnd5e-scene-weather-facts.mjs'
+import{validMastermindWardAttacks,mutateMastermindWardAttacks,projectMastermindWardAttack}from'../shared/mastermind-ward-attacks.mjs'
+import{recordTempestuousBeforeInterruptMutationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readTempestuousBeforeOriginalPreparationSource,probeTempestuousBeforeOriginalPreparationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulMonsterDamageZeroOriginalSource,currentBountifulMonsterDamageZeroOriginalSource,probeBountifulMonsterDamageZeroOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readSpellcastingOriginalPreparationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readStormCastOriginalPreparationSource,probeStormCastOriginalPreparationSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{readBountifulSpellDamageZeroOriginalSource,probeBountifulSpellDamageZeroOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{mutateMastermindSpellWindows,projectMastermindSpellWindowRequest,readMastermindSpellWindowSource,listMastermindSpellWindowWardChoices}from'../shared/mastermind-spell-windows.mjs'
+import{readBountifulDamageZeroOriginalSource,probeBountifulDamageZeroOriginalSource}from'./application/bountiful-ready-raw-authority.mjs'
+import{validMastermindMagicTruth,mutateMastermindMagicTruth,projectMastermindMagicTruth,mastermindMagicTruthPublicationAllowed,mastermindNativeMagicTruthTransactionId}from'../shared/mastermind-magic-truth.mjs'
+import {arcaneNativeScPublicationAllowed} from '../shared/arcane-native-sc-parent.mjs'
+import{validArcaneMovementOriginalJournal,arcaneMovementOriginalTransitionAllowed,issueArcaneMovementOriginal,issueArcaneMovementDie,projectArcaneMovementDie,lockArcaneMovementDie,confirmArcaneMovementDie,issueArcaneMovementCheckpoint,acceptArcaneMovementChoice,projectArcaneMovementChoices,arcaneMovementPublicationAllowed,arcaneMovementReversePublicationAllowed}from'../shared/arcane-movement-original.mjs'
+import{hasArcaneBaseChoice,acceptArcaneBaseChoice,projectArcaneBaseChoiceRequests,validArcaneBasePrefixJournal,arcaneBasePrefixGenericTransitionAllowed,arcaneBasePrefixConsumptionPaired,arcaneBasePrefixReverseConsumptionAllowed,issueArcaneBasePrefixRequest,lockArcaneBasePrefixRaw,confirmArcaneBasePrefixRaw,projectArcaneBasePrefixRequest}from'../shared/arcane-base-prefix.mjs'
+import{mutateMastermindMisdirection,projectMastermindMisdirection,validMastermindMisdirections,mastermindNativeMisdirectionTransactionId,mastermindNativeMisdirectionPublicationAllowed}from'../shared/mastermind-misdirections.mjs'
+import{mastermindThoughtPublicationAllowed,projectMastermindThoughtResult,mutateMastermindThoughtReading,projectMastermindThoughtReading,projectMastermindThoughtRoll,validMastermindThoughtReadings}from'../shared/mastermind-thought-readings.mjs'
+
+import{mutateMastermindObservation,projectMastermindObservation}from'../shared/mastermind-observations.mjs'
+import {authorizeSecondChancePlayerOriginalRawAppend} from '../shared/second-chance-original-raw-authority.mjs'
+import {armorNativeExtendedScAtomicEnvelope,armorNativeConsumptionPaired,armorNativeScReverseConsumptionAllowed,validArmorNativeParentJournal,armorNativeRawTransitionAllowed,lockArmorNativeRaw,lockArmorNativeDecision,isArmorNativeChoice,validArmorNativeChoice,armorNativeChoicesUnchanged,lockArmorNativeDecisionFromChoice} from '../shared/armor-native-parent.mjs'
+import{validArcaneNativeJournal,arcaneNativeTransitionAllowed,acceptArcaneNativeChoice,arcaneNativeConsumptionPaired,projectArcaneNativeRequests}from'../shared/arcane-native-parent.mjs'
+import {prepareBountifulParentCompletion} from './application/bountiful-parent-completion.mjs'
+import {readBountifulOpportunitySequenceSource,recordBountifulCollectorInterruptMutation,recordBountifulReadyDiceEvent,retainBountifulReadyPublication,recordBountifulOriginalCommandEvidence,preflightBountifulOriginalCommandEvidence,retainBountifulOriginalPublication} from './application/bountiful-ready-raw-authority.mjs'
+import {canonicalBountifulOpportunitySettlement} from '../shared/bountiful-opportunity-settlement.mjs'
+import {validateBountifulReadyD20Followup} from '../shared/bountiful-ready-d20-host-gate.mjs'
+import {validateBountifulReadyParents} from '../shared/bountiful-ready-parents.mjs'
+import {authorizeBountifulDmAppend,bountifulDmAppendIdentity} from '../shared/bountiful-dm-command.mjs'
+import {isBountifulD20FollowupInterrupt,validateBountifulD20ParentFollowup,bountifulD20ProtectedQueueUnchanged} from '../shared/bountiful-d20-host-gate.mjs'
+import {validScBasePrefixJournal,scBasePrefixGenericTransitionAllowed,scBasePrefixReverseConsumptionAllowed,scBasePrefixConsumptionPaired,issueScBasePrefixRequest,lockScBasePrefixRaw,confirmScBasePrefixRaw,projectScBasePrefixRequest} from '../shared/sc-base-prefix.mjs'
+import {lockActivityDeathInitiativeRaw,activityDeathRawTransitionAllowed,lockActivityDeathChoice,activityDeathRetiredChoiceIds} from '../shared/activity-death-parent.mjs'
+import {secondChanceCanonicalControllerMemberId} from '../shared/second-chance-controller.mjs'
+import {validActivityDeathParentJournal,isActivityDeathChoice,validActivityDeathChoice,activityDeathChoicesUnchanged} from '../shared/activity-death-parent.mjs'
+import {authorizeSecondChanceDmOwnedAppend,secondChanceDmAppendIdentity} from '../shared/second-chance-dm-command.mjs'
+import {observePactLifecycleTrace} from '../shared/pact-lifecycle-trace.mjs'
+import {isDmOnlyChoiceInterrupt,validateHostWorldFactChoice,dmOnlyChoiceProtectedQueueUnchanged} from '../shared/dm-world-fact-authority.mjs'
+import {projectPactWeaponOwnerStatus} from '../shared/pact-owner-status.mjs'
+import {observePactGroundEffects} from '../shared/pact-ground-effects-clock.mjs'
+import {observePactWeaponRituals} from '../shared/pact-weapon-ritual-continuity.mjs'
+import {validateBountifulOriginalParents,validateBountifulLuckCommand,projectBountifulOriginalPrompts} from '../shared/bountiful-luck-state.mjs'
+import {validateSecondChanceAttackReceipts,validateSceneReactionSpent} from '../shared/second-chance-state.mjs'
+import {multipartServerSurfaces, redactMultipartHistory} from '../shared/multipart-token-surfaces.mjs'
+import {migrateLegacyApCombatLogText, normalizeDedicatedDnd5eSharedState} from '../shared/legacy-combat-state.mjs'
+export {migrateLegacyApCombatLogText, normalizeDedicatedDnd5eSharedState}
+import { validSceneSensoryDeceptionSurvey } from '../src/lib/sceneSensoryDeceptionSurvey.ts'
+import { falseHydraSongConceals } from '../shared/false-hydra-song.mjs'
 import { recordSceneTransitionSightings } from './scene-transition-sightings.mjs'
 import { recordAcceptedMovementSightings } from './movement-sightings.mjs'
 import {retainDnd5eEndedEffectSavingThrows} from '../shared/effect-end-saving-throw.mjs'
@@ -24,6 +103,7 @@ import { SHORT_REST_RECOVERY_RESOURCE, validShortRestRecoveryJournal } from '../
 import { mergeMapsDeletionHistory } from '../shared/map-deletion-history.mjs'
 import { concentrationInitiativeCleanup } from '../shared/concentration-initiative-cleanup.mjs'
 import { persistentAreaBlocksRay } from '../shared/persistent-area-ray.mjs'
+import {personalSolidSightMagicSuppressed,projectPersonalSolidSightSuppression} from '../shared/personal-solid-sight.mjs'
 import { flameLightConcealed } from '../shared/flame-light-concealment.mjs'
 import { expireRestBoundAreas, validRestAreaSessionId } from '../shared/rest-bound-areas.mjs'
 import { campaignInteractionReferenceIssue, validCampaignInteractions, mutateCampaignInteraction, interruptCampaignInteractionsForTimeAdvance } from '../shared/campaign-interactions.mjs'
@@ -35,7 +115,7 @@ import { detachDnd5eUncontrolledSummon, expireDnd5eSummonLingerAtWorldMinute, dn
 import { stoneWallIntersects } from '../shared/stone-wall-geometry.mjs'
 import { ACTIVE_EFFECT_BREAK_TRIGGERS } from '../shared/active-effect-break-triggers.mjs'
 import { normalizeDnd5eRollDiceModifiers } from '../shared/roll-dice-modifiers.mjs'
-import { handleAccountStorageRequest, withAccountAssetBudget } from './account-storage-quota.mjs'
+import {withAccountAssetBudget} from "./account-storage-quota.mjs"
 // DM 与玩家服务端共用的权威协议、鉴权和原子持久化核心。
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
@@ -58,15 +138,8 @@ import {
 } from './tencent-verification-provider.mjs'
 import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
 import { openPostgresStorage } from './postgres-storage.mjs'
-import { applyCampaignPrepPlanPatch, normalizeCampaignPrepPlan } from './account-campaign-prep-plan.mjs'
-import {
-  AI_JOB_LOCAL_LEASE_MS,
-  AI_JOB_MAX_PER_CAMPAIGN,
-  normalizeAiJobCreateRequestV2,
-  normalizeAiJobRecordV2,
-  normalizePdfCampaignAnalysisArtifact,
-  publicAiJobV2,
-} from '../shared/ai-job.mjs'
+import {normalizeCampaignPrepPlan} from "./account-campaign-prep-plan.mjs"
+import {normalizeAiJobRecordV2} from "../shared/ai-job.mjs"
 import {
   compileGeometryCached,
   doorOpenState,
@@ -75,13 +148,11 @@ import {
   validateGeometryStructure,
 } from '../shared/map-geometry-kernel.mjs'
 import { validateMapViewportNotes } from '../shared/map-viewport-notes.mjs'
-import {
-  createPlayerExplorationMoveApi,
-  mutatePlayerExplorationMoveState,
-} from './player-exploration-move.mjs'
+import {createPlayerExplorationMoveApi} from "./player-exploration-move.mjs"
 export { mutatePlayerExplorationMoveState }
 import {
   applyDnd5eEffectiveVisionProfile,
+  projectDnd5ePersonalSolidSight,
   projectDnd5eSourceVisionSensor,
   isDnd5eInvisibleVisionSensor,
   resolveDnd5eVisionSensorSource,
@@ -95,18 +166,8 @@ import {
 } from '../shared/combat-presentation-contract.mjs'
 import { normalizeCombatTargetPresentationEvent } from './combat-target-presentation.mjs'
 import { applyRollOptionsMutation, ROLL_CONFIRMATION_STAGE_TIMEOUT_MS, validateChoiceRerollResponse } from './roll-confirmation-policy.mjs'
-import {
-  analyzeMarketplaceDeclarativePackage,
-  MARKETPLACE_CREATOR_NOTICE_VERSION,
-  MARKETPLACE_CREATOR_POLICY_VERSION,
-  normalizeMarketplacePublication,
-} from '../shared/marketplace-publication.mjs'
-import {
-  activeMarketplaceEntitlement,
-  canonicalMarketplaceJson,
-  MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION,
-  MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
-} from '../shared/marketplace-entitlement.mjs'
+
+import {activeMarketplaceEntitlement,canonicalMarketplaceJson,MARKETPLACE_ENTITLEMENT_SCHEMA_VERSION} from "../shared/marketplace-entitlement.mjs"
 import {
   MARKETPLACE_ORDER_SCHEMA_VERSION,
   MARKETPLACE_ORDER_TTL_MS,
@@ -144,21 +205,15 @@ import { projectDnd5eShopsForPlayer, validateDnd5eShopState } from './dnd5e-shop
 export { projectDnd5eShopsForPlayer } from './dnd5e-shop-state.mjs'
 import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
 import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
-import { handleRoomVoiceApi } from './application/room-voice-api.mjs'
-import { handleLongCastingOwnerApi } from './application/long-casting-owner-api.mjs'
+
+
 import {
   applyDmAuthoritativeCombatRecovery as recoverDmCombat,
   dmUndoAfterMetadata,
   dmUndoPublicTransaction,
   dmUndoPublicHistory,
 } from './dm-combat-recovery.mjs'
-import {
-  applyCors,
-  applySecurityHeaders,
-  normalizedHttpOrigin,
-  productionSecurityEnabled,
-  validateProductionSecurityConfig,
-} from './application/server-security-config.mjs'
+import {applyCors,applySecurityHeaders,normalizedHttpOrigin,productionSecurityEnabled} from "./application/server-security-config.mjs"
 import { observeServerOperation } from './ports/server-telemetry.mjs'
 export {
   applyCors,
@@ -166,16 +221,7 @@ export {
   productionSecurityEnabled,
   validateProductionSecurityConfig,
 } from './application/server-security-config.mjs'
-import {
-  LockTimeoutError,
-  atomicRename,
-  atomicWriteImageLocked,
-  atomicWriteJsonStateFreshLocked,
-  atomicWriteLocked,
-  retryTransientWindowsRename,
-  safeName,
-  withWriteLock,
-} from './adapters/file-atomic-store.mjs'
+import {atomicRename,atomicWriteImageLocked,atomicWriteLocked,safeName,withWriteLock} from "./adapters/file-atomic-store.mjs"
 export {
   LockTimeoutError,
   atomicWriteImageLocked,
@@ -209,6 +255,14 @@ const EVENT_CHANNEL_POLICIES = Object.freeze({
   'player-action-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'player-action-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'dice-roll-request-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'bountiful-ready-mint-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-opportunity-settlement-host-raw-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-opportunity-settlement-source-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-opportunity-settlement-confirm-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-opportunity-source-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-original-mint-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-native-raw-source-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
+  'bountiful-original-token-command-dm-to-host': { publish: ['dm'], subscribe: ['dm'] },
   'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
   'activity-placement-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'activity-placement-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
@@ -269,45 +323,6 @@ export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS = 2 * 60 * 1000
 const PROCESS_STARTED_AT = Date.now()
 const lastAutoSnapshotAt = new Map()
 
-/**
- * Dedicated SRD 5.1 servers must not relay retired AP balances even when an
- * older client reconnects and writes a pre-migration snapshot. Keeping this at
- * the HTTP persistence boundary prevents stale tabs from reintroducing AP into
- * otherwise migrated DM/player sessions.
- */
-export function migrateLegacyApCombatLogText(text) {
-  return String(text ?? '')
-    .replace(/(?:花费|消耗)\s*\d+\s*(?:点\s*)?AP\s*(?:[：:]\s*)?/giu, '')
-    .replace(/(?:未|不|无需)消耗\s*AP\s*(?:[：:]\s*)?/giu, '')
-    .replace(/\s*[；;,，]?\s*(?:本回合)?剩余\s*AP\s*\d+\s*\/\s*\d+/giu, '')
-    .replace(/\s*[；;,，]?\s*AP\s*\d+\s*\/\s*\d+/giu, '')
-    .replace(/AP\s*回满为\s*\d+\s*\/\s*\d+/giu, '')
-    .replace(/保留\s*AP\s*(?:[：:]\s*)?/giu, '')
-    .replace(/AP\s*不足/giu, '行动资源不足')
-    .replace(/\bAP\b/giu, '')
-    .replace(/\s+([，。；：,.;:])/gu, '$1')
-    .replace(/([，,]){2,}/gu, '$1')
-    .replace(/\s{2,}/gu, ' ')
-    .trim()
-}
-
-export function normalizeDedicatedDnd5eSharedState(name, value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  if (name === 'combat') {
-    if (!Object.prototype.hasOwnProperty.call(value, 'enemyApByToken')) return value
-    const normalized = { ...value }
-    delete normalized.enemyApByToken
-    return normalized
-  }
-  if (name !== 'combat-log' || !Array.isArray(value.entries)) return value
-  return {
-    ...value,
-    entries: value.entries.map((entry) => entry && typeof entry === 'object'
-      ? { ...entry, text: migrateLegacyApCombatLogText(entry.text) }
-      : entry),
-  }
-}
-
 // ── AC4：图片配额 ───────────────────────────────────────────────────────────
 // 最多保留多少张共享图片（含 meta，不计 .json）。超过时按 mtime 最旧优先 GC。
 export const IMAGE_COUNT_LIMIT = 128
@@ -353,6 +368,69 @@ function sharedStateRevision(value) {
  * revision. The generic metadata lives under _sync so domain resources such as
  * combat-interrupts can keep their own top-level revision semantics.
  */
+// Presentation snapshots do not carry Host-private attack receipts. Keep
+// those facts under the same authoritative lock without restoring any old
+// public turn, economy or map fields. A new combat/map is a new namespace.
+// Private authentication evidence is issued only by the real append endpoint.
+// It is outside the shared-state resource namespace and survives Host/server reload.
+const secondChanceRawEvidenceFile=(stateRoot,id)=>path.join(stateRoot,'.authority','second-chance-raw',createHash('sha256').update(id).digest('hex')+'.json')
+async function secondChanceFirstRawAuthorized(current,incoming,stateRoot){
+  const added=[]
+  for(const[id,next]of Object.entries(incoming?.secondChanceAttacks??{})){
+    const old=current?.mapId===incoming.mapId&&(current?.combatId??'')===(incoming.combatId??'')?current?.secondChanceAttacks?.[id]:undefined
+    if(next?.rollerD20&&!old?.rollerD20)added.push({next,phase:'roll-result',request:next.rollRequestId,values:[next.rollerD20.value]})
+    for(const[request,values]of Object.entries(next?.criticalDice??{}))if(!old?.criticalDice?.[request])added.push({next,phase:'critical-roll-result',request,values})
+  }
+  if(!added.length)return true
+  if(!stateRoot)return false
+  let queue;try{queue=JSON.parse(await readFile(path.join(stateRoot,'player-action-requests.json'),'utf8'))}catch{return false}
+  for(const item of added){
+    const attack=item.next.attack,rows=queue?.requests?.filter(action=>action?.type==='dnd5e-second-chance'&&action.mapId===attack.mapId&&action.combatId===attack.combatId&&action.actorTokenId===attack.rollerTokenId&&action.characterId===(attack.rollerCharacterId??attack.rollerTokenId)&&action.roomMemberId===attack.rollerControllerMemberId&&action.secondChance?.attackReceiptId===attack.id&&action.secondChance.phase===item.phase&&(item.phase==='roll-result'?action.secondChance.rollRequestId===item.request&&action.secondChance.value===item.values[0]:action.secondChance.supplementRequestId===item.request&&JSON.stringify(action.secondChance.values)===JSON.stringify(item.values)))??[]
+    if(rows.length!==1)return false
+    let evidence;try{evidence=JSON.parse(await readFile(secondChanceRawEvidenceFile(stateRoot,rows[0].id),'utf8'))}catch{return false}
+    if(evidence.identity!==secondChanceDmAppendIdentity(rows[0])||evidence.memberId!==attack.rollerControllerMemberId)return false
+    if(item.phase==='roll-result'&&(item.next.rollerD20.authenticatedMemberId!==attack.rollerControllerMemberId||item.next.rollerD20.dieIndex!==item.next.rollerSelection?.dieIndex))return false
+  }
+  return true
+}
+async function retainSecondChancePublication(current, incoming, stateRoot, publication) {
+  let armorJournal;try{armorJournal=JSON.parse(await readFile(path.join(stateRoot,'armor-native-parents.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,reason:'armor-native-sc-journal-unavailable'}}
+  const armorWorld={};if(armorJournal)for(const name of ['map-geometry','campaign-time']){let value;try{value=JSON.parse(await readFile(path.join(stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,reason:'armor-native-sc-original-world-unavailable'}}armorWorld[name]=sharedStateRevision(value)}
+  if(armorJournal){try{armorWorld.activityDeathParents=JSON.parse(await readFile(path.join(stateRoot,'activity-death-parents.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,reason:'armor-native-sc-death-journal-unavailable'}}}
+  if(!armorNativeScReverseConsumptionAllowed(armorJournal,current,incoming,publication?.writes,publication?.transactionId,armorWorld))return{ok:false,reason:'armor-native-sc-consumption-required'}
+  if(!await secondChanceFirstRawAuthorized(current,incoming,stateRoot))return{ok:false,reason:'second-chance-authenticated-original-raw-required'}
+  let prefixJournal;if(stateRoot){try{prefixJournal=JSON.parse(await readFile(path.join(stateRoot,'sc-base-prefix-rolls.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,reason:'sc-base-prefix-original-journal-required'}}}
+  if(!scBasePrefixReverseConsumptionAllowed(prefixJournal,current,incoming,publication?.writes,publication?.transactionId,value=>createHash('sha256').update(value).digest('hex')))return{ok:false,reason:'sc-base-prefix-consumption-required'}
+
+  if (!plainObject(current) || !plainObject(incoming) || current.mapId !== incoming.mapId ||
+    (current.combatId ?? '') !== (incoming.combatId ?? '') || !plainObject(current.secondChanceAttacks)) return {ok:true,next:incoming}
+  if (!Object.prototype.hasOwnProperty.call(incoming, 'secondChanceAttacks')) {
+    return {ok:true,next:{...incoming,secondChanceAttacks:current.secondChanceAttacks}}
+  }
+  // Null and malformed values remain subject to the existing shape validator.
+  if (!plainObject(incoming.secondChanceAttacks)) return {ok:true,next:incoming}
+  if (Object.keys(current.secondChanceAttacks).some(id => !Object.prototype.hasOwnProperty.call(incoming.secondChanceAttacks,id))) {
+    return {ok:false,reason:'second-chance-receipt-removal-forbidden'}
+  }
+  for (const [id, prior] of Object.entries(current.secondChanceAttacks)) {
+    const next = incoming.secondChanceAttacks[id]
+    if (!plainObject(prior) || !plainObject(next)) continue // existing validator rejects malformed records
+    if(!prior.postNativeClockAuthority&&next.postNativeClockAuthority)return{ok:false,reason:'second-chance-original-clock-late-bind'}
+    if(prior.postNativeClockAuthority&&(!next.postNativeClockAuthority||['schemaVersion','roomId','hostMemberId','revision','signature'].some(key=>prior.postNativeClockAuthority[key]!==next.postNativeClockAuthority[key])))return{ok:false,reason:'second-chance-original-clock-immutable'}
+    if (prior.rollerD20 && (!next.rollerD20 ||
+      ['authenticatedMemberId','dieIndex','value'].some(key => next.rollerD20[key] !== prior.rollerD20[key]))) {
+      return {ok:false,reason:'second-chance-original-raw-immutable'}
+    }
+    for (const [requestId, values] of Object.entries(prior.criticalDice ?? {})) {
+      const after = next.criticalDice?.[requestId]
+      if (!Array.isArray(after) || !Array.isArray(values) || after.length !== values.length || after.some((value,index) => value !== values[index])) {
+        return {ok:false,reason:'second-chance-original-raw-immutable'}
+      }
+    }
+  }
+  return {ok:true,next:incoming}
+}
+
 export async function atomicWriteJsonStateCasLocked(filePath, incoming, options = {}) {
   return withWriteLock(filePath, async () => {
     let current = null
@@ -376,7 +454,14 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
     const mergedIncoming = typeof options.mergeIncoming === 'function'
       ? options.mergeIncoming(current, incoming)
       : incoming
-    const candidate = path.basename(filePath) === 'maps.json' ? mergeMapsDeletionHistory(current, mergedIncoming) : mergedIncoming
+    let candidate = path.basename(filePath) === 'maps.json' ? mergeMapsDeletionHistory(current, mergedIncoming) : mergedIncoming
+    if(path.basename(filePath)==='combat.json'){const retained=await retainSecondChancePublication(current,candidate,options.secondChanceStateRoot??path.dirname(filePath));if(!retained.ok)return{ok:false,conflict:true,currentRevision,current,reason:retained.reason};candidate=retained.next}
+    if(path.basename(filePath)==='arcane-movement-parents.json'&&!arcaneMovementOriginalTransitionAllowed(current,candidate))return{ok:false,conflict:true,currentRevision,current,reason:'arcane-movement-host-issued-original-required'}
+    if(path.basename(filePath)==='arcane-native-parents.json'&&!arcaneNativeTransitionAllowed(current,candidate))return{ok:false,conflict:true,currentRevision,current,reason:'arcane-native-owner-choice-immutable'}
+    if(path.basename(filePath)==='combat.json'){const retained=await retainBountifulReadyPublication({stateRoot:path.dirname(filePath)},current,candidate);if(!retained.ok)return{ok:false,conflict:true,currentRevision,current,reason:retained.reason};candidate=retained.next}
+    if(path.basename(filePath)==='combat.json'){const retained=await retainBountifulOriginalPublication({stateRoot:path.dirname(filePath)},current,candidate);if(!retained.ok)return{ok:false,conflict:true,currentRevision,current,reason:retained.reason};candidate=retained.next}
+    if(path.basename(filePath)==='characters.json')candidate=observePactWeaponRituals(current,candidate,currentRevision+1)
+    if(path.basename(filePath)==='maps.json')candidate=observePactGroundEffects(current,candidate)
     const candidateValidation = typeof options.validateIncoming === 'function'
       ? options.validateIncoming(candidate)
       : { ok: true }
@@ -406,6 +491,22 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
 
 const SHARED_STATE_TRANSACTION_MAX_WRITES = 8
 const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
+  'mastermind-ward-saving-choices',
+  'bountiful-initiative-originals',
+  'mastermind-native-ward-bountifuls',
+  'mastermind-native-ward-outcomes',
+  'mastermind-native-ward-originals',
+  'mastermind-ward-originals',
+  'mastermind-ward-attacks',
+  'mastermind-misdirections',
+  'mastermind-magic-truth',
+  'mastermind-thought-readings',
+  'activity-death-parents',
+  'armor-native-parents',
+  'sc-base-prefix-rolls',
+  'arcane-movement-parents',
+  'arcane-base-prefix-rolls',
+  'arcane-native-parents',
   'characters',
   'maps',
   'combat',
@@ -416,6 +517,7 @@ const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
   'player-action',
   'player-action-requests',
   'player-action-ack',
+  'host-native-weapon-result',
   'player-action-processed',
   'combat-command-receipts',
   'map-geometry',
@@ -517,6 +619,58 @@ async function recoverSharedStateTransaction(ctx) {
  * failure restores every file already written before releasing the lock.
  */
 async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, transactionId, options = {}) {
+    let initiativePublication=false
+    if(writes.some(write=>write.name==='bountiful-initiative-originals')||typeof transactionId==='string'&&transactionId.startsWith('combat-start:')){
+      const names=['maps','characters','combat','map-geometry','campaign-time','bountiful-initiative-originals'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+      initiativePublication=bountifulInitiativeConsumptionAllowed(snapshot['bountiful-initiative-originals'],snapshot,ctx.magicTruthAuthority??{},writes,transactionId)
+      if(!initiativePublication)return{ok:false,conflict:true,conflicts:[{name:'bountiful-initiative-originals',reason:'initiative-original-consumption-required'}]}
+    }
+
+    // The command wrapper alone appends its authenticated command receipt.
+    const internalMoveReceipt=options.commandSettlement?writes.find(w=>w.name===COMBAT_COMMAND_RECEIPT_RESOURCE&&w.data?.schemaVersion===COMBAT_COMMAND_SCHEMA_VERSION&&Array.isArray(w.data?.receipts)&&w.data.receipts.some(r=>r.commandId===options.commandSettlement.commandId&&r.status===(options.commandSettlement.status==='committed'?'committed':'rejected'))):undefined
+    const arcaneMoveWrites=internalMoveReceipt?writes.filter(w=>w!==internalMoveReceipt):writes
+    let arcaneMovementPublication
+    if(writes.some(w=>w.name==='arcane-movement-parents'||w.name==='player-action-ack')){
+      const names=['maps','characters','combat','map-geometry','campaign-time','arcane-movement-parents','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),world=Object.fromEntries(names.map((name,index)=>[name,values[index]])),before=world['arcane-movement-parents'],after=writes.find(w=>w.name==='arcane-movement-parents')?.data
+      if(!arcaneMovementReversePublicationAllowed(before,after,arcaneMoveWrites,transactionId,world))return{ok:false,conflict:true,conflicts:[{name:'arcane-movement-parents',reason:'arcane-movement-consumption-required'}]}
+      if(before&&after&&!arcaneMovementOriginalTransitionAllowed(before,after)){
+        if(!arcaneMovementPublicationAllowed(before,after,arcaneMoveWrites,transactionId,world))return{ok:false,conflict:true,conflicts:[{name:'arcane-movement-parents',reason:'arcane-movement-original-publication-required'}]}
+        arcaneMovementPublication=world
+      }
+    }
+    let arcanePublication
+    if(typeof transactionId==='string'&&transactionId.startsWith('arcane-native-publish:')){
+      const names=['maps','characters','combat','map-geometry','campaign-time','arcane-native-parents','arcane-base-prefix-rolls','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),world=Object.fromEntries(names.map((name,index)=>[name,values[index]])),after=writes.find(w=>w.name==='arcane-native-parents')?.data
+      if(!arcaneBasePrefixReverseConsumptionAllowed(world['arcane-base-prefix-rolls'],world['arcane-native-parents'],after,writes,transactionId,value=>createHash('sha256').update(value).digest('hex')))return{ok:false,conflict:true,conflicts:[{name:'arcane-base-prefix-rolls',reason:'arcane-base-prefix-consumption-required'}]}
+      if(!arcaneNativeConsumptionPaired(world['arcane-native-parents'],after,writes,transactionId,world))return{ok:false,conflict:true,conflicts:[{name:'arcane-native-parents',reason:'arcane-native-paired-publication-required'}]}
+      arcanePublication=world
+    }
+    if(writes.some(w=>w.name==='combat')||typeof transactionId==='string'&&transactionId.startsWith('second-chance-parent:')){
+      const names=['maps','characters','combat','map-geometry','campaign-time','arcane-native-parents','sc-base-prefix-rolls','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),world=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+      const paired=arcaneNativeScPublicationAllowed(world,writes,transactionId,value=>createHash('sha256').update(value).digest('hex'))
+      if(!paired.ok)return{ok:false,conflict:true,conflicts:[{name:'arcane-native-parents',reason:'arcane-native-sc-paired-publication-required'}]}
+      if(paired.consumed)arcanePublication=world
+    }
+    let wardBountifulPublication=false;let misdirectionJournal=null;try{misdirectionJournal=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-misdirections.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,conflict:true,conflicts:[{name:'mastermind-misdirections',reason:'invalid-misdirection-journal'}]}}
+    const misdirectionWrite=writes.find(w=>w.name==='mastermind-misdirections')
+    if(misdirectionWrite||misdirectionJournal&&Object.values(misdirectionJournal.parents??{}).some(row=>row.nativeOriginal&&row.phase!=='consumed'&&transactionId===mastermindNativeMisdirectionTransactionId(row))){
+      const names=['characters','maps','combat','map-geometry','campaign-time','player-action-requests','player-action-processed','player-action-ack','mastermind-native-ward-bountifuls','mastermind-native-ward-originals','mastermind-native-ward-outcomes'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]]))
+      const windowRow=Object.values(misdirectionJournal?.parents??{}).find(row=>row.spellWindowOriginal&&transactionId===mastermindNativeMisdirectionTransactionId(row));if(windowRow){let book=null;try{book=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-spell-windows.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,conflict:true,conflicts:[{name:'mastermind-misdirections',reason:'invalid-spell-window-original'}]}}snapshot.mastermindSpellSource=readMastermindSpellWindowSource(book,snapshot,ctx.magicTruthAuthority??{},windowRow.spellWindowOriginal.sourceParentId,value=>createHash('sha256').update(value).digest('hex'))}
+      snapshot['mastermind-misdirections']=misdirectionJournal;wardBountifulPublication=mastermindNativeWardBountifulConsumptionAllowed(snapshot['mastermind-native-ward-bountifuls'],snapshot,ctx.magicTruthAuthority??{},writes,transactionId);
+      if(!wardBountifulPublication||!misdirectionWrite||!mastermindNativeMisdirectionPublicationAllowed(misdirectionJournal,misdirectionWrite.data,snapshot,writes.filter(write=>write.name!=='mastermind-native-ward-bountifuls'),transactionId,ctx.magicTruthAuthority??{}))return{ok:false,conflict:true,conflicts:[{name:'mastermind-misdirections',reason:'native-misdirection-original-publication-required'}]}
+    }
+    let magicTruthJournal=null;try{magicTruthJournal=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-magic-truth.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,conflict:true,conflicts:[{name:'mastermind-magic-truth',reason:'magic-truth-invalid-journal'}]}}
+    const magicTruthWrite=writes.find(w=>w.name==='mastermind-magic-truth'),magicTruthAck=writes.find(w=>w.name==='player-action-ack')?.data;
+    if(magicTruthWrite||(magicTruthJournal&&Object.values(magicTruthJournal.parents??{}).some(row=>row.phase!=='consumed'&&((magicTruthAck?.status==='accepted'&&magicTruthAck.actionId===row.parentTransactionId)||(row.origin==='native'&&transactionId===mastermindNativeMagicTruthTransactionId(row)))))){
+      const names=['characters','maps','combat','map-geometry','campaign-time','player-action-requests','player-action-processed','combat-interrupts'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]]));
+      if(!magicTruthWrite||!mastermindMagicTruthPublicationAllowed(magicTruthJournal,magicTruthWrite.data,snapshot,writes,transactionId,ctx.magicTruthAuthority??{}))return{ok:false,conflict:true,conflicts:[{name:'mastermind-magic-truth',reason:'magic-truth-original-publication-required'}]};
+    }
+    let thoughtJournal=null;try{thoughtJournal=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-thought-readings.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,conflict:true,conflicts:[{name:'mastermind-thought-readings',reason:'invalid-thought-reading-journal'}]}}
+    const thoughtWrite=writes.find(w=>w.name==='mastermind-thought-readings'),thoughtAck=writes.find(w=>w.name==='player-action-ack')?.data;
+    if(thoughtWrite||(thoughtJournal&&Object.values(thoughtJournal.parents??{}).some(row=>row.phase==='answered'&&thoughtAck?.status==='accepted'&&thoughtAck.actionId===row.parentTransactionId))){
+      const names=['characters','maps','combat','map-geometry','campaign-time','player-action-requests','combat-interrupts'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]]));
+      if(!thoughtWrite||!mastermindThoughtPublicationAllowed(thoughtJournal,thoughtWrite.data,snapshot,writes,transactionId,ctx.mastermindThoughtAuthority??{}))return{ok:false,conflict:true,conflicts:[{name:'mastermind-thought-readings',reason:'thought-reading-original-publication-required'}]};
+    }
     const prepared = []
     for (const write of writes) {
       const filePath = path.join(ctx.stateRoot, `${write.name}.json`)
@@ -537,9 +691,51 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
           conflicts: [{ name: write.name, expectedRevision: write.expectedRevision, currentRevision }],
         }
       }
+      if(write.name==='mastermind-ward-saving-choices')return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'ward-saving-protocol-required'}]}
+      if(write.name==='bountiful-initiative-originals'&&!initiativePublication)return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'initiative-original-protocol-required'}]}
+      if(write.name==='mastermind-native-ward-bountifuls'&&!wardBountifulPublication)return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'native-ward-bountiful-protocol-required'}]}
+      if(write.name==='mastermind-native-ward-outcomes')return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'native-ward-outcome-protocol-required'}]}
+      if(write.name==='mastermind-native-ward-originals')return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'native-ward-original-protocol-required'}]}
+      if(write.name==='mastermind-ward-originals')return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'ward-original-protocol-required'}]}
+      if(write.name==='mastermind-ward-attacks')return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'ward-attack-protocol-required'}]}
+      if(write.name==='combat-interrupts'&&!armorNativeChoicesUnchanged(current,write.data))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'armor-native-owner-choice-immutable'}]}
+      if(write.name==='armor-native-parents'){
+        const combatState=await readSharedStateFile(ctx,'combat'),armorWorld={}
+        for(const name of ['map-geometry','campaign-time']){const value=await readSharedStateFile(ctx,name);armorWorld[name]=sharedStateRevision(value.value)}
+        const paired=armorNativeConsumptionPaired(current,write.data,combatState.value,writes,transactionId,armorWorld)
+        if(!armorNativeRawTransitionAllowed(current,write.data,paired))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'armor-native-original-publication-required'}]}
+      }
+      if(write.name==='combat-interrupts'){
+        let parents;try{parents=JSON.parse(await readFile(path.join(ctx.stateRoot,'activity-death-parents.json'),'utf8'))}catch{}
+        if(!activityDeathChoicesUnchanged(current,write.data,activityDeathRetiredChoiceIds(parents)))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'death-choice-authenticated-owner-required'}]}
+      }
+      if(write.name==='arcane-movement-parents'&&!arcaneMovementOriginalTransitionAllowed(current,write.data,!!arcaneMovementPublication))return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'arcane-movement-host-issued-original-required'}]}
+      if(write.name==='arcane-base-prefix-rolls'){
+        const original=await readSharedStateFile(ctx,'arcane-native-parents'),after=writes.find(w=>w.name==='arcane-native-parents')?.data
+        const paired=arcaneBasePrefixConsumptionPaired(current,write.data,original.value,after,transactionId,value=>createHash('sha256').update(value).digest('hex'))
+        if(!arcaneBasePrefixGenericTransitionAllowed(current,write.data,paired))return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'arcane-base-prefix-authenticated-facts-required'}]}
+      }
+      if(write.name==='sc-base-prefix-rolls'){
+        let combat;try{combat=JSON.parse(await readFile(path.join(ctx.stateRoot,'combat.json'),'utf8'))}catch{}
+        const changed=Object.values(current?.parents??{}).filter(parent=>JSON.stringify(parent)!==JSON.stringify(write.data?.parents?.[parent.id]))
+        const prefix=changed.length===1?changed[0]:undefined
+        const worldNames=['maps','characters','combat','map-geometry','campaign-time']
+        const originalWorld=prefix&&await Promise.all(worldNames.map(async name=>{let value;try{value=JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{}return sharedStateRevision(value)===prefix.dependencies[name]}))
+        const originalWrites=prefix&&['maps','characters'].every(name=>writes.some(row=>row.name===name&&row.expectedRevision===prefix.dependencies[name]))
+        const paired=!!originalWrites&&originalWorld.every(Boolean)&&scBasePrefixConsumptionPaired(current,write.data,combat,writes.find(row=>row.name==='combat'),transactionId,value=>createHash('sha256').update(value).digest('hex'))
+        if(!scBasePrefixGenericTransitionAllowed(current,write.data,paired))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'sc-base-prefix-authenticated-facts-required'}]}
+      }
+      if(write.name==='activity-death-parents'&&!activityDeathRawTransitionAllowed(current,write.data))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'death-initiative-raw-immutable'}]}
+      let combatPublication=write.name==='combat'?await retainSecondChancePublication(current,write.data,ctx.stateRoot,{writes,transactionId}):{ok:true,next:write.data}
+      if(write.name==='arcane-native-parents'){const prefix=await readSharedStateFile(ctx,'arcane-base-prefix-rolls');if(!arcaneBasePrefixReverseConsumptionAllowed(prefix.value,current,write.data,writes,transactionId,value=>createHash('sha256').update(value).digest('hex')))return{ok:false,conflict:true,conflicts:[{name:write.name,reason:'arcane-base-prefix-consumption-required'}]}}
+      if(write.name==='arcane-native-parents'&&!arcaneNativeTransitionAllowed(current,write.data,!!arcanePublication))return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:'arcane-native-owner-choice-immutable'}]}
+      if(combatPublication.ok&&write.name==='combat')await prepareBountifulParentCompletion(ctx,current,combatPublication.next,{writes,transactionId})
+      if(combatPublication.ok&&write.name==='combat')combatPublication=await retainBountifulReadyPublication({...ctx,bountifulCompletionTransaction:{writes,transactionId}},current,combatPublication.next)
+      if(combatPublication.ok&&write.name==='combat')combatPublication=await retainBountifulOriginalPublication({...ctx,bountifulCompletionTransaction:{writes,transactionId}},current,combatPublication.next)
+      if(!combatPublication.ok)return{ok:false,conflict:true,conflicts:[{name:write.name,expectedRevision:write.expectedRevision,currentRevision,reason:combatPublication.reason}]}
       const writtenAt = Date.now()
       const next = {
-        ...(write.name === 'maps' ? mergeMapsDeletionHistory(current, write.data) : write.data),
+        ...(write.name === 'maps' ? mergeMapsDeletionHistory(current, write.data) : combatPublication.next),
         _sync: {
           schemaVersion: SHARED_STATE_SCHEMA_VERSION,
           revision: currentRevision + 1,
@@ -695,6 +891,23 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
         }
       }
     }
+    // Pact positions are observations of committed room state, never client attestations.
+    if(prepared.some(entry=>['maps','characters','map-geometry','campaign-time'].includes(entry.name))){
+      const resources={};for(const name of ['maps','characters','map-geometry','campaign-time']){
+        const entry=prepared.find(row=>row.name===name),stored=entry?{value:entry.current,body:entry.currentBody}:await readSharedStateFile(ctx,name);
+        resources[name]={entry,stored,next:entry?.next??stored.value};
+      }
+      const characters=resources.characters;
+      const next=observePactLifecycleTrace({before:characters.stored.value,after:characters.next,
+        beforeMaps:resources.maps.stored.value,afterMaps:resources.maps.next,
+        beforeGeometry:resources['map-geometry'].stored.value,afterGeometry:resources['map-geometry'].next,
+        beforeClock:resources['campaign-time'].stored.value,afterClock:resources['campaign-time'].next,
+        elevation:tokenElevationFeet});
+      if(next!==characters.next){let entry=characters.entry;if(!entry){const current=characters.stored.value,currentRevision=sharedStateRevision(current),writtenAt=Date.now();
+        entry={name:'characters',filePath:path.join(ctx.stateRoot,'characters.json'),current,currentBody:characters.stored.body,currentRevision,revision:currentRevision+1,writtenAt};prepared.push(entry);
+        entry.next={...current,_sync:{schemaVersion:SHARED_STATE_SCHEMA_VERSION,revision:entry.revision,writerId:normalizedLabel(writerId,120)||'state-transaction',writtenAt}};
+      }entry.next={...next,_sync:entry.next._sync};entry.nextBody=JSON.stringify(entry.next);}
+    }
     const revisions = Object.fromEntries(prepared.map((entry) => [entry.name, entry.revision]))
     const authorityRevisions = Object.fromEntries(
       Object.entries(revisions).filter(([name]) => name !== COMBAT_COMMAND_RECEIPT_RESOURCE),
@@ -721,6 +934,17 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
       }
       commandReceiptEntry.nextBody = JSON.stringify(commandReceiptEntry.next)
     }
+    const pactMaps=prepared.find(entry=>entry.name==='maps')
+    if(pactMaps){
+      const storedClock=await readSharedStateFile(ctx,'campaign-time'),storedCharacters=await readSharedStateFile(ctx,'characters')
+      const clockEntry=prepared.find(entry=>entry.name==='campaign-time'),characterEntry=prepared.find(entry=>entry.name==='characters')
+      const clockValue=clockEntry?.next??storedClock.value
+      if(clockValue){pactMaps.next=observePactGroundEffects(pactMaps.current,pactMaps.next,{clock:clockValue,clockRevision:clockEntry?.revision??sharedStateRevision(storedClock.value),charactersBefore:characterEntry?.current?.characters??storedCharacters.value?.characters??[],charactersAfter:characterEntry?.next?.characters??storedCharacters.value?.characters??[],allowIssue:true});pactMaps.nextBody=JSON.stringify(pactMaps.next)}
+    }
+    const ritualCharacters=prepared.find(entry=>entry.name==='characters')
+    if(ritualCharacters){ritualCharacters.next=observePactWeaponRituals(ritualCharacters.current,ritualCharacters.next,ritualCharacters.revision);ritualCharacters.nextBody=JSON.stringify(ritualCharacters.next)}
+    if(arcaneMovementPublication){const materialized=prepared.filter(entry=>!internalMoveReceipt||entry.name!==internalMoveReceipt.name).map(entry=>({...entry,expectedRevision:entry.currentRevision,data:entry.next})),after=materialized.find(w=>w.name==='arcane-movement-parents')?.data;if(!arcaneMovementPublicationAllowed(arcaneMovementPublication['arcane-movement-parents'],after,materialized,transactionId,arcaneMovementPublication))return{ok:false,conflict:true,conflicts:[{name:'arcane-movement-parents',reason:'arcane-movement-materialized-publication-required'}]}}
+    if(arcanePublication){const materialized=prepared.map(entry=>({...entry,data:entry.next})),after=materialized.find(w=>w.name==='arcane-native-parents')?.data;if(!(transactionId.startsWith('second-chance-parent:')?arcaneNativeScPublicationAllowed(arcanePublication,materialized,transactionId,value=>createHash('sha256').update(value).digest('hex')).consumed:arcaneNativeConsumptionPaired(arcanePublication['arcane-native-parents'],after,materialized,transactionId,arcanePublication)))return{ok:false,conflict:true,conflicts:[{name:'arcane-native-parents',reason:'arcane-native-materialized-publication-required'}]}}
     const journalPath = sharedStateTransactionJournalPath(ctx)
     const journal = {
       schemaVersion: 1,
@@ -1462,6 +1686,9 @@ async function atomicAppendCombatCommand(ctx, normalized, member, role) {
 
 const PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
   'dnd5eOriginalAlignment',
+  'dnd5ePactWeaponAuthority',
+  'dnd5ePactWeaponRitualAuthority',
+  'dnd5ePactWeaponStatus',
   'conditions',
   'concentrating',
   'dnd5eCombatState',
@@ -1718,7 +1945,14 @@ export function mergePlayerCharactersStateForAuthority(
     if (!current) {
       if (incoming.roomMemberId !== memberId) continue
       const created = { ...incoming, roomMemberId: memberId }
+      // Imported player JSON is not a native spell-casting receipt. Existing
+      // canonical combat state remains preserved by the normal authority list.
+      if(plainObject(created.dnd5eCombatState)&&Array.isArray(created.dnd5eCombatState.activeEffects))created.dnd5eCombatState={...created.dnd5eCombatState,activeEffects:created.dnd5eCombatState.activeEffects.map(effect=>{if(!plainObject(effect)||!plainObject(effect.source))return effect;const source={...effect.source};delete source.castingClassId;const thoughtControls=source.kind==='spell'&&typeof source.rulesId==='string'&&source.rulesId.split(':').at(-1)==='detect-thoughts'&&Array.isArray(effect.grantedActivities)?effect.grantedActivities.filter(id=>!['spell:detect-thoughts:surface','spell:detect-thoughts:probe','spell:detect-thoughts:search'].includes(id)):undefined;return{...effect,source,...(thoughtControls?{grantedActivities:thoughtControls.length?thoughtControls:undefined}:{})}})}
       delete created.dnd5eOriginalAlignment
+      delete created.dnd5ePactWeaponAuthority
+      delete created.dnd5ePactWeaponRitualAuthority
+      delete created.dnd5ePactWeaponStatus
+      if(plainObject(created.dnd5eInventory)&&Array.isArray(created.dnd5eInventory.entries))created.dnd5eInventory={...created.dnd5eInventory,entries:created.dnd5eInventory.entries.map(entry=>{if(!plainObject(entry))return entry;const safe={...entry};delete safe.pactWeaponPhysicalIdentity;return safe})}
       delete created.dnd5eExposedSurfaces
       delete created.dnd5eExposedEnchantmentItems
       merged.push(created)
@@ -2948,6 +3182,13 @@ export function authorizeStateWrite(resourceName, providedSecret) {
 
 /** Scene declarations contain DM-only secrets and may never be replaced by a player or spectator client. */
 export function stateResourceWriteAllowedForRole(resourceName, role) {
+  if(resourceName==='mastermind-magic-truth')return role==='dm'
+  if(resourceName==='arcane-movement-parents')return role==='dm'
+  if(resourceName==='arcane-native-parents')return role==='dm'
+  if (resourceName === 'host-native-weapon-result' && role !== 'dm') return false
+  if(resourceName==='arcane-base-prefix-rolls')return role==='dm'
+  if(resourceName==='sc-base-prefix-rolls')return role==='dm'
+  if(resourceName==='activity-death-parents'||resourceName==='armor-native-parents')return role==='dm'
   if (resourceName === 'scene-orchestration' && (role === 'player' || role === 'spectator')) return false
   if (role === 'dm' && (resourceName === 'player-action' || resourceName === 'player-action-requests')) {
     return false
@@ -3066,6 +3307,8 @@ function stampClientEvent(channel, payload, member) {
 }
 
 function eventPayloadVisibleToViewer(channel, payload, viewer) {
+  if(channel===SHARED_STATE_CHANGED_CHANNEL&&payload?.name==='mastermind-magic-truth')return viewer?.role==='dm'
+  if (channel === SHARED_STATE_CHANGED_CHANNEL && payload?.name === 'host-native-weapon-result') return viewer?.role === 'dm'
   const role = normalizedEventRole(viewer?.role)
   if (!eventChannelOperationAllowed(channel, 'subscribe', role)) return false
   if (channel === 'player-action-dm-to-player' || channel === 'dnd5e-inventory-dm-to-player') {
@@ -3101,8 +3344,9 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
     }
     const result = await updater(current)
     if (!result?.changed) return result
+    const ritualObserved=path.basename(filePath)==='characters.json'?observePactWeaponRituals(current,result.next,sharedStateRevision(current)+1):path.basename(filePath)==='maps.json'?observePactGroundEffects(current,result.next):result.next
     const next = {
-      ...result.next,
+      ...ritualObserved,
       _sync: {
         schemaVersion: SHARED_STATE_SCHEMA_VERSION,
         revision: sharedStateRevision(current) + 1,
@@ -3139,8 +3383,9 @@ export async function atomicMutateCampaignTimeAndMaps(ctx, updater, writerId, op
       if(pending.length)return {ok:false,changed:false,status:409,error:'temple-expiry-settlement-required',
         pendingTempleExpiry:{mapId:map.id,tokenIds:pending,worldMinute:result.next.worldMinute}}
     }
+    const breathingSource = await options.readCampaignBreathingSource?.()
     const breathing = planCampaignSubmergedBreathing({ maps: currentMaps, characters: currentCharacters,
-      previousClock: normalizeCampaignTimeState(clockState.value), nextClock: result.next })
+      previousClock: normalizeCampaignTimeState(clockState.value), nextClock: result.next, explicitWaterBreathingPolicies: breathingSource?.policies ?? [], explicitSummonedMonsterConstitutions: breathingSource?.summonedMonsterConstitutions ?? [] })
     const applyBreathing = (entity, update, character) => {
       if (!update) return entity
       const originalState = entity.dnd5eCombatState ?? {}
@@ -3271,7 +3516,7 @@ export async function atomicMutateCampaignTimeAndMaps(ctx, updater, writerId, op
     })
     const geometryChanged = nextGeometry.some((scene,index) => scene !== geometryState.value.maps[index])
     const charactersChanged = nextCharacters.some((character,index) => character !== charactersState.value.characters[index])
-    const mapsChanged = nextMaps.some((map, index) => map !== currentMaps[index])
+    const mapsChanged = nextMaps.some((map, index) => map !== currentMaps[index]) || currentMaps.some(map=>map.dnd5ePactGroundEffectClocks?.length)
     const nextMapsState = mapsChanged ? { ...mapsState.value, maps: nextMaps } : mapsState.value
     const mapValidation = mapsChanged ? validateSharedStateShape('maps', nextMapsState) : { ok: true }
     if (!mapValidation.ok) {
@@ -3281,6 +3526,9 @@ export async function atomicMutateCampaignTimeAndMaps(ctx, updater, writerId, op
     if (mapsChanged) writes.push({ name: 'maps', expectedRevision: sharedStateRevision(mapsState.value), data: nextMapsState })
     if (geometryChanged) writes.push({name:'map-geometry',expectedRevision:sharedStateRevision(geometryState.value),data:{...geometryState.value,maps:nextGeometry}})
     if (charactersChanged) writes.push({name:'characters',expectedRevision:sharedStateRevision(charactersState.value),data:{...charactersState.value,characters:nextCharacters}})
+    if (breathingSource && (await options.readCampaignBreathingSource()).stamp !== breathingSource.stamp) {
+      return {ok:false,changed:false,status:409,error:'campaign-breathing-source-changed'}
+    }
     if(options.prepareOnly){
       // Include stable snapshots even when unchanged: the Host may add fall damage.
       for(const [name,stored,data]of [['maps',mapsState.value,nextMapsState],['map-geometry',geometryState.value,{...geometryState.value,maps:nextGeometry}],
@@ -3442,12 +3690,23 @@ function mutateDiceEventsState(current, mutation, now, member, accessRole) {
   }
 }
 
+export function mergeBountifulD20PlayerInterruptQueue(current,incoming){
+  if(!bountifulD20ProtectedQueueUnchanged(current,incoming))throw new RoomProtocolError(403,'bountiful-followup-host-required')
+  return incoming
+}
+
+export function mergeDmOnlyChoicePlayerInterruptQueue(current,incoming){
+  if(!dmOnlyChoiceProtectedQueueUnchanged(current,incoming))throw new RoomProtocolError(403,'dm-choice-host-required')
+  return incoming
+}
+
 export function mutateCombatInterruptQueue(
   queue,
   mutation,
   now = Date.now(),
   authorityRole = 'open',
   authorityCharacterIds,
+  activityDeathAuthority,
 ) {
   const operation = mutation?.operation
   const mapId = String(mutation?.mapId ?? '')
@@ -3460,6 +3719,18 @@ export function mutateCombatInterruptQueue(
     const interrupt = mutation?.interrupt
     if (!interrupt || interrupt.mapId !== mapId || !interrupt.id) {
       return { ok: false, status: 400, error: 'invalid-interrupt' }
+    }
+    if(isArmorNativeChoice(interrupt)||base.interrupts.some(row=>row.id===interrupt.id&&isArmorNativeChoice(row))){
+      if(authorityRole!=='dm')return{ok:false,status:403,error:'dm-authority-required'}
+      if(!validArmorNativeChoice(interrupt)||interrupt.status!=='pending'||interrupt.response!=null||activityDeathAuthority?.controllers?.[interrupt.actorCharId]!==interrupt.payload.armorNativeBinding.controllerMemberId)return{ok:false,status:400,error:'invalid-armor-native-choice'}
+    }
+    if(isBountifulD20FollowupInterrupt(interrupt)){
+      if(authorityRole!=='dm'&&authorityRole!=='open')return {ok:false,status:403,error:'bountiful-followup-host-required'}
+      if(interrupt.kind!=='roll-confirmation'||(!validateBountifulD20ParentFollowup(interrupt.payload?.bountifulParent,interrupt.payload?.rollId)&&!validateBountifulReadyD20Followup(interrupt.payload?.bountifulReadyParent,interrupt.payload?.rollId)))return {ok:false,status:400,error:'invalid-bountiful-followup-identity'}
+    }
+    if(isActivityDeathChoice(interrupt)||base.interrupts.some(row=>row.id===interrupt.id&&isActivityDeathChoice(row))){
+      if(authorityRole!=='dm')return{ok:false,status:403,error:'dm-authority-required'}
+      if(!validActivityDeathChoice(interrupt)||interrupt.status!=='pending'||interrupt.response!=null||activityDeathAuthority?.controllers?.[interrupt.actorCharId]!==interrupt.payload.activityDeathBinding.controllerMemberId)return{ok:false,status:400,error:'invalid-activity-death-choice'}
     }
     if (
       interrupt.kind === 'roll-confirmation' && (
@@ -3478,6 +3749,8 @@ export function mutateCombatInterruptQueue(
       )
     ) return { ok: false, status: 400, error: 'invalid-roll-confirmation' }
     const existing = base.interrupts.find((item) => item.id === interrupt.id)
+    if(authorityRole!=='dm'&&authorityRole!=='open'&&(isDmOnlyChoiceInterrupt(interrupt)||isDmOnlyChoiceInterrupt(existing)))return {ok:false,status:403,error:'dm-choice-host-required'}
+    if(!validateHostWorldFactChoice(interrupt))return {ok:false,status:400,error:'invalid-host-world-fact'}
     if (existing && existing.status !== 'pending') {
       return { ok: true, changed: false, next: base }
     }
@@ -3525,6 +3798,27 @@ export function mutateCombatInterruptQueue(
   const index = base.interrupts.findIndex((item) => item.id === id)
   if (index < 0) return { ok: false, status: 404, error: 'interrupt-not-found' }
   const current = base.interrupts[index]
+  if(current.kind==='dm-adjudication'&&authorityRole!=='dm'&&authorityRole!=='open')return {ok:false,status:403,error:'dm-choice-host-required'}
+  if(isArmorNativeChoice(current)){
+    if(!validArmorNativeChoice(current))return{ok:false,status:400,error:'invalid-armor-native-choice'}
+    const owner=current.payload.armorNativeBinding.controllerMemberId
+    if(operation==='answer'){
+      if(!activityDeathAuthority?.memberId||activityDeathAuthority.memberId!==owner||activityDeathAuthority.controllers?.[current.actorCharId]!==owner||authorityRole!=='dm'&&authorityRole!=='player')return{ok:false,status:403,error:'character-ownership-required'}
+      if(!plainObject(mutation.response)||Object.keys(mutation.response).length!==1||!['use','decline','wait'].includes(mutation.response.optionId))return{ok:false,status:400,error:'invalid-armor-native-response'}
+      mutation={...mutation,response:{optionId:mutation.response.optionId,controllerMemberId:activityDeathAuthority.memberId}}
+    }else if(authorityRole!=='dm')return{ok:false,status:403,error:'dm-authority-required'}
+    if(operation==='finish'&&mutation.response!=null&&JSON.stringify(mutation.response)!==JSON.stringify(current.response))return{ok:false,status:409,error:'settlement-conflict'}
+  }
+  if(isActivityDeathChoice(current)){
+    if(!validActivityDeathChoice(current))return{ok:false,status:400,error:'invalid-activity-death-choice'}
+    const owner=current.payload.activityDeathBinding.controllerMemberId
+    if(operation==='answer'){
+      if(!activityDeathAuthority?.memberId||activityDeathAuthority.memberId!==owner||activityDeathAuthority.controllers?.[current.actorCharId]!==owner||authorityRole!=='dm'&&authorityRole!=='player')return{ok:false,status:403,error:'character-ownership-required'}
+      if(!plainObject(mutation.response)||Object.keys(mutation.response).length!==1||!['use','decline','wait'].includes(mutation.response.optionId))return{ok:false,status:400,error:'invalid-activity-death-response'}
+      mutation={...mutation,response:{optionId:mutation.response.optionId,controllerMemberId:activityDeathAuthority.memberId}}
+    }else if(authorityRole!=='dm')return{ok:false,status:403,error:'dm-authority-required'}
+    if(operation==='finish'&&mutation.response!=null&&JSON.stringify(mutation.response)!==JSON.stringify(current.response))return{ok:false,status:409,error:'settlement-conflict'}
+  }
   if (operation === 'roll-options') {
     if (authorityRole === 'player') return { ok: false, status: 403, error: 'dm-authority-required' }
     return applyRollOptionsMutation(base, index, mutation, now)
@@ -4703,6 +4997,10 @@ export function projectCharactersForRoomMember(value, member) {
       .filter((character) => characterOwnedByRoomMember(character, member) || character?.visibleToPlayers !== false)
       .map((character) => {
         const projected = { ...character }
+        delete projected.dnd5ePactWeaponAuthority
+        delete projected.dnd5ePactWeaponRitualAuthority
+        delete projected.dnd5ePactWeaponStatus
+        if(characterOwnedByRoomMember(character,member)){const status=projectPactWeaponOwnerStatus(character);if(status)projected.dnd5ePactWeaponStatus=status}
         projected.dnd5eExposedSurfaces = projectExposedInventorySurfaces(character.dnd5eInventory)
         projected.dnd5eExposedEnchantmentItems = (character.dnd5eInventory?.entries ?? []).flatMap(entry => {
           const profile = entry?.item?.equipment?.dnd5e
@@ -4722,6 +5020,7 @@ export function projectCharactersForRoomMember(value, member) {
             delete projected.dnd5eCombatState.knownCreatureLocations
             delete projected.dnd5eCombatState.damageTraitReports
             delete projected.dnd5eCombatState.planarPortalReports
+            delete projected.dnd5eCombatState.sensoryDeceptionReports
             delete projected.dnd5eCombatState.recentCreatureSightings
           }
           projected.dnd5eInventory = projectOtherPlayerIdentifyCandidates(projected.dnd5eInventory)
@@ -4770,6 +5069,33 @@ export function projectCombatInterruptsForRoomMember(value, member, characterSta
   return { ...value, interrupts: visible }
 }
 
+
+export function projectSecondChanceCombatForMember(value, member) {
+  if(!plainObject(value))return value
+  const {secondChanceAttacks:privateAttacks,bountifulOriginalParents:privateOriginalParents,bountifulReadyParents:privateReadyParents,...publicCombat}=value
+  void privateReadyParents
+  publicCombat.bountifulLuckPrompts=projectBountifulOriginalPrompts(privateOriginalParents??{},member?.memberId)
+  if(!plainObject(privateAttacks))return publicCombat
+  const prompts=Object.values(privateAttacks).flatMap(receipt=>{
+    const attack=receipt?.attack
+    if(!plainObject(attack)||attack.phase!=='hit-confirmation')return[]
+    const isDefender=attack.targetControllerMemberId===member?.memberId,isRoller=attack.rollerControllerMemberId===member?.memberId
+    if(!isDefender&&!isRoller)return[]
+    if(receipt.committed){
+      if(!isRoller||receipt.parentContinuation?.phase!=='ready')return[]
+      return Object.values(receipt.pendingCriticalDiceRequests??{}).filter(request=>!receipt.criticalDice?.[request.id]).map(request=>({attackReceiptId:attack.id,mapId:attack.mapId,combatId:attack.combatId,targetTokenId:attack.targetTokenId,targetCharacterId:attack.targetCharacterId,rollerTokenId:attack.rollerTokenId,rollerCharacterId:attack.rollerCharacterId,phase:'critical-roll',canRespondAsDefender:false,canRespondAsRoller:true,rollRequestId:request.id,count:request.count,sides:request.sides,supplementRequestId:request.id}))
+    }
+    return [{attackReceiptId:attack.id,mapId:attack.mapId,combatId:attack.combatId,
+      targetTokenId:attack.targetTokenId,targetCharacterId:attack.targetCharacterId,
+      rollerTokenId:attack.rollerTokenId,rollerCharacterId:attack.rollerCharacterId,
+      phase:!receipt.reactionDecision?'reaction':receipt.reactionDecision.decision==='decline'?'declined':!receipt.rollerSelection?'select-die':!receipt.rollerD20?'roll':'settle',
+      canRespondAsDefender:isDefender,canRespondAsRoller:isRoller,
+      ...(isRoller&&receipt.reactionDecision?.decision==='use'?{dice:[...(attack.dice??[])],mode:attack.mode,rollRequestId:receipt.rollRequestId,count:1,sides:20}:{}),
+    }]
+  })
+  return {...publicCombat,secondChancePrompts:prompts}
+}
+
 function projectPlayerActionResourceForRoomMember(name, value, member) {
   if (name === 'player-action' || name === 'player-action-processed') return null
   if (name === 'player-action-requests') return { ...value, requests: [] }
@@ -4779,7 +5105,7 @@ function projectPlayerActionResourceForRoomMember(name, value, member) {
   return value
 }
 
-function stampPlayerActionStateForRoomMember(name, value, member) {
+export function stampPlayerActionStateForRoomMember(name, value, member) {
   if (!member?.memberId || !plainObject(value)) return value
   const stamp = (action) => plainObject(action)
     ? { ...action, sourceMode: 'player', roomMemberId: member.memberId }
@@ -5518,9 +5844,10 @@ function validDnd5ePersistentAreaLighting(value) {
         value.suppressesMagicalDarknessThroughLevel >= 0 && value.suppressesMagicalDarknessThroughLevel <= 9
       ))
   }
-  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel', 'lightSuppressionScope'])
+  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel', 'lightSuppressionScope', 'sourceCanSeeThrough'])
   return Object.keys(value).every((key) => allowed.has(key)) &&
     (value.lightSuppressionScope == null || value.lightSuppressionScope === 'within-area') &&
+    (value.sourceCanSeeThrough == null || value.sourceCanSeeThrough === true) &&
     value.kind === 'magical-darkness' && Number.isInteger(value.radiusFeet) &&
     value.radiusFeet >= 1 && value.radiusFeet <= 1_000 &&
     (value.suppressesMagicalLightThroughLevel == null || (
@@ -5797,6 +6124,7 @@ function validateSceneOrchestrationState(value) {
       typeof scene.description !== 'string' || scene.description.length > 2_000 ||
       typeof scene.environmentLabel !== 'string' || scene.environmentLabel.length > 300 ||
       (scene.planarPortalSurvey != null && !validScenePortalSurvey(scene.planarPortalSurvey)) ||
+      (scene.sensoryDeceptionSurvey != null && !validSceneSensoryDeceptionSurvey(scene.sensoryDeceptionSurvey)) ||
       (scene.weather != null && !validSceneWeather(scene.weather)) ||
       !['none', 'discovery', 'danger', 'door', 'mystery', 'victory'].includes(scene.backgroundCue) ||
       (scene.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(scene.backgroundAudioMode)) ||
@@ -6040,6 +6368,12 @@ function validateDnd5eResourceStates(name, value) {
               !validTerrainClearingProgress(area.terrainClearingProgress, area.cells))) ||
             typeof area.label !== 'string' || !area.label || area.label.length > 120 ||
             !validDnd5ePersistentAreaLighting(area.lighting) ||
+            (area.lighting?.sourceCanSeeThrough != null && (
+              area.sourceKind !== 'core-spell' || area.coreSpellId !== 'darkness' ||
+              typeof area.sourceTokenId !== 'string' || !area.sourceTokenId ||
+              typeof area.sourceCharacterId !== 'string' || !area.sourceCharacterId ||
+              !map.tokens.some(token => token.id === area.sourceTokenId && token.characterId === area.sourceCharacterId)
+            )) ||
             [area.rectGeometry?.pitchDegrees, area.rectGeometry?.rollDegrees].some(angle =>
               angle != null && (typeof angle !== 'number' || !Number.isFinite(angle) || angle < -180 || angle > 180 ||
                 area.rectGeometry.gridAligned !== false || area.vertical?.mode !== 'volume' || area.vertical.shape === 'sphere')) ||
@@ -6195,6 +6529,7 @@ function validateMapGeometryState(value) {
       (map.vision.ambientLight != null && !['bright', 'dim', 'darkness'].includes(map.vision.ambientLight)) ||
       map.vision.defaultRangeFeet < 0 || !Number.isFinite(map.updatedAt)
     ) return 'invalid-map-geometry'
+    if(map.weatherFacts!==undefined&&!validDnd5eSceneWeatherFacts(map.weatherFacts))return 'invalid-map-weather-facts'
     mapIds.add(map.mapId)
     if (
       !map.walls.every((entity) => validGeometryEntity(entity, 'wall')) ||
@@ -6539,6 +6874,7 @@ function mapSpellLightingSources(map, geometry) {
       if (lighting.kind !== 'magical-darkness') return []
       return [{
         id: `spell-darkness:${area.id}`,
+        areaId: area.id,
         kind: 'magical-darkness',
         lightSuppressionScope: lighting.lightSuppressionScope,
         point,
@@ -6640,7 +6976,15 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
 }
 
 function mapBaseIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked, viewer) {
-  const spellLighting = mapSpellLightingSources(map, geometry).map(source => {
+  // The physical darkness remains; only its actual bound creator may ignore
+  // an explicitly resource-cast core Darkness area for visual illumination.
+  const spellLighting = mapSpellLightingSources(map, geometry)
+    .filter(source => source.kind !== 'magical-darkness' || !viewer ||
+      !(map.dnd5ePluginAreas ?? []).some(area => area.id === source.areaId &&
+        area.sourceKind === 'core-spell' && area.coreSpellId === 'darkness' &&
+        area.lighting?.kind === 'magical-darkness' && area.lighting.sourceCanSeeThrough === true &&
+        area.sourceTokenId === viewer.id && area.sourceCharacterId === viewer.characterId))
+    .map(source => {
     if (source.kind !== 'light' || !source.emissionArea) return source
     const origins = rectangularLightCandidateOrigins(map, source.emissionArea, { ...point, elevationFeet },
       compileGeometryCached(geometry).segments.filter(segment => segment.blocksVision).flatMap(segment => [segment.a, segment.b]),
@@ -6909,8 +7253,31 @@ function persistentAreaBlocksVisionRay(
   return false
 }
 
+/** Match the client: only native core Darkness obstructs this visual ray,
+ * with its real creator binding and existing point-light suppression intact. */
+function coreDarknessBlocksSightRay(map,geometry,viewer,to,fromEye,toEye,senseRangeFeet,lineBlocked){
+ const ids=new Set((map.dnd5ePluginAreas??[]).filter(area=>area.sourceKind==='core-spell'&&area.coreSpellId==='darkness'&&area.lighting?.kind==='magical-darkness').map(area=>area.id))
+ if(!ids.size)return false
+ const sources=mapSpellLightingSources(map,geometry).filter(source=>source.kind==='magical-darkness'&&ids.has(source.areaId)&&!(map.dnd5ePluginAreas??[]).some(area=>area.id===source.areaId&&area.sourceKind==='core-spell'&&area.coreSpellId==='darkness'&&area.lighting?.kind==='magical-darkness'&&area.lighting.sourceCanSeeThrough===true&&area.sourceTokenId===viewer.id&&area.sourceCharacterId===viewer.characterId))
+ if(!sources.length)return false
+ const grid=Math.max(1,Number(map.gridSize)||1),feet=Math.max(1,Number(map.feetPerCell)||5),distance=Math.hypot(Math.hypot(to.x-viewer.x,to.y-viewer.y)/grid*feet,toEye-fromEye),steps=Math.max(2,Math.ceil(distance/(feet/4)))
+ for(let i=0;i<=steps;i++){const ratio=i/steps;if(distance<=senseRangeFeet)return false;const point={x:viewer.x+(to.x-viewer.x)*ratio,y:viewer.y+(to.y-viewer.y)*ratio},elevation=fromEye+(toEye-fromEye)*ratio
+  if(sources.some(source=>spellLightingAffectsPoint(source,point,map,elevation))&&mapIlluminationAtPoint(map,geometry,point,elevation,lineBlocked,viewer)==='magical-darkness')return true
+ }return false
+}
+
 function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true, characterById = null, perception = null) {
-  if (viewer.dnd5eSourceSightDisabled === true && !playerSpecialSenseRange(viewer, target, 'blindsight', map)) return false
+  const viewerCharacter = characterById?.get(viewer.characterId)
+  if (falseHydraSongConceals(target.dnd5eCombatState?.monsterMultipart,
+    viewer, viewer.dnd5eCombatState, viewerCharacter, viewerCharacter?.dnd5eCombatState)) return false
+  const surfaces=multipartServerSurfaces(map,target)
+  if(surfaces)return surfaces.some(part=>playerCanSeeToken(map,geometry,viewer,part,fallbackRangeFeet,lightingEnabled,characterById,perception))
+  const viewerBlinded = viewer.dnd5eSourceSightDisabled === true ||
+    [viewer.conditions, viewer.dnd5eCombatState?.conditions, viewerCharacter?.conditions, viewerCharacter?.dnd5eCombatState?.conditions]
+      .some(conditions => conditions?.some(condition => ['blinded', '失明'].includes(String(condition).toLowerCase()))) ||
+    tokenActiveEffects(viewer, characterById).filter(effect => !effect?.suspendedBy?.length)
+      .some(effect => effect.standardCondition === 'blinded' || effect.legacyCondition === 'blinded')
+  if (viewerBlinded && !playerSpecialSenseRange(viewer, target, 'blindsight', map)) return false
   if (!initialSpaceAllowsTarget(map, geometry, viewer, target, characterById)) return false
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
@@ -6985,7 +7352,12 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
       from?.id === viewer.id ? viewer.id : null,
     )
   const targetSamples = tokenVisibilitySamples(target, gridSize)
-  if (targetSamples.every((sample) => lineBlocked(viewer, sample, fromEyeElevation, toEyeElevation))) return false
+  if (targetSamples.every((sample) => {
+    const distance=Math.hypot((sample.x-viewer.x)/gridSize*feetPerCell,(sample.y-viewer.y)/gridSize*feetPerCell,toEyeElevation-fromEyeElevation)
+    if(coreDarknessBlocksSightRay(map,geometry,viewer,sample,fromEyeElevation,toEyeElevation,Math.max(profile.magicalDarknessSightRangeFeet,profile.blindsightRangeFeet,profile.truesightRangeFeet),lineBlocked))return true
+    const solidSight=(profile.throughSolidObjectsRangeFeet??0)>0 && distance<=profile.throughSolidObjectsRangeFeet
+    return solidSight ? persistentAreaBlocksVisionRay(map,geometry,viewer,sample,fromEyeElevation,toEyeElevation,viewer.id) : lineBlocked(viewer,sample,fromEyeElevation,toEyeElevation)
+  })) return false
   const illumination = lightingEnabled
     ? mapIlluminationAtPoint(map, geometry, target, toElevation, lineBlocked, viewer)
     : 'bright'
@@ -7229,6 +7601,7 @@ export function recordServerMovementSightings(input) {
 
 export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null, worldMinute = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
+  if(value.maps.some(map=>plainObject(map)&&Object.prototype.hasOwnProperty.call(map,'dnd5ePactGroundEffectClocks')))value={...value,maps:value.maps.map(map=>{if(!plainObject(map))return map;const{dnd5ePactGroundEffectClocks:privateClocks,...publicMap}=map;return publicMap})}
   const roomTokens = value.maps.flatMap(map => Array.isArray(map?.tokens) ? map.tokens : [])
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
   const fogByMapId = new Map((fogState?.maps ?? []).map((fog) => [fog.mapId, fog]))
@@ -7275,18 +7648,19 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       if (!plainObject(map)) return map
       // Pending flight receipts hold the original private object snapshot and
       // Host settlement data. Player views receive only ordinary scene tokens.
-      const { dnd5eObjectFlightDepartures: _hostFlights, ...publicMap } = map
+      const { dnd5eObjectFlightDepartures: _hostFlights, dnd5eSkillCheckMovement: _hostMovement, ...publicMap } = map
       map = publicMap
       if (!Array.isArray(map.tokens)) return map
       const effectiveMap = {
         ...map,
         tokens: map.tokens.map((token) => {
           if (!plainObject(token)) return token
-          if (token.dnd5eCombatState?.damageTraitReports || token.dnd5eCombatState?.knownCreatureLocations || token.dnd5eCombatState?.planarPortalReports || token.dnd5eCombatState?.recentCreatureSightings) {
+          if (token.dnd5eCombatState?.damageTraitReports || token.dnd5eCombatState?.knownCreatureLocations || token.dnd5eCombatState?.planarPortalReports || token.dnd5eCombatState?.sensoryDeceptionReports || token.dnd5eCombatState?.recentCreatureSightings) {
             token = { ...token, dnd5eCombatState: { ...token.dnd5eCombatState } }
             delete token.dnd5eCombatState.knownCreatureLocations
             delete token.dnd5eCombatState.damageTraitReports
             delete token.dnd5eCombatState.planarPortalReports
+            delete token.dnd5eCombatState.sensoryDeceptionReports
             delete token.dnd5eCombatState.recentCreatureSightings
           }
           const bounded = clampTokenToMap(map, token)
@@ -7319,18 +7693,26 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         : DEFAULT_PLAYER_VISION_RANGE_FEET
       const players = effectiveMap.tokens
         .filter((token) => plainObject(token) && token.type === 'player')
-        .map((token) => applyDnd5eEffectiveVisionProfile(
-          token,
+        .map((token) => {
+          const personalSightAllowed = token.characterId === resolvedActiveCharacterId
+          const suppressed = personalSolidSightMagicSuppressed({map:effectiveMap,token,
+            elevationFeet:tokenElevationFeet(geometry,token),heightFeet:tokenHeightFeet(token),
+            elevationAt:point=>tokenElevationFeet(geometry,point),terrainAt:point=>terrainElevationAtPoint(geometry,point),
+            lineOfEffectBlocked:(from,to)=>!!raycastGeometry({compiled:compileGeometryCached(geometry),from,to,purpose:'line-of-effect',fromElevationFeet:from.elevationFeet,toElevationFeet:to.elevationFeet,ignoreStart:true}) ||
+              !!persistentAreaBlocksRay({map:effectiveMap,from,to,purpose:'line-of-effect',fromElevationFeet:from.elevationFeet,toElevationFeet:to.elevationFeet,fromEyeHeightFeet:0,toEyeHeightFeet:0,overlapsHeight:(area,base,height)=>persistentAreaVisionOverlapsHeight(effectiveMap,geometry,area,base,height)}),
+          })
+          const visionToken = projectDnd5ePersonalSolidSight(projectPersonalSolidSightSuppression(token, suppressed), personalSightAllowed)
+          const character = typeof token.characterId === 'string' ? characterById.get(token.characterId) : undefined
+          return applyDnd5eEffectiveVisionProfile(
+          visionToken,
           compileDnd5eEffectiveVisionProfile({
-            token,
-            character: typeof token.characterId === 'string'
-              ? characterById.get(token.characterId)
-              : undefined,
+            token: visionToken,
+            character: projectDnd5ePersonalSolidSight(projectPersonalSolidSightSuppression(character, suppressed), personalSightAllowed),
             fallbackRangeFeet: dynamicVision
               ? geometry?.vision?.defaultRangeFeet
               : manualFallbackRangeFeet,
           }),
-        ))
+        )})
       const projectedPlayerById = new Map(players.map((token) => [token.id, token]))
       const sourceVisionEffects = effectiveMap.tokens
         .filter((token) => plainObject(token) && token.dnd5eSpellEffect?.shareVisionWithSource === true &&
@@ -7352,7 +7734,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         : players), ...sourceVisionEffects]
       const hasSpellObstruction = (effectiveMap.dnd5ePluginAreas ?? []).some(area =>
         area?.obscuration?.kind === 'heavy' || area?.blocking?.vision || area?.lighting?.kind === 'magical-darkness' || area?.lighting?.kind === 'reduce-light')
-      const tokens = effectiveMap.tokens.flatMap((token) => {
+      const tokens = effectiveMap.tokens.flatMap((originalToken) => {
+        const token={...originalToken}
+        // Song immunity is personal; a deaf ally's shared vision does not grant it.
+        const ownCharacter = characterById.get(resolvedActiveCharacterId)
+        const ownToken = effectiveMap.tokens.find(candidate => candidate.type === 'player' && candidate.characterId === resolvedActiveCharacterId)
+        if (falseHydraSongConceals(token.dnd5eCombatState?.monsterMultipart,
+          ownToken, ownToken?.dnd5eCombatState, ownCharacter, ownCharacter?.dnd5eCombatState)) return []
         if (!plainObject(token)) return []
         if (token.dnd5eSpellEffect?.linkedTargetProjection) {
           if (personalSpaceRestricted && !players.filter(viewer => viewer.characterId === resolvedActiveCharacterId)
@@ -7545,6 +7933,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
           ? redactUnseenToken(token)
           : projectTokenTruesightPerception(token, observingViewers, map, characterById)]
       })
+      for (const token of tokens) redactMultipartHistory(token)
       const visibleIds = new Set(tokens.map((token) => token.id))
       return {
         ...map,
@@ -7815,6 +8204,28 @@ function validCombatCommandRecord(value) {
  * room state.
  */
 export function validateSharedStateShape(name, value) {
+  if(name==='armor-native-parents'&&!validArmorNativeParentJournal(value))return{ok:false,reason:'invalid-armor-native-parent'}
+  if(name==='arcane-movement-parents'&&!validArcaneMovementOriginalJournal(value))return{ok:false,reason:'invalid-arcane-movement-parent'}
+  if(name==='arcane-base-prefix-rolls'&&!validArcaneBasePrefixJournal(value))return{ok:false,reason:'invalid-arcane-base-prefix'}
+  if(name==='sc-base-prefix-rolls'&&!validScBasePrefixJournal(value))return{ok:false,reason:'invalid-sc-base-prefix'}
+  if(name==='mastermind-ward-saving-choices'&&!validMastermindWardSavingChoices(value))return{ok:false,reason:'invalid-ward-saving-journal'}
+  if(name==='bountiful-initiative-originals'&&!validBountifulInitiativeOriginals(value))return{ok:false,reason:'invalid-initiative-original-journal'}
+  if(name==='mastermind-native-ward-bountifuls'&&!validMastermindNativeWardBountifuls(value))return{ok:false,reason:'invalid-native-ward-bountiful-journal'}
+  if(name==='mastermind-native-ward-outcomes'&&!validMastermindNativeWardOutcomes(value))return{ok:false,reason:'invalid-native-ward-outcome-journal'}
+  if(name==='mastermind-native-ward-originals'&&!validMastermindNativeWardOriginals(value))return{ok:false,reason:'invalid-native-ward-original-journal'}
+  if(name==='mastermind-ward-originals'&&!validMastermindWardOriginals(value))return{ok:false,reason:'invalid-ward-original-journal'}
+  if(name==='mastermind-ward-attacks'&&!validMastermindWardAttacks(value))return{ok:false,reason:'invalid-ward-attack-journal'}
+  if(name==='mastermind-misdirections'&&!validMastermindMisdirections(value))return{ok:false,reason:'invalid-misdirection-journal'}
+  if(name==='mastermind-magic-truth'&&!validMastermindMagicTruth(value))return{ok:false,reason:'invalid-magic-truth-journal'}
+  if(name==='mastermind-thought-readings'&&!validMastermindThoughtReadings(value))return{ok:false,reason:'invalid-thought-reading-journal'}
+  if(name==='activity-death-parents'&&!validActivityDeathParentJournal(value))return{ok:false,reason:'invalid-activity-death-parent'}
+  if(name==='arcane-native-parents'&&!validArcaneNativeJournal(value))return{ok:false,reason:'invalid-arcane-native-parent'}
+  const sceneRows=name==='characters'&&Array.isArray(value?.characters)?value.characters:name==='maps'&&Array.isArray(value?.maps)?value.maps.flatMap(map=>Array.isArray(map?.tokens)?map.tokens:[]):[]
+  if(sceneRows.some(row=>!validateSceneReactionSpent(row?.dnd5eCombatState?.sceneReactionSpent)))return{ok:false,reason:'invalid-scene-reaction-marker'}
+  if(name==='combat'&&value?.bountifulOriginalParents!==undefined&&!validateBountifulOriginalParents(value.bountifulOriginalParents))return{ok:false,reason:'invalid-bountiful-original-parents'}
+  if(name==='combat'&&value?.bountifulReadyParents!==undefined&&!validateBountifulReadyParents(value.bountifulReadyParents))return{ok:false,reason:'invalid-bountiful-ready-parents'}
+  if(name==='player-action-requests'&&Array.isArray(value?.requests)&&value.requests.some(row=>row?.type==='dnd5e-bountiful-luck'&&!validateBountifulLuckCommand(row.bountifulLuck)))return{ok:false,reason:'invalid-bountiful-original-command'}
+  if(name==='combat'&&value?.secondChanceAttacks!==undefined&&!validateSecondChanceAttackReceipts(value.secondChanceAttacks))return{ok:false,reason:'invalid-second-chance-receipts'}
   if (name === SHORT_REST_RECOVERY_RESOURCE && !validShortRestRecoveryJournal(value)) return { ok: false, reason: 'invalid-short-rest-recovery' }
   if (!plainObject(value)) return { ok: false, reason: 'state-must-be-object' }
   const requiredArrays = {
@@ -8501,6 +8912,23 @@ async function collectCampaignPlugins(ctx, room) {
     plugins.push({ ...hosted, ...requirement, data: bytes.toString('base64') })
   }
   return plugins
+}
+
+async function roomCampaignBreathingPolicies(ctx, room) {
+  const policies = [], summonedMonsterConstitutions = []
+  for (const requirement of room?.requiredPlugins ?? []) {
+    const hosted = room.pluginFiles?.[requirement.id]
+    if (!hosted || hosted.integrity !== requirement.integrity || hosted.version !== requirement.version) throw new RoomProtocolError(409, 'plugin-file-not-found')
+    const bytes = await readFile(roomHostedPluginFile(ctx, room.id, requirement.id, hosted))
+    if ('sha256-' + createHash('sha256').update(bytes).digest('base64') !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+    const raw = bytes.toString('utf8').trimStart()
+    if (!raw.startsWith('{')) continue
+    const value = JSON.parse(raw)
+    if (value?.manifest?.id !== requirement.id || value?.manifest?.version !== requirement.version) throw new RoomProtocolError(409, 'plugin-metadata-mismatch')
+    policies.push(...explicitWaterBreathingPoliciesFromPackage(value))
+    summonedMonsterConstitutions.push(...explicitSummonedMonsterConstitutionsFromPackage(value))
+  }
+  return {policies, summonedMonsterConstitutions}
 }
 
 async function roomSubclassChoicePolicies(ctx, room) {
@@ -10235,7 +10663,7 @@ function accountAuthCapabilities(env = process.env) {
   }
 }
 
-async function deliverAccountVerification(channel, destination, code, env = process.env) {
+async function deliverAccountVerification(channel, destination, code, env = process.env, purpose = 'register') {
   const webhookUrl = verificationWebhookUrl(channel, env)
   if (!webhookUrl) {
     if (!productionSecurityEnabled(env)) {
@@ -10266,7 +10694,7 @@ async function deliverAccountVerification(channel, destination, code, env = proc
       body: JSON.stringify({
         schemaVersion: 1,
         brand: 'Astral Trace VTT',
-        purpose: 'register',
+        purpose,
         channel,
         destination,
         code,
@@ -10647,6 +11075,10 @@ function applyAccountAuthRateLimit(ctx, key, limit, windowMs, now = Date.now()) 
 }
 
 async function requestAccountVerification(ctx, req, payload, now = Date.now()) {
+  const purpose = payload?.purpose ?? 'register'
+  if (purpose !== 'register' && purpose !== 'reset-password') {
+    throw new RoomProtocolError(400, 'invalid-verification-purpose')
+  }
   const channel = payload?.channel === 'email' || payload?.channel === 'phone' ? payload.channel : null
   const destination = normalizeAccountContact(channel, payload?.destination)
   if (!channel || !destination) throw new RoomProtocolError(400, 'invalid-verification-destination')
@@ -10659,17 +11091,28 @@ async function requestAccountVerification(ctx, req, payload, now = Date.now()) {
   applyAccountAuthRateLimit(ctx, `verification-destination:${destinationDigest}`, 3, 10 * 60 * 1000, now)
   await mkdir(accountIdentityDirectory(ctx), { recursive: true })
   await mkdir(accountVerificationDirectory(ctx), { recursive: true })
-  if (await readAccountIdentity(ctx, channel, destination)) {
+  const accountId = await readAccountIdentity(ctx, channel, destination)
+  if (purpose === 'register' && accountId) {
     throw new RoomProtocolError(409, 'account-contact-exists')
   }
+  const account = purpose === 'reset-password' && accountId ? await readAccount(ctx, accountId) : null
+  const recoverable = account?.auth?.channel === channel && account.auth.destination === destination &&
+    !!account.auth.destinationVerifiedAt && plainObject(account.auth.password)
 
   const challengeId = randomUUID()
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
-  const delivery = await deliverAccountVerification(channel, destination, code)
+  // Unknown contacts receive the same public challenge response, without mail.
+  const delivery = purpose === 'register' || recoverable
+    ? await deliverAccountVerification(channel, destination, code, process.env, purpose)
+    : { debugCode: null }
   const challenge = {
     version: 1,
     challengeId,
-    purpose: 'register',
+    purpose,
+    ...(purpose === 'reset-password' ? {
+      accountId: recoverable ? account.accountId : null,
+      passwordFingerprint: recoverable ? tokenHash(JSON.stringify(account.auth.password)) : null,
+    } : {}),
     channel,
     destination,
     destinationDigest,
@@ -10686,6 +11129,49 @@ async function requestAccountVerification(ctx, req, payload, now = Date.now()) {
     expiresAt: challenge.expiresAt,
     ...(delivery.debugCode ? { debugCode: delivery.debugCode } : {}),
   }
+}
+
+async function resetRegisteredAccountPassword(ctx, req, payload, now = Date.now()) {
+  const challengeId = normalizeVerificationChallengeId(payload?.challengeId)
+  const code = typeof payload?.verificationCode === 'string' ? payload.verificationCode.trim() : ''
+  const password = normalizeAccountPassword(payload?.newPassword)
+  if (!password) throw new RoomProtocolError(400, 'invalid-account-password')
+  if (!challengeId || !/^\d{6}$/.test(code)) throw new RoomProtocolError(400, 'invalid-verification-code')
+  applyAccountAuthRateLimit(ctx, `reset-ip:${req.socket?.remoteAddress ?? 'local'}`, 20, 10 * 60 * 1000, now)
+  return withWriteLock(accountAuthLockFile(ctx), async () => {
+    const challenge = await readVerificationChallenge(ctx, challengeId)
+    if (challenge.purpose !== 'reset-password' || challenge.consumedAt || Number(challenge.expiresAt) <= now) {
+      throw new RoomProtocolError(400, 'verification-code-expired')
+    }
+    if (Number(challenge.failedAttempts ?? 0) >= ACCOUNT_VERIFICATION_ATTEMPT_LIMIT) {
+      throw new RoomProtocolError(429, 'verification-attempt-limit')
+    }
+    if (!secretMatches(challenge.code, code) || !challenge.accountId) {
+      await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify({
+        ...challenge, failedAttempts: Number(challenge.failedAttempts ?? 0) + 1, updatedAt: now,
+      }))
+      throw new RoomProtocolError(400, 'invalid-verification-code')
+    }
+    // Consume first: an interrupted save requires a new code, never a reusable
+    // password-reset credential. The account mutation retains all user data.
+    const consumed = { ...challenge, consumedAt: now, updatedAt: now }
+    delete consumed.code
+    await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify(consumed))
+    await mutateAccount(ctx, challenge.accountId, (current) => {
+      if (current.auth?.channel !== challenge.channel || current.auth?.destination !== challenge.destination ||
+        !current.auth?.destinationVerifiedAt ||
+        !plainObject(current.auth?.password) ||
+        tokenHash(JSON.stringify(current.auth?.password)) !== challenge.passwordFingerprint) {
+        throw new RoomProtocolError(400, 'verification-code-expired')
+      }
+      return {
+        ...current,
+        auth: { ...current.auth, password: secretRecord(password) },
+        sessions: [],
+        updatedAt: now,
+      }
+    })
+  })
 }
 
 function normalizeVerificationChallengeId(value) {
@@ -10846,14 +11332,20 @@ async function loginRegisteredAccount(ctx, req, payload, now = Date.now()) {
   }
 
   const token = accountSessionToken(account.accountId)
-  const next = await mutateAccount(ctx, account.accountId, (current) => ({
-    ...current,
-    sessions: [
-      ...(Array.isArray(current.sessions) ? current.sessions : []),
-      { tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now },
-    ].slice(-ACCOUNT_SESSION_LIMIT),
-    updatedAt: now,
-  }))
+  const next = await mutateAccount(ctx, account.accountId, (current) => {
+    // A password reset may win while this login is waiting for the write lock.
+    if (JSON.stringify(current.auth?.password) !== JSON.stringify(passwordRecord)) {
+      throw new RoomProtocolError(401, 'invalid-account-credentials')
+    }
+    return {
+      ...current,
+      sessions: [
+        ...(Array.isArray(current.sessions) ? current.sessions : []),
+        { tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now },
+      ].slice(-ACCOUNT_SESSION_LIMIT),
+      updatedAt: now,
+    }
+  })
   return { account: next, token }
 }
 
@@ -12090,2062 +12582,11 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
 }
 
 async function handleAccountApi(req, res, parsed, ctx) {
-  if (!parsed.pathname.startsWith('/api/accounts')) return false
-  if (!applyLobbyRateLimit(req, res, ctx)) return true
-
-  if (parsed.pathname === '/api/accounts/auth/config' && req.method === 'GET') {
-    writeJson(res, 200, accountAuthCapabilities())
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/auth/verification' && req.method === 'POST') {
-    const payload = await readJsonRequest(req)
-    const challenge = await requestAccountVerification(ctx, req, payload)
-    writeJson(res, 201, challenge)
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/auth/register' && req.method === 'POST') {
-    const payload = await readJsonRequest(req)
-    const { account, token } = await createRegisteredAccount(ctx, payload)
-    writeJson(res, 201, { session: accountSessionResponse(account, token) })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/auth/login' && req.method === 'POST') {
-    const payload = await readJsonRequest(req)
-    const { account, token } = await loginRegisteredAccount(ctx, req, payload)
-    writeJson(res, 200, { session: accountSessionResponse(account, token) })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/auth/logout' && req.method === 'POST') {
-    await logoutAccount(req, ctx)
-    writeJson(res, 200, { ok: true })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts' && req.method === 'POST') {
-    if (productionSecurityEnabled() && process.env.STARS_ALLOW_LEGACY_ACCOUNT_CREATION !== 'true') {
-      throw new RoomProtocolError(410, 'legacy-account-creation-disabled')
-    }
-    const payload = await readJsonRequest(req)
-    const { account, token, recoveryCode } = await createAccountRecord(ctx, payload)
-    writeJson(res, 201, { session: accountSessionResponse(account, token), recoveryCode })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/recover' && req.method === 'POST') {
-    const payload = await readJsonRequest(req)
-    const recovery = normalizeAccountRecoveryCode(payload?.recoveryCode)
-    const clientId = payload?.clientId
-    if (!recovery || !validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-recovery-code')
-    const account = await readAccount(ctx, recovery.accountId).catch(() => null)
-    if (!account || !secretMatches(account.recovery, recovery.secret)) {
-      throw new RoomProtocolError(401, 'invalid-recovery-code')
-    }
-    const token = accountSessionToken(account.accountId)
-    const now = Date.now()
-    const next = await mutateAccount(ctx, account.accountId, (current) => ({
-      ...current,
-      sessions: [
-        ...(Array.isArray(current.sessions) ? current.sessions : []),
-        { tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now },
-      ].slice(-ACCOUNT_SESSION_LIMIT),
-      updatedAt: now,
-    }))
-    writeJson(res, 200, { session: accountSessionResponse(next, token) })
-    return true
-  }
-
-  if (await handleAccountStorageRequest(req, res, parsed, ctx, { authenticateAccount, writeJson, readJsonRequest, mutateAccount, RoomProtocolError })) return true
-
-  if (parsed.pathname === '/api/accounts/me' && req.method === 'GET') {
-    const account = await authenticateAccount(req, ctx)
-    writeJson(res, 200, accountPublicProfile(account))
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me' && req.method === 'DELETE') {
-    const account = await authenticateAccount(req, ctx)
-    const payload = await readJsonRequest(req)
-    const currentPassword = normalizeAccountPassword(payload?.currentPassword)
-    if (payload?.confirmation !== 'DELETE') {
-      throw new RoomProtocolError(400, 'account-deletion-confirmation-required')
-    }
-    const result = await deleteRegisteredAccount(ctx, account, currentPassword)
-    writeJson(res, 200, result)
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me' && req.method === 'PATCH') {
-    const account = await authenticateAccount(req, ctx)
-    const payload = await readJsonRequest(req, 512 * 1024)
-    const displayName = normalizedLabel(payload?.displayName, 24)
-    const avatar = normalizeAccountAvatar(payload?.avatar)
-    if (!displayName) throw new RoomProtocolError(400, 'invalid-account-name')
-    if (avatar == null) throw new RoomProtocolError(400, 'invalid-account-avatar')
-    const now = Date.now()
-    const next = await mutateAccount(ctx, account.accountId, (current) => ({
-      ...current,
-      displayName,
-      ...(avatar ? { avatar } : { avatar: undefined }),
-      updatedAt: now,
-    }))
-    writeJson(res, 200, accountPublicProfile(next))
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/password' && req.method === 'POST') {
-    const account = await authenticateAccount(req, ctx)
-    const payload = await readJsonRequest(req)
-    const currentPassword = normalizeAccountPassword(payload?.currentPassword)
-    const newPassword = normalizeAccountPassword(payload?.newPassword)
-    if (!plainObject(account.auth) || !plainObject(account.auth.password)) {
-      throw new RoomProtocolError(409, 'registered-account-required')
-    }
-    if (!currentPassword || !secretMatches(account.auth.password, currentPassword)) {
-      throw new RoomProtocolError(401, 'invalid-account-current-password')
-    }
-    if (!newPassword) throw new RoomProtocolError(400, 'invalid-account-password')
-    const presentedToken = req.headers['x-stars-account-token']
-    const presentedHash = tokenHash(presentedToken)
-    const now = Date.now()
-    await mutateAccount(ctx, account.accountId, (current) => ({
-      ...current,
-      auth: {
-        ...current.auth,
-        password: secretRecord(newPassword),
-      },
-      sessions: (Array.isArray(current.sessions) ? current.sessions : []).filter(
-        (session) => session?.tokenHash === presentedHash,
-      ),
-      updatedAt: now,
-    }))
-    writeJson(res, 200, { ok: true })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/push-subscriptions' && req.method === 'PUT') {
-    const account = await authenticateAccount(req, ctx)
-    const payload = await readJsonRequest(req)
-    const subscription = normalizePushSubscription(payload)
-    if (!subscription) throw new RoomProtocolError(400, 'invalid-push-subscription')
-    const now = Date.now()
-    await mutateAccount(ctx, account.accountId, (current) => ({
-      ...current,
-      pushSubscriptions: [
-        ...(Array.isArray(current.pushSubscriptions)
-          ? current.pushSubscriptions.filter((candidate) => candidate?.deviceId !== subscription.deviceId)
-          : []),
-        { ...subscription, provider: 'expo', enabledAt: now, updatedAt: now },
-      ].slice(-12),
-      updatedAt: now,
-    }))
-    writeJson(res, 200, { registered: true, deviceId: subscription.deviceId })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/push-subscriptions' && req.method === 'DELETE') {
-    const account = await authenticateAccount(req, ctx)
-    const payload = await readJsonRequest(req)
-    const deviceId = typeof payload?.deviceId === 'string' ? payload.deviceId.trim() : ''
-    if (!/^[a-zA-Z0-9._:-]{8,160}$/.test(deviceId)) {
-      throw new RoomProtocolError(400, 'invalid-push-subscription')
-    }
-    const now = Date.now()
-    await mutateAccount(ctx, account.accountId, (current) => ({
-      ...current,
-      pushSubscriptions: Array.isArray(current.pushSubscriptions)
-        ? current.pushSubscriptions.filter((candidate) => candidate?.deviceId !== deviceId)
-        : [],
-      updatedAt: now,
-    }))
-    writeJson(res, 200, { registered: false, deviceId })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/campaigns') {
-    const account = await authenticateAccount(req, ctx)
-    if (req.method === 'GET') {
-      writeJson(res, 200, { campaigns: await accountCampaignListResponse(ctx, account) })
-      return true
-    }
-    if (req.method === 'POST') {
-      const payload = await readJsonRequest(req)
-      const name = normalizedLabel(payload?.name, 60)
-      const description = normalizeCampaignDescription(payload?.description)
-      const rulesetId = String(payload?.rulesetId ?? '')
-      if (!name) throw new RoomProtocolError(400, 'invalid-campaign-name')
-      if (description == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
-      if (rulesetId !== DND5E_2014_RULESET_ID) throw new RoomProtocolError(400, 'invalid-ruleset')
-      const now = Date.now()
-      let created = null
-      const next = await mutateAccount(ctx, account.accountId, (current) => {
-        const campaigns = accountCampaigns(current)
-        if (campaigns.length >= ACCOUNT_CAMPAIGN_LIMIT) {
-          throw new RoomProtocolError(409, 'account-campaign-limit')
-        }
-        let campaignId = ''
-        for (let attempt = 0; attempt < 32; attempt += 1) {
-          const candidate = randomLobbyCode(12)
-          if (!campaigns.some((campaign) => campaign.campaignId === candidate)) {
-            campaignId = candidate
-            break
-          }
-        }
-        if (!campaignId) throw new RoomProtocolError(503, 'campaign-id-exhausted')
-        created = {
-          schemaVersion: ACCOUNT_CAMPAIGN_SCHEMA_VERSION,
-          campaignId,
-          ownerAccountId: current.accountId,
-          name,
-          description,
-          rulesetId,
-          archived: false,
-          roomCount: 0,
-          roomHistory: [],
-          createdAt: now,
-          updatedAt: now,
-        }
-        return {
-          ...current,
-          campaigns: [...campaigns, created],
-          updatedAt: now,
-        }
-      })
-      const persisted = accountCampaigns(next).find((campaign) => campaign.campaignId === created?.campaignId)
-      writeJson(res, 201, await accountCampaignResponse(ctx, persisted))
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  const accountCampaignAiJobsMatch = parsed.pathname.match(
-    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/ai-jobs$/,
-  )
-  if (accountCampaignAiJobsMatch) {
-    const account = await authenticateAccount(req, ctx)
-    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignAiJobsMatch[1] ?? ''))
-    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
-    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
-    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
-    if (req.method === 'GET') {
-      const includeArtifact = parsed.searchParams.get('includeArtifact') === '1'
-      writeJson(res, 200, {
-        schemaVersion: 2,
-        jobs: campaignAiJobs(campaign)
-          .sort((left, right) => right.updatedAt - left.updatedAt)
-          .map((job) => publicAiJobV2(job, includeArtifact)),
-      })
-      return true
-    }
-    if (req.method === 'POST') {
-      const payload = await readJsonRequest(req, 128 * 1024)
-      const request = normalizeAiJobCreateRequestV2(payload)
-      if (!request) throw new RoomProtocolError(400, 'invalid-ai-job-request')
-      if (request.executionMode !== 'local-runner') {
-        throw new RoomProtocolError(409, 'ai-provider-not-configured')
-      }
-      let created = null
-      let reused = false
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => {
-        const existing = jobs.find((job) => job.idempotencyKey === request.idempotencyKey)
-        if (existing) {
-          created = existing
-          reused = true
-          return jobs
-        }
-        if (jobs.length >= AI_JOB_MAX_PER_CAMPAIGN) {
-          throw new RoomProtocolError(409, 'ai-job-limit')
-        }
-        created = {
-          ...request,
-          jobId: randomUUID(),
-          accountId: account.accountId,
-          campaignId,
-          status: 'awaiting-local-runner',
-          revision: 1,
-          progress: { stage: 'awaiting-local-runner', current: 0, total: 0, message: '等待本地模型接管任务' },
-          lease: null,
-          artifact: null,
-          failure: null,
-          createdAt: now,
-          updatedAt: now,
-        }
-        return [...jobs, created]
-      })
-      writeJson(res, reused ? 200 : 201, { job: publicAiJobV2(created, true), reused })
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  const accountCampaignAiJobMatch = parsed.pathname.match(
-    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/ai-jobs\/([^/]+)(?:\/(lease|progress|failure|result|artifact|cancel))?$/,
-  )
-  if (accountCampaignAiJobMatch) {
-    const account = await authenticateAccount(req, ctx)
-    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignAiJobMatch[1] ?? ''))
-    const jobId = decodeURIComponent(accountCampaignAiJobMatch[2] ?? '')
-    const action = accountCampaignAiJobMatch[3] ?? ''
-    if (campaignId.length !== 12 || !/^[a-f0-9-]{20,80}$/i.test(jobId)) {
-      throw new RoomProtocolError(400, 'invalid-ai-job-id')
-    }
-    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
-    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
-    const currentJob = campaignAiJobs(campaign).find((job) => job.jobId === jobId)
-    if (!currentJob) throw new RoomProtocolError(404, 'ai-job-not-found')
-    if (!action && req.method === 'GET') {
-      writeJson(res, 200, { job: publicAiJobV2(currentJob, true) })
-      return true
-    }
-
-    if (!action && req.method === 'DELETE') {
-      const payload = await readJsonRequest(req)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => {
-        const target = jobs.find((job) => job.jobId === jobId)
-        if (!target) throw new RoomProtocolError(404, 'ai-job-not-found')
-        assertAiJobRevision(target, expectedRevision)
-        if (target.status === 'running' && target.lease && target.lease.expiresAt > now) {
-          throw new RoomProtocolError(409, 'ai-job-active')
-        }
-        return jobs.filter((job) => job.jobId !== jobId)
-      })
-      writeJson(res, 200, { deleted: true, jobId })
-      return true
-    }
-
-    if (action === 'lease' && req.method === 'POST') {
-      const payload = await readJsonRequest(req)
-      const runnerId = normalizedLabel(payload?.runnerId, 160)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      if (!runnerId) throw new RoomProtocolError(400, 'invalid-ai-runner')
-      const leaseToken = randomBytes(32).toString('base64url')
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        const leaseActive = job.lease && job.lease.expiresAt > now
-        const ownedTakeover = job.status === 'running' && leaseActive && payload?.takeoverOwnedLease === true &&
-          job.lease.runnerId === runnerId
-        if (job.status !== 'awaiting-local-runner' && !(job.status === 'running' && (!leaseActive || ownedTakeover))) {
-          throw new RoomProtocolError(409, 'ai-job-not-leasable')
-        }
-        updated = {
-          ...job,
-          status: 'running',
-          revision: job.revision + 1,
-          progress: { ...job.progress, stage: 'running', message: '本地模型正在分析' },
-          lease: {
-            tokenHash: tokenHash(leaseToken),
-            runnerId,
-            acquiredAt: now,
-            expiresAt: now + AI_JOB_LOCAL_LEASE_MS,
-          },
-          updatedAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, false), leaseToken })
-      return true
-    }
-
-    if (action === 'progress' && req.method === 'POST') {
-      const payload = await readJsonRequest(req)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
-          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
-        }
-        const current = Number(payload?.progress?.current)
-        const total = Number(payload?.progress?.total)
-        updated = {
-          ...job,
-          revision: job.revision + 1,
-          progress: {
-            stage: normalizedLabel(payload?.progress?.stage, 80) || 'running',
-            current: Number.isSafeInteger(current) && current >= 0 ? current : job.progress.current,
-            total: Number.isSafeInteger(total) && total >= 0 ? total : job.progress.total,
-            message: normalizedLabel(payload?.progress?.message, 500),
-          },
-          lease: { ...job.lease, expiresAt: now + AI_JOB_LOCAL_LEASE_MS },
-          updatedAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
-      return true
-    }
-
-    if (action === 'failure' && req.method === 'POST') {
-      const payload = await readJsonRequest(req, 64 * 1024)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      const failureCode = normalizedLabel(payload?.failure?.code, 120) || 'ai-job-failed'
-      const failureMessage = normalizedLabel(payload?.failure?.message, 1_000)
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
-          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
-        }
-        updated = {
-          ...job,
-          status: 'failed',
-          revision: job.revision + 1,
-          progress: { ...job.progress, stage: 'failed', message: '本地模型分析失败，可重新选择原始 PDF 后重试' },
-          lease: null,
-          failure: { code: failureCode, message: failureMessage },
-          updatedAt: now,
-          completedAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
-      return true
-    }
-
-    if (action === 'result' && req.method === 'POST') {
-      const payload = await readJsonRequest(req, 4 * 1024 * 1024)
-      const artifact = normalizePdfCampaignAnalysisArtifact(payload?.artifact)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        if (job.status !== 'running' || !aiJobLeaseMatches(job, payload?.leaseToken, now)) {
-          throw new RoomProtocolError(409, 'invalid-ai-job-lease')
-        }
-        updated = {
-          ...job,
-          status: 'review-required',
-          revision: job.revision + 1,
-          progress: { stage: 'review-required', current: 1, total: 1, message: '等待 DM 审阅与编辑' },
-          lease: null,
-          artifact,
-          failure: null,
-          updatedAt: now,
-          resultAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, true) })
-      return true
-    }
-
-    if (action === 'artifact' && req.method === 'PUT') {
-      const payload = await readJsonRequest(req, 4 * 1024 * 1024)
-      const artifact = normalizePdfCampaignAnalysisArtifact(payload?.artifact)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      if (!artifact) throw new RoomProtocolError(400, 'invalid-ai-job-artifact')
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        if (!['review-required', 'completed'].includes(job.status)) {
-          throw new RoomProtocolError(409, 'ai-job-artifact-not-editable')
-        }
-        updated = {
-          ...job,
-          status: 'review-required',
-          revision: job.revision + 1,
-          artifact,
-          updatedAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, true) })
-      return true
-    }
-
-    if (action === 'cancel' && req.method === 'POST') {
-      const payload = await readJsonRequest(req)
-      const expectedRevision = aiJobExpectedRevision(payload?.expectedRevision)
-      let updated = null
-      await mutateCampaignAiWorkspace(ctx, account.accountId, campaignId, (jobs, _currentCampaign, now) => jobs.map((job) => {
-        if (job.jobId !== jobId) return job
-        assertAiJobRevision(job, expectedRevision)
-        if (['completed', 'failed', 'cancelled'].includes(job.status)) {
-          throw new RoomProtocolError(409, 'ai-job-not-cancellable')
-        }
-        updated = {
-          ...job,
-          status: 'cancelled',
-          revision: job.revision + 1,
-          lease: null,
-          progress: { ...job.progress, stage: 'cancelled', message: '任务已由 DM 取消' },
-          updatedAt: now,
-          completedAt: now,
-        }
-        return updated
-      }))
-      writeJson(res, 200, { job: publicAiJobV2(updated, false) })
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  const accountCampaignResumeRoomMatch = parsed.pathname.match(
-    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/rooms\/current$/,
-  )
-  if (accountCampaignResumeRoomMatch) {
-    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-    const account = await authenticateAccount(req, ctx)
-    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignResumeRoomMatch[1] ?? ''))
-    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
-    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
-    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
-    if (campaign.archived === true) throw new RoomProtocolError(409, 'campaign-archived')
-    const roomId = normalizeLobbyRoomCode(campaign.lastRoomId)
-    if (roomId.length !== 6) throw new RoomProtocolError(404, 'campaign-room-not-found')
-    const payload = await readJsonRequest(req)
-    const clientId = payload?.clientId
-    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
-    const displayName = normalizedLabel(payload?.displayName, 24) || account.displayName
-    if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
-    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-    if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
-    const roomToken = createRoomSessionToken()
-    const now = Date.now()
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      if (
-        room.campaignId !== campaignId ||
-        room.campaignOwnerAccountId !== account.accountId ||
-        room.host?.accountId !== account.accountId
-      ) {
-        return { ok: false, status: 403, error: 'forbidden' }
-      }
-      const host = {
-        ...room.host,
-        clientId,
-        displayName,
-        activePlugins,
-        lastSeenAt: now,
-        roomTokenHash: roomSessionTokenHash(roomToken),
-      }
-      return {
-        ok: true,
-        member: host,
-        next: {
-          ...room,
-          host,
-          updatedAt: now,
-        },
-      }
-    })
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, 'dm', roomToken))
-    return true
-  }
-
-  const accountCampaignRoomMatch = parsed.pathname.match(/^\/api\/accounts\/me\/campaigns\/([^/]+)\/rooms$/)
-  if (accountCampaignRoomMatch) {
-    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-    const account = await authenticateAccount(req, ctx)
-    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignRoomMatch[1] ?? ''))
-    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
-    const payload = await readJsonRequest(req)
-    if (payload?.accountId != null && payload.accountId !== account.accountId) {
-      throw new RoomProtocolError(401, 'invalid-account-session')
-    }
-    const now = Date.now()
-    let createdRoom = null
-    let createdMember = null
-    let createdRoomToken = null
-    try {
-      await mutateAccount(ctx, account.accountId, async (current) => {
-        const campaigns = accountCampaigns(current)
-        const campaignIndex = campaigns.findIndex((campaign) => campaign.campaignId === campaignId)
-        if (campaignIndex < 0) throw new RoomProtocolError(404, 'account-campaign-not-found')
-        const campaign = campaigns[campaignIndex]
-        if (campaign.archived === true) throw new RoomProtocolError(409, 'campaign-archived')
-        const previousRoom = await readLobbyRoomOptional(ctx, campaign.lastRoomId)
-        if (
-          previousRoom &&
-          previousRoom.campaignId === campaignId &&
-          previousRoom.campaignOwnerAccountId === current.accountId &&
-          !previousRoom.closedAt
-        ) {
-          if (roomHostIsOnline(previousRoom, now)) {
-            throw new RoomProtocolError(409, 'campaign-room-active')
-          }
-          const closed = await mutateLobbyRoom(ctx, previousRoom.id, (room) => {
-            const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, previousRoom.id, room)
-            const withoutEphemeral = withoutRoomEphemeralPlugins(room)
-            return {
-              ok: true,
-              ephemeralStoragePaths,
-              next: {
-                ...withoutEphemeral,
-                closedAt: now,
-                updatedAt: now,
-                host: { ...room.host, lastSeenAt: 0 },
-              },
-            }
-          })
-          await removeRoomEphemeralPluginStorage(closed.ephemeralStoragePaths ?? [])
-        }
-        const roomNumber = (Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1
-        const roomPayload = {
-          ...payload,
-          roomName: normalizedLabel(payload?.roomName, 40) || `${campaign.name} · 第 ${roomNumber} 场`,
-          rulesetId: campaign.rulesetId,
-        }
-        const created = await createLobbyRoom(ctx, roomPayload, current, now, campaignId)
-        createdRoom = created.room
-        createdMember = created.member
-        createdRoomToken = created.roomToken
-        const history = [
-          ...(Array.isArray(campaign.roomHistory) ? campaign.roomHistory : []),
-          { roomId: created.room.id, createdAt: now },
-        ].slice(-ACCOUNT_CAMPAIGN_ROOM_HISTORY_LIMIT)
-        const updatedCampaign = {
-          ...campaign,
-          roomCount: (Number.isSafeInteger(campaign.roomCount)
-            ? campaign.roomCount
-            : Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1,
-          roomHistory: history,
-          lastRoomId: created.room.id,
-          updatedAt: now,
-        }
-        return {
-          ...current,
-          campaigns: campaigns.map((candidate, index) => index === campaignIndex ? updatedCampaign : candidate),
-          updatedAt: now,
-        }
-      })
-    } catch (error) {
-      if (createdRoom?.id) await rm(roomLobbyFile(ctx, createdRoom.id), { force: true }).catch(() => {})
-      throw error
-    }
-    writeJson(res, 201, roomMemberResponse(createdRoom, createdMember, 'dm', createdRoomToken))
-    return true
-  }
-
-  const accountCampaignMatch = parsed.pathname.match(/^\/api\/accounts\/me\/campaigns\/([^/]+)$/)
-  if (accountCampaignMatch) {
-    const account = await authenticateAccount(req, ctx)
-    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignMatch[1] ?? ''))
-    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
-    const currentCampaign = accountCampaigns(account).find((campaign) => campaign.campaignId === campaignId)
-    if (!currentCampaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
-    if (req.method === 'GET') {
-      writeJson(res, 200, await accountCampaignResponse(ctx, currentCampaign))
-      return true
-    }
-    if (req.method === 'PATCH') {
-      const payload = await readJsonRequest(req)
-      const requestedName = payload?.name == null ? null : normalizedLabel(payload.name, 60)
-      const requestedDescription = payload?.description == null ? null : normalizeCampaignDescription(payload.description)
-      if (payload?.name != null && !requestedName) throw new RoomProtocolError(400, 'invalid-campaign-name')
-      if (payload?.description != null && requestedDescription == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
-      if (payload?.archived != null && typeof payload.archived !== 'boolean') {
-        throw new RoomProtocolError(400, 'invalid-campaign-archive-state')
-      }
-      const now = Date.now()
-      const next = await mutateAccount(ctx, account.accountId, (current) => {
-        const campaigns = accountCampaigns(current)
-        const storedCampaign = campaigns.find((campaign) => campaign.campaignId === campaignId)
-        if (!storedCampaign) {
-          throw new RoomProtocolError(404, 'account-campaign-not-found')
-        }
-        const prepPlanResult = applyCampaignPrepPlanPatch(storedCampaign.prepPlan, payload, now)
-        if (!prepPlanResult.ok) throw new RoomProtocolError(prepPlanResult.status, prepPlanResult.error)
-        return {
-          ...current,
-          campaigns: campaigns.map((campaign) => campaign.campaignId === campaignId
-            ? {
-                ...campaign,
-                name: requestedName ?? campaign.name,
-                description: requestedDescription ?? campaign.description ?? '',
-                archived: payload?.archived ?? campaign.archived === true,
-                ...(prepPlanResult.value ? { prepPlan: prepPlanResult.value } : {}),
-                updatedAt: now,
-              }
-            : campaign),
-          updatedAt: now,
-        }
-      })
-      const updated = accountCampaigns(next).find((campaign) => campaign.campaignId === campaignId)
-      writeJson(res, 200, await accountCampaignResponse(ctx, updated))
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  if (parsed.pathname === '/api/accounts/me/characters' && req.method === 'GET') {
-    const account = await authenticateAccount(req, ctx)
-    writeJson(res, 200, { characters: Array.isArray(account.characters) ? account.characters : [] })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/plugins' && req.method === 'GET') {
-    const account = await authenticateAccount(req, ctx)
-    writeJson(res, 200, {
-      plugins: accountPluginVersions(account)
-        .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id)),
-      limits: {
-        maxVersions: ACCOUNT_PLUGIN_VERSION_LIMIT,
-        maxTotalBytes: ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT,
-        maxPackageBytes: STATE_MAX_BYTES,
-      },
-    })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/creator') {
-    const account = await authenticateAccount(req, ctx)
-    if (req.method === 'GET') {
-      const registry = await readPluginRegistry(ctx)
-      const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
-      writeJson(res, 200, { creator: marketplaceCreatorPublicRecord(account, creator) })
-      return true
-    }
-    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-    const payload = await readJsonRequest(req)
-    const countryOrRegion = normalizedLabel(payload?.countryOrRegion, 80)
-    const verificationReference = normalizedLabel(payload?.verificationReference, 200)
-    if (
-      !countryOrRegion ||
-      verificationReference.length < 6 ||
-      payload?.acceptedPolicyVersion !== MARKETPLACE_CREATOR_POLICY_VERSION ||
-      payload?.acceptedNoticeVersion !== MARKETPLACE_CREATOR_NOTICE_VERSION
-    ) throw new RoomProtocolError(400, 'invalid-creator-application')
-    const now = Date.now()
-    const registry = await mutatePluginRegistry(ctx, (current) => {
-      const existing = current.creators.find((candidate) => candidate.accountId === account.accountId)
-      if (existing?.status === 'verified' || existing?.status === 'suspended') {
-        throw new RoomProtocolError(409, existing.status === 'verified'
-          ? 'creator-already-verified'
-          : 'creator-account-suspended')
-      }
-      const creator = {
-        schemaVersion: 1,
-        accountId: account.accountId,
-        displayName: account.auth?.username ?? account.displayName,
-        status: 'pending',
-        countryOrRegion,
-        verificationReference,
-        policyVersion: MARKETPLACE_CREATOR_POLICY_VERSION,
-        noticeVersion: MARKETPLACE_CREATOR_NOTICE_VERSION,
-        appliedAt: now,
-      }
-      return {
-        ...current,
-        creators: [...current.creators.filter((candidate) => candidate.accountId !== account.accountId), creator],
-      }
-    })
-    const creator = registry.creators.find((candidate) => candidate.accountId === account.accountId)
-    writeJson(res, 202, { creator: marketplaceCreatorPublicRecord(account, creator) })
-    return true
-  }
-
-  if (parsed.pathname === '/api/accounts/me/entitlements' && req.method === 'GET') {
-    const account = await authenticateAccount(req, ctx)
-    const registry = await readPluginRegistry(ctx)
-    writeJson(res, 200, {
-      entitlements: registry.entitlements
-        .filter((entitlement) => entitlement.accountId === account.accountId)
-        .sort((left, right) => Number(right.grantedAt ?? 0) - Number(left.grantedAt ?? 0)),
-    })
-    return true
-  }
-
-  const accountPluginPublicationMatch = parsed.pathname.match(
-    /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)\/publication$/,
-  )
-  if (accountPluginPublicationMatch) {
-    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-    const account = await authenticateAccount(req, ctx)
-    const pluginId = decodeURIComponent(accountPluginPublicationMatch[1] ?? '')
-    const pluginVersion = decodeURIComponent(accountPluginPublicationMatch[2] ?? '')
-    const plugin = accountPluginVersions(account).find((candidate) =>
-      candidate.id === pluginId && candidate.version === pluginVersion)
-    if (!plugin) throw new RoomProtocolError(404, 'account-plugin-not-found')
-    const payload = await readJsonRequest(req)
-    const visibility = payload?.visibility
-    if (!['public', 'unlisted', 'private'].includes(visibility)) {
-      throw new RoomProtocolError(400, 'invalid-plugin-publication')
-    }
-    const now = Date.now()
-    if (visibility === 'private') {
-      const registry = await mutatePluginRegistry(ctx, (current) => ({
-        ...current,
-        entries: current.entries.map((entry) => entry.id === pluginId && entry.publisher?.accountId === account.accountId
-          ? {
-              ...entry,
-              updatedAt: now,
-              versions: (Array.isArray(entry.versions) ? entry.versions : []).map((version) =>
-                version.version === pluginVersion
-                  ? { ...version, status: 'withdrawn', visibility: 'private', moderatedAt: now }
-                  : version),
-            }
-          : entry),
-      }))
-      const entry = registry.entries.find((candidate) => candidate.id === pluginId)
-      writeJson(res, 200, { publication: entry ?? null })
-      return true
-    }
-    if (plugin.distributionPolicy !== 'room-distributable') {
-      throw new RoomProtocolError(409, 'plugin-not-publicly-distributable')
-    }
-    const bytes = await readFile(accountPluginBlobFile(ctx, plugin.integrity))
-    const parsedPackage = validateDeclarativePackageForPublication(bytes, plugin)
-    const marketplaceResult = normalizeMarketplacePublication(payload, { allowLegacyFree: true })
-    if (!marketplaceResult.ok) throw new RoomProtocolError(400, marketplaceResult.error)
-    if (Array.isArray(parsedPackage.assets) && parsedPackage.assets.length > 0 && !marketplaceResult.value.rightsManifest?.assets.some((asset) => asset.category === 'art')) throw new RoomProtocolError(400, 'marketplace-art-rights-required')
-    const creatorRegistry = await readPluginRegistry(ctx)
-    const creator = creatorRegistry.creators.find((candidate) => candidate.accountId === account.accountId)
-    if (marketplaceResult.value.pricing.kind === 'paid' && !marketplacePaidPublishingEnabled()) {
-      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
-    }
-    if (marketplaceResult.value.pricing.kind === 'paid' && creator?.status !== 'verified') {
-      throw new RoomProtocolError(403, 'verified-creator-required')
-    }
-    const automatedAnalysis = analyzeMarketplaceDeclarativePackage(parsedPackage)
-    if (automatedAnalysis.riskLevel === 'blocked') {
-      throw new RoomProtocolError(400, 'marketplace-automated-analysis-blocked')
-    }
-    const changelog = normalizedLabel(payload?.changelog, 4_000)
-    const storeDescription = normalizedLabel(payload?.storeDescription, 20_000)
-    if (payload?.commerce && storeDescription.length < 20) {
-      throw new RoomProtocolError(400, 'marketplace-store-description-required')
-    }
-    const tags = Array.isArray(payload?.tags)
-      ? [...new Set(payload.tags.map((tag) => normalizedLabel(tag, 32)).filter(Boolean))].slice(0, 12)
-      : []
-    const productManifest = {
-      schemaVersion: MARKETPLACE_PRODUCT_MANIFEST_SCHEMA_VERSION,
-      productId: plugin.id,
-      listingId: plugin.id,
-      version: plugin.version,
-      publisherAccountId: account.accountId,
-      integrity: plugin.integrity,
-      rulesetId: plugin.rulesetId,
-      contentCategory: plugin.contentCategory,
-      pricing: {
-        kind: marketplaceResult.value.pricing.kind,
-        currency: marketplaceResult.value.pricing.currency,
-        amountMinor: marketplaceResult.value.pricing.amountMinor,
-      },
-      issuedAt: now,
-    }
-    const productSignature = await signMarketplaceProduct(ctx, productManifest)
-    const status = pluginCatalogReviewRequired() ? 'pending' : 'published'
-    const registry = await mutatePluginRegistry(ctx, (current) => {
-      const currentCreator = current.creators.find((candidate) => candidate.accountId === account.accountId)
-      if (marketplaceResult.value.pricing.kind === 'paid' && currentCreator?.status !== 'verified') {
-        throw new RoomProtocolError(403, 'verified-creator-required')
-      }
-      const existing = current.entries.find((entry) => entry.id === pluginId)
-      if (existing && existing.publisher?.accountId !== account.accountId) {
-        throw new RoomProtocolError(409, 'plugin-id-owned-by-other-publisher')
-      }
-      const versionRecord = {
-        ...plugin,
-        visibility,
-        status,
-        changelog,
-        storeDescription: storeDescription || plugin.description || '',
-        marketplace: marketplaceResult.value,
-        automatedAnalysis,
-        productManifest,
-        productSignature,
-        submittedAt: now,
-        ...(status === 'published' ? { publishedAt: now } : {}),
-      }
-      const entry = {
-        schemaVersion: 1,
-        id: plugin.id,
-        name: plugin.name,
-        description: plugin.description ?? '',
-        publisher: {
-          accountId: account.accountId,
-          displayName: account.auth?.username ?? account.displayName,
-          creatorVerified: currentCreator?.status === 'verified',
-        },
-        contentCategory: plugin.contentCategory,
-        tags,
-        versions: [
-          ...(Array.isArray(existing?.versions) ? existing.versions : [])
-            .filter((candidate) => candidate.version !== plugin.version),
-          versionRecord,
-        ],
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      }
-      return {
-        ...current,
-        entries: [...current.entries.filter((candidate) => candidate.id !== pluginId), entry],
-      }
-    })
-    const entry = registry.entries.find((candidate) => candidate.id === pluginId)
-    writeJson(res, status === 'pending' ? 202 : 201, { publication: entry, status })
-    return true
-  }
-
-  const accountPluginMatch = parsed.pathname.match(
-    /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)$/,
-  )
-  if (accountPluginMatch) {
-    const account = await authenticateAccount(req, ctx)
-    const pluginId = decodeURIComponent(accountPluginMatch[1] ?? '')
-    const pluginVersion = decodeURIComponent(accountPluginMatch[2] ?? '')
-    if (
-      !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId) ||
-      !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(pluginVersion)
-    ) throw new RoomProtocolError(400, 'invalid-account-plugin')
-
-    const currentVersions = accountPluginVersions(account)
-    const current = currentVersions.find((candidate) =>
-      candidate.id === pluginId && candidate.version === pluginVersion)
-
-    if (req.method === 'PUT') {
-      const uploadMetadata = decodedPluginMetadataHeader(req)
-      const uploadDistributionPolicy = normalizePluginDistributionPolicy(uploadMetadata.distributionPolicy)
-      if (uploadDistributionPolicy === 'local-only') {
-        throw new RoomProtocolError(409, 'plugin-local-only')
-      }
-      if (uploadDistributionPolicy === 'room-ephemeral') {
-        throw new RoomProtocolError(409, 'plugin-ephemeral-room-only')
-      }
-      const bytes = await readBody(req, STATE_MAX_BYTES)
-      if (bytes.length < 1) throw new RoomProtocolError(400, 'account-plugin-file-empty')
-      assertAccountPluginPackagePolicy(
-        bytes,
-        pluginId,
-        pluginVersion,
-        uploadDistributionPolicy ?? 'room-distributable',
-      )
-      const now = Date.now()
-      const workshopOrigin = await verifiedDmWorkshopOrigin(req, ctx, account, now)
-      const record = accountPluginVersionFromUpload(
-        req,
-        pluginId,
-        pluginVersion,
-        bytes.length,
-        workshopOrigin,
-        now,
-      )
-      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
-      if (actualIntegrity !== record.integrity) {
-        throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
-      }
-      const marketplaceProduct = await assertMarketplacePackageEntitlement(
-        ctx,
-        account.accountId,
-        record.integrity,
-      )
-      if (current) {
-        if (current.integrity !== record.integrity) {
-          throw new RoomProtocolError(409, 'account-plugin-version-conflict')
-        }
-        if (marketplaceProduct) {
-          await syncMarketplaceAccountInstallation(ctx, {
-            accountId: account.accountId,
-            integrity: record.integrity,
-            active: true,
-            timestamp: now,
-          })
-        }
-        writeJson(res, 200, current)
-        return true
-      }
-      if (currentVersions.length >= ACCOUNT_PLUGIN_VERSION_LIMIT) {
-        throw new RoomProtocolError(409, 'account-plugin-version-limit')
-      }
-      const totalBytes = currentVersions.reduce((total, candidate) => total + candidate.sizeBytes, 0)
-      if (totalBytes + record.sizeBytes > ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT) {
-        throw new RoomProtocolError(409, 'account-plugin-storage-limit')
-      }
-      await mkdir(accountPluginBlobDirectory(ctx), { recursive: true })
-      const blobPath = accountPluginBlobFile(ctx, record.integrity)
-      try {
-        await writeFile(blobPath, bytes, { flag: 'wx', mode: 0o600 })
-      } catch (error) {
-        if (error?.code !== 'EEXIST') throw error
-        const stored = await readFile(blobPath)
-        const storedIntegrity = `sha256-${createHash('sha256').update(stored).digest('base64')}`
-        if (storedIntegrity !== record.integrity) {
-          throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
-        }
-      }
-      await mutateAccount(ctx, account.accountId, (latest) => {
-        const versions = accountPluginVersions(latest)
-        const conflict = versions.find((candidate) =>
-          candidate.id === pluginId && candidate.version === pluginVersion)
-        if (conflict && conflict.integrity !== record.integrity) {
-          throw new RoomProtocolError(409, 'account-plugin-version-conflict')
-        }
-        if (conflict) return latest
-        if (versions.length >= ACCOUNT_PLUGIN_VERSION_LIMIT) {
-          throw new RoomProtocolError(409, 'account-plugin-version-limit')
-        }
-        const latestBytes = versions.reduce((total, candidate) => total + candidate.sizeBytes, 0)
-        if (latestBytes + record.sizeBytes > ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT) {
-          throw new RoomProtocolError(409, 'account-plugin-storage-limit')
-        }
-        return {
-          ...latest,
-          pluginLibrary: [...versions, record],
-          updatedAt: now,
-        }
-      })
-      if (marketplaceProduct) {
-        await syncMarketplaceAccountInstallation(ctx, {
-          accountId: account.accountId,
-          integrity: record.integrity,
-          active: true,
-          timestamp: now,
-        })
-      }
-      writeJson(res, 201, record)
-      return true
-    }
-
-    if (req.method === 'GET') {
-      if (!current) throw new RoomProtocolError(404, 'account-plugin-not-found')
-      let bytes
-      try {
-        bytes = await readFile(accountPluginBlobFile(ctx, current.integrity))
-      } catch (error) {
-        if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'account-plugin-file-not-found')
-        throw error
-      }
-      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
-      if (actualIntegrity !== current.integrity) {
-        throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
-      }
-      res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': String(bytes.length),
-        'Cache-Control': 'private, no-store',
-        'X-Stars-Plugin-Version': current.version,
-        'X-Stars-Plugin-Integrity': current.integrity,
-        'X-Stars-Plugin-Filename': encodeURIComponent(current.fileName),
-        'X-Stars-Plugin-Name': encodeURIComponent(current.name),
-        'X-Stars-Plugin-Publisher': encodeURIComponent(current.publisher),
-        'X-Stars-Plugin-License': encodeURIComponent(current.license),
-        'X-Stars-Plugin-State-Schema': String(current.stateSchemaVersion),
-        'X-Stars-Plugin-Api-Version': String(current.apiVersion),
-        'X-Stars-Plugin-Ruleset': current.rulesetId,
-        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
-          manifestSchemaVersion: current.manifestSchemaVersion,
-          minimumGameProtocolVersion: current.minimumGameProtocolVersion,
-          dependencies: current.dependencies,
-          conflicts: current.conflicts,
-          declaredCapabilities: current.declaredCapabilities,
-          distributionPolicy: current.distributionPolicy,
-          contentCategory: current.contentCategory,
-        })),
-      })
-      res.end(bytes)
-      return true
-    }
-
-    if (req.method === 'DELETE') {
-      if (!current) throw new RoomProtocolError(404, 'account-plugin-not-found')
-      const usedByCharacter = (Array.isArray(account.characters) ? account.characters : []).some((character) =>
-        Array.isArray(character?.compatibility?.requiredPlugins) &&
-        character.compatibility.requiredPlugins.some((requirement) =>
-          requirement?.id === current.id &&
-          requirement?.version === current.version &&
-          requirement?.integrity === current.integrity))
-      if (usedByCharacter) throw new RoomProtocolError(409, 'account-plugin-in-use')
-      const registry = await readPluginRegistry(ctx)
-      const marketplaceProduct = registry.entries.flatMap((entry) =>
-        (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
-        .find(({ version }) =>
-          version.integrity === current.integrity &&
-          version.status === 'published')
-      const usedByPublication = registry.entries.some((entry) =>
-        entry.publisher?.accountId === account.accountId &&
-        entry.id === current.id &&
-        (Array.isArray(entry.versions) ? entry.versions : []).some((version) =>
-          version.version === current.version &&
-          version.integrity === current.integrity &&
-          ['pending', 'published'].includes(version.status)))
-      if (usedByPublication) throw new RoomProtocolError(409, 'account-plugin-in-use')
-      const now = Date.now()
-      await mutateAccount(ctx, account.accountId, (latest) => ({
-        ...latest,
-        pluginLibrary: accountPluginVersions(latest).filter((candidate) =>
-          candidate.id !== pluginId || candidate.version !== pluginVersion),
-        updatedAt: now,
-      }))
-      if (marketplaceProduct) {
-        const remainingMarketplaceVersion = currentVersions
-          .filter((candidate) =>
-            candidate.id !== pluginId || candidate.version !== pluginVersion)
-          .find((candidate) =>
-            registry.entries.some((entry) =>
-              entry.id === marketplaceProduct.entry.id &&
-              (Array.isArray(entry.versions) ? entry.versions : []).some((version) =>
-                version.integrity === candidate.integrity &&
-                version.status === 'published')))
-        await syncMarketplaceAccountInstallation(ctx, {
-          accountId: account.accountId,
-          integrity: remainingMarketplaceVersion?.integrity ?? current.integrity,
-          active: Boolean(remainingMarketplaceVersion),
-          timestamp: now,
-        })
-      }
-      writeJson(res, 200, { ok: true })
-      return true
-    }
-
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  const characterMatch = parsed.pathname.match(/^\/api\/accounts\/me\/characters\/([^/]+)$/)
-  if (characterMatch) {
-    const account = await authenticateAccount(req, ctx)
-    const characterId = decodeURIComponent(characterMatch[1] ?? '')
-    if (!characterId || characterId.length > 128) throw new RoomProtocolError(400, 'invalid-account-character')
-    if (req.method === 'PUT') {
-      const payload = await readJsonRequest(req, 2 * 1024 * 1024)
-      const now = Date.now()
-      const record = normalizedAccountCharacterRecord(payload, account.accountId, characterId, now)
-      await mutateAccount(ctx, account.accountId, (current) => {
-        const characters = Array.isArray(current.characters) ? current.characters : []
-        const exists = characters.some((candidate) => candidate?.id === characterId)
-        if (!exists && characters.length >= ACCOUNT_CHARACTER_LIMIT) {
-          throw new RoomProtocolError(409, 'account-character-limit')
-        }
-        return {
-          ...current,
-          characters: [...characters.filter((candidate) => candidate?.id !== characterId), record]
-            .sort((left, right) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0)),
-          updatedAt: now,
-        }
-      })
-      writeJson(res, 200, record)
-      return true
-    }
-    if (req.method === 'DELETE') {
-      const currentCharacters = Array.isArray(account.characters) ? account.characters : []
-      if (!currentCharacters.some((candidate) => candidate?.id === characterId)) {
-        throw new RoomProtocolError(404, 'account-character-not-found')
-      }
-      const now = Date.now()
-      await mutateAccount(ctx, account.accountId, (current) => ({
-        ...current,
-        characters: (Array.isArray(current.characters) ? current.characters : [])
-          .filter((candidate) => candidate?.id !== characterId),
-        updatedAt: now,
-      }))
-      writeJson(res, 200, { ok: true })
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  throw new RoomProtocolError(404, 'account-not-found')
+  return createAccountRoomHandlers(() => ({ACCOUNT_CAMPAIGN_LIMIT,ACCOUNT_CAMPAIGN_ROOM_HISTORY_LIMIT,ACCOUNT_CAMPAIGN_SCHEMA_VERSION,ACCOUNT_CHARACTER_LIMIT,ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT,ACCOUNT_PLUGIN_VERSION_LIMIT,ACCOUNT_SESSION_LIMIT,DND5E_2014_RULESET_ID,ROOM_EPHEMERAL_PLUGIN_MAX_BYTES,ROOM_HOST_TTL_MS,ROOM_PLAYER_SLOTS,RoomProtocolError,SHARED_PROTOCOL_VERSION,SHARED_STATE_CHANGED_CHANNEL,STATE_MAX_BYTES,accountAuthCapabilities,accountCampaignListResponse,accountCampaignResponse,accountCampaigns,accountPluginBlobDirectory,accountPluginBlobFile,accountPluginVersionFromUpload,accountPluginVersions,accountPublicProfile,accountSessionResponse,accountSessionToken,activeRoomPlayers,activeRoomSpectators,aiJobExpectedRevision,aiJobLeaseMatches,applyLobbyRateLimit,assertAccountPluginPackagePolicy,assertAiJobRevision,assertDeclarativeRoomPluginManifest,assertMarketplacePackageEntitlement,assignRoomPlayer,assignRoomSpectator,authenticateAccount,boundedText,campaignAiJobs,campaignScopedContext,createAccountRecord,createLobbyRoom,createRegisteredAccount,createRoomSessionToken,decodedPluginHeader,decodedPluginMetadataHeader,deleteRegisteredAccount,lobbyRoomMember,loginRegisteredAccount,logoutAccount,marketplaceCreatorPublicRecord,marketplacePaidPublishingEnabled,mutateAccount,mutateCampaignAiWorkspace,mutateLobbyRoom,mutatePluginRegistry,mutateRoomPlayerCharacterAssignment,normalizeAccountAvatar,normalizeAccountPassword,normalizeAccountRecoveryCode,normalizeCampaignDescription,normalizeCampaignId,normalizeDnd5eHouseRules,normalizeLobbyRoomCode,normalizePluginDistributionPolicy,normalizePushSubscription,normalizeRoomPluginRequirements,normalizedAccountCharacterRecord,normalizedLabel,normalizedPluginState,normalizedRoomPassword,plainObject,pluginCatalogReviewRequired,publishEventBestEffort,randomLobbyCode,readAccount,readBody,readCharactersForProjection,readJsonRequest,readLobbyRoomOptional,readPluginRegistry,readSharedStateFile,removeRoomEphemeralPluginStorage,requestAccountVerification,resetRegisteredAccountPassword,roomEphemeralPluginStoragePaths,roomHostIsOnline,roomHostPresence,roomHostedPluginFile,roomLobbyFile,roomMemberAccountAuthorized,roomMemberCharacterAssignment,roomMemberResponse,roomMemberSessionAuthorized,roomPasswordMatches,roomPasswordRecord,roomPlayerPresence,roomPluginDirectory,roomPluginDistributionPolicy,roomPluginFile,roomPluginReadiness,roomPluginVersionFile,roomRulesResponse,roomSessionTokenHash,samePluginRequirement,scopedContext,secretMatches,secretRecord,signMarketplaceProduct,syncMarketplaceAccountInstallation,tokenHash,validClientId,validateDeclarativePackageForPublication,verifiedDmWorkshopOrigin,withoutRoomEphemeralPlugins,writeCampaignSnapshot,writeJson})).handleAccountApi(req, res, parsed, ctx)
 }
 
 async function handleRoomLobbyApi(req, res, parsed, ctx) {
-  if (!parsed.pathname.startsWith('/api/rooms')) return false
-  if (!applyLobbyRateLimit(req, res, ctx)) return true
-
-  if (parsed.pathname === '/api/rooms' && req.method === 'POST') {
-    const payload = await readJsonRequest(req)
-    if (payload?.campaignId != null) {
-      throw new RoomProtocolError(400, 'campaign-room-launch-required')
-    }
-    const account = await authenticateAccount(req, ctx, !productionSecurityEnabled())
-    if (payload?.accountId != null && account?.accountId !== payload.accountId) {
-      throw new RoomProtocolError(401, 'invalid-account-session')
-    }
-    const { room, member, roomToken } = await createLobbyRoom(ctx, payload, account)
-    writeJson(res, 201, roomMemberResponse(room, member, 'dm', roomToken))
-    return true
-  }
-
-  const previewMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/preview$/)
-  if (previewMatch) {
-    if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
-    const rawRoomId = String(previewMatch[1] ?? '').toUpperCase()
-    const roomId = normalizeLobbyRoomCode(rawRoomId)
-    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      return { ok: true }
-    })
-    const rules = roomRulesResponse(result.room)
-    writeJson(res, 200, {
-      roomId: result.room.id,
-      roomName: result.room.name,
-      rulesetId: result.room.rulesetId,
-      dmDisplayName: result.room.host?.displayName ?? 'DM',
-      hostOnline: roomHostIsOnline(result.room),
-      hostStatus: roomHostPresence(result.room),
-      hostLastSeenAt: Number(result.room.host?.lastSeenAt ?? 0),
-      hostGraceExpiresAt: Number(result.room.host?.lastSeenAt ?? 0) + ROOM_HOST_TTL_MS,
-      gameProtocolVersion: SHARED_PROTOCOL_VERSION,
-      locked: result.room.locked === true,
-      passwordRequired: plainObject(result.room.joinSecret),
-      playerCount: activeRoomPlayers(result.room).length,
-      spectatorCount: activeRoomSpectators(result.room).length,
-      maxPlayers: Number.isInteger(result.room.maxPlayers) ? result.room.maxPlayers : 3,
-      plugins: rules.plugins,
-    })
-    return true
-  }
-
-  if (await handleRoomVoiceApi(req, res, parsed, ctx, { normalizeLobbyRoomCode, roomLobbyFile, lobbyRoomMember, roomMemberSessionAuthorized, roomPlayerPresence, RoomProtocolError, writeJson })) return true
-  if (await handleLongCastingOwnerApi(req, res, parsed, ctx, { normalizeLobbyRoomCode, roomLobbyFile, lobbyRoomMember, roomMemberSessionAuthorized, RoomProtocolError, writeJson, readBody, scopedContext, readSharedStateFile })) return true
-
-  const protectedRoomMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(.+)$/)
-  if (protectedRoomMatch && !['join', 'preview'].includes(protectedRoomMatch[2])) {
-    const rawRoomId = String(protectedRoomMatch[1] ?? '').toUpperCase()
-    const protectedRoomId = normalizeLobbyRoomCode(rawRoomId)
-    if (protectedRoomId !== rawRoomId || protectedRoomId.length !== 6) {
-      throw new RoomProtocolError(400, 'invalid-room-code')
-    }
-    let protectedRoom
-    try {
-      protectedRoom = JSON.parse(await readFile(roomLobbyFile(ctx, protectedRoomId), 'utf8'))
-    } catch (error) {
-      if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'room-not-found')
-      throw error
-    }
-    const requestMember = lobbyRoomMember(protectedRoom, req?.headers?.['x-stars-member'])
-    if (!requestMember || !roomMemberSessionAuthorized(requestMember, req?.headers?.['x-stars-room-token'])) {
-      throw new RoomProtocolError(403, 'forbidden')
-    }
-  }
-
-  const stagedPluginMatch = parsed.pathname.match(
-    /^\/api\/rooms\/([^/]+)\/plugins\/([^/]+)\/(stage|migration-state|activate)$/,
-  )
-  if (stagedPluginMatch) {
-    const rawRoomId = String(stagedPluginMatch[1] ?? '').toUpperCase()
-    const roomId = normalizeLobbyRoomCode(rawRoomId)
-    const pluginId = decodeURIComponent(stagedPluginMatch[2] ?? '')
-    const operation = stagedPluginMatch[3]
-    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
-    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId)) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-
-    if (operation === 'migration-state') {
-      if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
-      const memberId = req?.headers?.['x-stars-member']
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        const active = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
-          .find((plugin) => plugin.id === pluginId)
-        const stored = room.pluginRuntimeState?.[pluginId]
-        const stateSchemaVersion = Number.isInteger(stored?.stateSchemaVersion)
-          ? stored.stateSchemaVersion
-          : (active?.stateSchemaVersion ?? 1)
-        return {
-          ok: true,
-          active,
-          hasState: !!stored || !!active,
-          runtime: {
-            stateSchemaVersion,
-            data: stored?.data == null ? {} : normalizedPluginState(stored.data),
-          },
-        }
-      })
-      writeJson(res, 200, {
-        installed: !!result.active,
-        hasState: result.hasState,
-        rulesRevision: Number.isFinite(result.room.rulesRevision) ? result.room.rulesRevision : 1,
-        ...(result.active ? { active: result.active } : {}),
-        stateSchemaVersion: result.runtime.stateSchemaVersion,
-        data: result.runtime.data,
-      })
-      return true
-    }
-
-    if (operation === 'stage') {
-      if (req.method !== 'PUT') throw new RoomProtocolError(405, 'method-not-allowed')
-      const memberId = req?.headers?.['x-stars-member']
-      const version = typeof req?.headers?.['x-stars-plugin-version'] === 'string'
-        ? req.headers['x-stars-plugin-version'].trim()
-        : ''
-      const expectedIntegrity = typeof req?.headers?.['x-stars-plugin-integrity'] === 'string'
-        ? req.headers['x-stars-plugin-integrity'].trim()
-        : ''
-      const stateSchemaVersion = Number(req?.headers?.['x-stars-plugin-state-schema'])
-      const encodedFileName = typeof req?.headers?.['x-stars-plugin-filename'] === 'string'
-        ? req.headers['x-stars-plugin-filename']
-        : ''
-      const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
-      const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
-      const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
-      const distributionPolicy = roomPluginDistributionPolicy(req)
-      if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      let fileName = `${pluginId}.dndstars5e`
-      try {
-        const decoded = decodeURIComponent(encodedFileName)
-        if (decoded && decoded.length <= 180 && !/[\\/\0]/.test(decoded)) fileName = decoded
-      } catch {
-        throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      }
-      const requirement = normalizeRoomPluginRequirements([{
-        id: pluginId,
-        version,
-        integrity: expectedIntegrity,
-        stateSchemaVersion,
-      }])?.[0]
-      if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      const authorizedStageRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        return { ok: true }
-      })
-      const bytes = await readBody(
-        req,
-        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
-      )
-      if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
-      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
-      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
-      if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
-      await assertMarketplacePackageEntitlement(
-        ctx,
-        authorizedStageRoom.room.host?.accountId,
-        requirement.integrity,
-      )
-      await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
-      const storagePath = roomPluginVersionFile(ctx, roomId, pluginId, requirement.integrity)
-      await withWriteLock(storagePath, () => atomicRename(storagePath, bytes))
-      const now = Date.now()
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        return {
-          ok: true,
-          member: room.host,
-          next: {
-            ...room,
-            stagedPluginFiles: {
-              ...(room.stagedPluginFiles ?? {}),
-              [pluginId]: {
-                ...requirement,
-                name: pluginName,
-                publisher,
-                license,
-                distributionPolicy,
-                fileName,
-                storageFile: path.basename(storagePath),
-                size: bytes.length,
-                uploadedAt: now,
-              },
-            },
-            updatedAt: now,
-          },
-        }
-      })
-      writeJson(res, 200, roomRulesResponse(result.room, result.member))
-      return true
-    }
-
-    if (operation === 'activate') {
-      if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-      const payload = await readJsonRequest(req)
-      const memberId = payload?.memberId
-      const expectedRulesRevision = Number(payload?.expectedRulesRevision)
-      const stateSchemaVersion = Number(payload?.stateSchemaVersion)
-      const stagedVersion = typeof payload?.stagedVersion === 'string' ? payload.stagedVersion : ''
-      const stagedIntegrity = typeof payload?.stagedIntegrity === 'string' ? payload.stagedIntegrity : ''
-      const expectedActive = payload?.expectedActive == null
-        ? null
-        : normalizeRoomPluginRequirements([payload.expectedActive])?.[0]
-      if (
-        !Number.isInteger(expectedRulesRevision) || !Number.isInteger(stateSchemaVersion) ||
-        payload?.expectedActive != null && !expectedActive
-      ) throw new RoomProtocolError(400, 'invalid-plugin-activation')
-      const data = normalizedPluginState(payload?.data)
-      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
-      const now = Date.now()
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        const currentRevision = Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1
-        if (currentRevision !== expectedRulesRevision) {
-          return { ok: false, status: 409, error: 'rules-revision-conflict' }
-        }
-        const current = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
-          .find((plugin) => plugin.id === pluginId) ?? null
-        if (!samePluginRequirement(current, expectedActive)) {
-          return { ok: false, status: 409, error: 'plugin-version-conflict' }
-        }
-        const staged = room.stagedPluginFiles?.[pluginId]
-        if (!staged || staged.version !== stagedVersion || staged.integrity !== stagedIntegrity) {
-          return { ok: false, status: 409, error: 'staged-plugin-conflict' }
-        }
-        if ((staged.stateSchemaVersion ?? 1) !== stateSchemaVersion) {
-          return { ok: false, status: 409, error: 'plugin-state-schema-mismatch' }
-        }
-        const previousState = room.pluginRuntimeState?.[pluginId]
-        const previousSchema = Number.isInteger(previousState?.stateSchemaVersion)
-          ? previousState.stateSchemaVersion
-          : (current?.stateSchemaVersion ?? 1)
-        if (stateSchemaVersion < previousSchema) {
-          return { ok: false, status: 409, error: 'plugin-state-downgrade' }
-        }
-        const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
-        delete stagedPluginFiles[pluginId]
-        const requiredPlugins = [
-          ...(Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []).filter((plugin) => plugin.id !== pluginId),
-          {
-            id: staged.id,
-            version: staged.version,
-            integrity: staged.integrity,
-            stateSchemaVersion: staged.stateSchemaVersion ?? 1,
-          },
-        ].sort((left, right) => left.id.localeCompare(right.id))
-        return {
-          ok: true,
-          member: room.host,
-          next: {
-            ...room,
-            requiredPlugins,
-            pluginFiles: { ...(room.pluginFiles ?? {}), [pluginId]: staged },
-            stagedPluginFiles,
-            pluginRuntimeState: {
-              ...(room.pluginRuntimeState ?? {}),
-              [pluginId]: {
-                pluginVersion: staged.version,
-                stateSchemaVersion,
-                data,
-                updatedAt: now,
-              },
-            },
-            rulesRevision: currentRevision + 1,
-            rulesUpdatedAt: now,
-            updatedAt: now,
-          },
-        }
-      })
-      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
-        id: `room-rules:plugin-activate:${pluginId}:${now}`,
-        name: 'room-rules',
-        updatedAt: now,
-      })
-      writeJson(res, 200, roomRulesResponse(result.room, result.member))
-      return true
-    }
-  }
-
-  const pluginMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/plugins\/([^/]+)$/)
-  if (pluginMatch) {
-    const rawRoomId = String(pluginMatch[1] ?? '').toUpperCase()
-    const roomId = normalizeLobbyRoomCode(rawRoomId)
-    const pluginId = decodeURIComponent(pluginMatch[2] ?? '')
-    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
-    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId)) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-
-    if (req.method === 'GET') {
-      const memberId = req?.headers?.['x-stars-member']
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        const member = lobbyRoomMember(room, memberId)
-        if (!member) return { ok: false, status: 403, error: 'forbidden' }
-        if (member !== room.host && !roomHostIsOnline(room)) {
-          return { ok: false, status: 409, error: 'room-offline' }
-        }
-        const requirement = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
-          .find((plugin) => plugin.id === pluginId)
-        const hosted = room.pluginFiles?.[pluginId]
-        if (!requirement || !hosted || hosted.integrity !== requirement.integrity || hosted.version !== requirement.version) {
-          return { ok: false, status: 404, error: 'plugin-file-not-found' }
-        }
-        return { ok: true, member, requirement, hosted }
-      })
-      let bytes
-      try {
-        bytes = await readFile(roomHostedPluginFile(ctx, roomId, pluginId, result.hosted))
-      } catch (error) {
-        if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'plugin-file-not-found')
-        throw error
-      }
-      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
-      if (actualIntegrity !== result.requirement.integrity) {
-        throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
-      }
-      res.writeHead(200, {
-        'Content-Type': 'text/javascript; charset=utf-8',
-        'Content-Length': String(bytes.length),
-        'Cache-Control': 'private, no-store',
-        'X-Stars-Plugin-Version': result.requirement.version,
-        'X-Stars-Plugin-Integrity': result.requirement.integrity,
-        'X-Stars-Plugin-State-Schema': String(result.requirement.stateSchemaVersion ?? 1),
-        'X-Stars-Plugin-Filename': encodeURIComponent(result.hosted.fileName ?? `${pluginId}.dndstars5e`),
-        'X-Stars-Plugin-Name': encodeURIComponent(result.hosted.name ?? pluginId),
-        'X-Stars-Plugin-Publisher': encodeURIComponent(result.hosted.publisher ?? '未知发布者'),
-        'X-Stars-Plugin-License': encodeURIComponent(result.hosted.license ?? '未声明'),
-        'X-Stars-Plugin-Distribution-Policy': result.hosted.distributionPolicy ?? 'room-distributable',
-      })
-      res.end(bytes)
-      return true
-    }
-
-    if (req.method === 'PUT') {
-      const memberId = req?.headers?.['x-stars-member']
-      const version = typeof req?.headers?.['x-stars-plugin-version'] === 'string'
-        ? req.headers['x-stars-plugin-version'].trim()
-        : ''
-      const expectedIntegrity = typeof req?.headers?.['x-stars-plugin-integrity'] === 'string'
-        ? req.headers['x-stars-plugin-integrity'].trim()
-        : ''
-      const encodedFileName = typeof req?.headers?.['x-stars-plugin-filename'] === 'string'
-        ? req.headers['x-stars-plugin-filename']
-        : ''
-      const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
-      const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
-      const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
-      const distributionPolicy = roomPluginDistributionPolicy(req)
-      if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      let fileName = `${pluginId}.dndstars5e`
-      try {
-        const decoded = decodeURIComponent(encodedFileName)
-        if (decoded && decoded.length <= 180 && !/[\\/\0]/.test(decoded)) fileName = decoded
-      } catch {
-        throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      }
-      const requirement = normalizeRoomPluginRequirements([{
-        id: pluginId,
-        version,
-        integrity: expectedIntegrity,
-        stateSchemaVersion: Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1),
-      }])?.[0]
-      if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-      const authorizedLegacyRoom = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        return { ok: true, member: room.host }
-      })
-      const bytes = await readBody(
-        req,
-        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
-      )
-      if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
-      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
-      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
-      if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
-      await assertMarketplacePackageEntitlement(
-        ctx,
-        authorizedLegacyRoom.room.host?.accountId,
-        requirement.integrity,
-      )
-      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
-      await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
-      await withWriteLock(roomPluginFile(ctx, roomId, pluginId), () =>
-        atomicRename(roomPluginFile(ctx, roomId, pluginId), bytes))
-      const now = Date.now()
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        const requiredPlugins = [
-          ...(Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []).filter((plugin) => plugin.id !== pluginId),
-          requirement,
-        ].sort((left, right) => left.id.localeCompare(right.id))
-        return {
-          ok: true,
-          member: room.host,
-          next: {
-            ...room,
-            requiredPlugins,
-            pluginFiles: {
-              ...(room.pluginFiles ?? {}),
-              [pluginId]: {
-                ...requirement,
-                name: pluginName,
-                publisher,
-                license,
-                distributionPolicy,
-                fileName,
-                size: bytes.length,
-                uploadedAt: now,
-              },
-            },
-            rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
-            rulesUpdatedAt: now,
-            updatedAt: now,
-          },
-        }
-      })
-      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
-        id: `room-rules:plugin-install:${pluginId}:${now}`,
-        name: 'room-rules',
-        updatedAt: now,
-      })
-      writeJson(res, 200, roomRulesResponse(result.room, result.member))
-      return true
-    }
-
-    if (req.method === 'DELETE') {
-      const memberId = req?.headers?.['x-stars-member']
-      await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        return { ok: true }
-      })
-      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
-      const now = Date.now()
-      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-        const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room, pluginId)
-        const pluginFiles = { ...(room.pluginFiles ?? {}) }
-        delete pluginFiles[pluginId]
-        const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
-        delete stagedPluginFiles[pluginId]
-        const pluginRuntimeState = { ...(room.pluginRuntimeState ?? {}) }
-        delete pluginRuntimeState[pluginId]
-        return {
-          ok: true,
-          member: room.host,
-          ephemeralStoragePaths,
-          next: {
-            ...room,
-            requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
-              .filter((plugin) => plugin.id !== pluginId),
-            pluginFiles,
-            stagedPluginFiles,
-            pluginRuntimeState,
-            rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
-            rulesUpdatedAt: now,
-            updatedAt: now,
-          },
-        }
-      })
-      await removeRoomEphemeralPluginStorage(result.ephemeralStoragePaths ?? [])
-      publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
-        id: `room-rules:plugin-remove:${pluginId}:${now}`,
-        name: 'room-rules',
-        updatedAt: now,
-      })
-      writeJson(res, 200, roomRulesResponse(result.room, result.member))
-      return true
-    }
-    throw new RoomProtocolError(405, 'method-not-allowed')
-  }
-
-  const adminMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/admin$/)
-  if (adminMatch) {
-    if (req.method !== 'PATCH') throw new RoomProtocolError(405, 'method-not-allowed')
-    const rawRoomId = String(adminMatch[1] ?? '').toUpperCase()
-    const roomId = normalizeLobbyRoomCode(rawRoomId)
-    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
-    const payload = await readJsonRequest(req)
-    const memberId = payload?.memberId
-    const operation = payload?.operation
-    const account = await authenticateAccount(req, ctx, true)
-    // Account-campaign rooms keep their shared character/map state under the
-    // campaign storage scope, while the lobby itself remains keyed by its
-    // six-character room code.  Looking up a character assignment in the
-    // lobby scope therefore consulted a stale/empty copy and rejected cards
-    // that the DM UI had just made available.
-    const assignmentRoom = operation === 'assign-character'
-      ? await readLobbyRoomOptional(ctx, roomId)
-      : null
-    const assignmentStateContext = assignmentRoom?.campaignId
-      ? campaignScopedContext(
-          ctx,
-          roomId,
-          assignmentRoom.campaignId,
-          assignmentRoom.campaignOwnerAccountId,
-        )
-      : scopedContext(ctx, roomId)
-    let assignmentCharacter = null
-    if (operation === 'assign-character' && payload?.characterId != null) {
-      const characterId = boundedText(payload.characterId, 128)
-      if (!characterId) throw new RoomProtocolError(400, 'invalid-character-assignment')
-      const characterState = await readCharactersForProjection(assignmentStateContext)
-      if (characterState.corrupted) throw new RoomProtocolError(409, 'characters-unavailable')
-      assignmentCharacter = (Array.isArray(characterState.value?.characters) ? characterState.value.characters : [])
-        .find((character) => character?.id === characterId)
-      if (
-        !assignmentCharacter ||
-        assignmentCharacter.visibleToPlayers === false ||
-        assignmentCharacter.roomMemberId !== payload?.targetMemberId
-      ) {
-        throw new RoomProtocolError(409, 'character-assignment-conflict')
-      }
-    }
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      if (room.host?.memberId !== memberId || !roomMemberAccountAuthorized(room.host, account)) {
-        return { ok: false, status: 403, error: 'forbidden' }
-      }
-      const now = Date.now()
-      const players = Array.isArray(room.players) ? room.players : []
-      const activePlayers = activeRoomPlayers(room, now)
-      if (operation === 'set-lock') {
-        return { ok: true, member: room.host, role: 'dm', next: { ...room, locked: payload.locked === true, updatedAt: now } }
-      }
-      if (operation === 'set-capacity') {
-        const maxPlayers = Number(payload.maxPlayers)
-        if (!Number.isInteger(maxPlayers) || maxPlayers < activePlayers.length || maxPlayers > ROOM_PLAYER_SLOTS.length) {
-          return { ok: false, status: 400, error: 'invalid-room-capacity' }
-        }
-        return { ok: true, member: room.host, role: 'dm', next: { ...room, maxPlayers, updatedAt: now } }
-      }
-      if (operation === 'set-password') {
-        const password = normalizedRoomPassword(payload.password)
-        if (password.length > 64) return { ok: false, status: 400, error: 'invalid-room-password' }
-        return {
-          ok: true,
-          member: room.host,
-          role: 'dm',
-          next: { ...room, joinSecret: roomPasswordRecord(password), updatedAt: now },
-        }
-      }
-      if (operation === 'kick') {
-        const target = players.find((player) => player.memberId === payload.targetMemberId && !player.removedAt)
-        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
-        return {
-          ok: true,
-          member: room.host,
-          role: 'dm',
-          next: {
-            ...room,
-            players: players.map((player) => player.memberId === target.memberId
-              ? { ...player, lastSeenAt: 0, removedAt: now }
-              : player),
-            updatedAt: now,
-          },
-        }
-      }
-      if (operation === 'restore-member') {
-        const target = players.find((player) => player.memberId === payload.targetMemberId && player.removedAt)
-        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
-        const restored = { ...target, lastSeenAt: 0, leftAt: now }
-        delete restored.removedAt
-        return {
-          ok: true,
-          member: room.host,
-          role: 'dm',
-          next: {
-            ...room,
-            players: players.map((player) => player.memberId === target.memberId ? restored : player),
-            updatedAt: now,
-          },
-        }
-      }
-      if (operation === 'assign-character') {
-        return mutateRoomPlayerCharacterAssignment(room, {
-          targetMemberId: payload.targetMemberId,
-          characterId: assignmentCharacter?.id ?? null,
-          characterName: assignmentCharacter?.name ?? null,
-        }, now)
-      }
-      if (operation === 'transfer-dm') {
-        const target = activePlayers.find((player) => player.memberId === payload.targetMemberId)
-        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
-        if (!roomPluginReadiness(room.requiredPlugins, target.activePlugins).ready) {
-          return { ok: false, status: 409, error: 'target-plugins-not-ready' }
-        }
-        const nextHost = { ...target, lastSeenAt: now }
-        delete nextHost.slot
-        delete nextHost.role
-        const previousHostAsPlayer = {
-          ...room.host,
-          role: 'player',
-          slot: target.slot,
-          joinedAt: room.host.joinedAt ?? room.createdAt,
-          lastSeenAt: now,
-        }
-        return {
-          ok: true,
-          member: previousHostAsPlayer,
-          role: 'player',
-          next: {
-            ...room,
-            host: nextHost,
-            players: [...players.filter((player) => player.memberId !== target.memberId), previousHostAsPlayer],
-            authorityRevision: Number(room.authorityRevision ?? 1) + 1,
-            updatedAt: now,
-          },
-        }
-      }
-      return { ok: false, status: 400, error: 'invalid-room-operation' }
-    })
-    if (operation === 'assign-character') {
-      publishEventBestEffort(assignmentStateContext, SHARED_STATE_CHANGED_CHANNEL, {
-        id: `room-character-assignment:${payload?.targetMemberId}:${result.room.updatedAt}`,
-        name: 'room-character-assignment',
-        updatedAt: result.room.updatedAt,
-      })
-    }
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role))
-    return true
-  }
-
-  const match = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(join|heartbeat|leave|close|roster|rules)$/)
-  if (!match) throw new RoomProtocolError(404, 'room-not-found')
-  const rawRoomId = String(match[1] ?? '').toUpperCase()
-  const roomId = normalizeLobbyRoomCode(rawRoomId)
-  if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
-  if (match[2] === 'rules') {
-    if (req.method !== 'GET' && req.method !== 'PUT') throw new RoomProtocolError(405, 'method-not-allowed')
-    const payload = req.method === 'PUT' ? await readJsonRequest(req) : null
-    const memberId = req.method === 'GET' ? req?.headers?.['x-stars-member'] : payload?.memberId
-    const account = await authenticateAccount(req, ctx, true)
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      const member = lobbyRoomMember(room, memberId)
-      if (!member || !roomMemberAccountAuthorized(member, account)) return { ok: false, status: 403, error: 'forbidden' }
-      if (req.method === 'GET') return { ok: true, member }
-      if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
-      const requiredPlugins = normalizeRoomPluginRequirements(payload?.requiredPlugins)
-      if (!requiredPlugins) return { ok: false, status: 400, error: 'invalid-plugin-manifest' }
-      const houseRules = payload?.houseRules == null
-        ? normalizeDnd5eHouseRules(room.dnd5eHouseRules)
-        : normalizeDnd5eHouseRules(payload.houseRules)
-      const hosted = room.pluginFiles ?? {}
-      if (requiredPlugins.some((plugin) =>
-        hosted[plugin.id]?.version !== plugin.version || hosted[plugin.id]?.integrity !== plugin.integrity)) {
-        return { ok: false, status: 409, error: 'plugin-file-missing' }
-      }
-      const now = Date.now()
-      const host = { ...room.host, activePlugins: requiredPlugins, lastSeenAt: now }
-      return {
-        ok: true,
-        member: host,
-        next: {
-          ...room,
-          host,
-          requiredPlugins,
-          dnd5eHouseRules: houseRules,
-          rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
-          rulesUpdatedAt: now,
-          updatedAt: now,
-        },
-      }
-    })
-    if (req.method === 'PUT') publishEventBestEffort(scopedContext(ctx, roomId), SHARED_STATE_CHANGED_CHANNEL, {
-      id: `room-rules:update:${result.room.rulesRevision}:${result.room.rulesUpdatedAt}`,
-      name: 'room-rules',
-      updatedAt: result.room.rulesUpdatedAt,
-    })
-    writeJson(res, 200, roomRulesResponse(result.room, result.member))
-    return true
-  }
-  if (match[2] === 'roster') {
-    if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
-    const memberId = req?.headers?.['x-stars-member']
-    const account = await authenticateAccount(req, ctx, true)
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      if (
-        typeof memberId !== 'string' || room.host?.memberId !== memberId ||
-        !roomMemberAccountAuthorized(room.host, account)
-      ) {
-        return { ok: false, status: 403, error: 'forbidden' }
-      }
-      return { ok: true }
-    })
-    const now = Date.now()
-    writeJson(res, 200, {
-      roomId: result.room.id,
-      locked: result.room.locked === true,
-      passwordRequired: plainObject(result.room.joinSecret),
-      maxPlayers: Number.isInteger(result.room.maxPlayers) ? result.room.maxPlayers : 3,
-      players: (Array.isArray(result.room.players) ? result.room.players : []).map((player) => ({
-        memberId: player.memberId,
-        accountId: player.accountId,
-        displayName: player.displayName,
-        role: player.role === 'spectator' ? 'spectator' : 'player',
-        slot: player.slot,
-        joinedAt: player.joinedAt,
-        lastSeenAt: player.lastSeenAt,
-        status: roomPlayerPresence(player, now),
-        online: roomPlayerPresence(player, now) === 'online',
-        activeCharacterId: normalizedLabel(player.activeCharacterId, 128) || null,
-        activeCharacterName: normalizedLabel(player.activeCharacterName, 80) || null,
-        characterAssignment: roomMemberCharacterAssignment(player),
-        ...roomPluginReadiness(result.room.requiredPlugins, player.activePlugins),
-      })),
-    })
-    return true
-  }
-
-  if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
-  const payload = await readJsonRequest(req)
-
-  if (match[2] === 'join') {
-    const displayName = normalizedLabel(payload?.displayName, 24)
-    const clientId = payload?.clientId
-    const resumeMemberId = payload?.resumeMemberId
-    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
-    const requestedRole = payload?.role === 'spectator' ? 'spectator' : 'player'
-    const account = await authenticateAccount(req, ctx, !productionSecurityEnabled())
-    const roomToken = createRoomSessionToken()
-    const roomTokenHash = roomSessionTokenHash(roomToken)
-    if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
-    if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
-    if (resumeMemberId != null && (typeof resumeMemberId !== 'string' || resumeMemberId.length < 8 || resumeMemberId.length > 128)) {
-      throw new RoomProtocolError(400, 'invalid-resume-member')
-    }
-    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (account && room.host?.accountId === account.accountId) {
-        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-        const now = Date.now()
-        const member = {
-          ...room.host,
-          clientId,
-          displayName,
-          activePlugins,
-          lastSeenAt: now,
-          leftAt: undefined,
-          roomTokenHash,
-        }
-        return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
-      }
-      if (!roomPasswordMatches(room, payload?.password)) return { ok: false, status: 403, error: 'invalid-room-password' }
-      const assign = requestedRole === 'spectator' ? assignRoomSpectator : assignRoomPlayer
-      return assign(room, {
-        clientId,
-        displayName,
-        memberId: resumeMemberId ?? randomUUID(),
-        accountId: account?.accountId,
-        activePlugins,
-        roomTokenHash,
-      })
-    })
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? requestedRole, roomToken))
-    return true
-  }
-
-  const memberId = payload?.memberId
-  if (typeof memberId !== 'string' || memberId.length < 8) throw new RoomProtocolError(400, 'member-not-found')
-  const account = await authenticateAccount(req, ctx, true)
-
-  if (match[2] === 'heartbeat') {
-    const now = Date.now()
-    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
-    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
-    const characterPresenceProvided = Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterId') ||
-      Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterName')
-    const presencePatch = (member) => {
-      const assignment = roomMemberCharacterAssignment(member)
-      if (assignment.enforced) {
-        return {
-          activeCharacterId: assignment.characterId,
-          activeCharacterName: assignment.characterName,
-        }
-      }
-      return characterPresenceProvided
-        ? {
-            activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
-            activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
-          }
-        : {
-            activeCharacterId: member?.activeCharacterId ?? null,
-            activeCharacterName: member?.activeCharacterName ?? null,
-          }
-    }
-    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
-      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
-      if (room.host?.memberId === memberId) {
-        if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
-        const member = {
-          ...room.host,
-          activePlugins,
-          lastSeenAt: now,
-          leftAt: undefined,
-          ...presencePatch(room.host),
-        }
-        return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
-      }
-      if (!roomHostIsOnline(room, now)) return { ok: false, status: 409, error: 'room-offline' }
-      const players = Array.isArray(room.players) ? room.players : []
-      const member = players.find((player) => player.memberId === memberId)
-      if (!member) return { ok: false, status: 404, error: 'member-not-found' }
-      if (!roomMemberAccountAuthorized(member, account)) return { ok: false, status: 403, error: 'forbidden' }
-      if (roomPlayerPresence(member, now) === 'removed') return { ok: false, status: 403, error: 'member-removed' }
-      const memberRole = member.role === 'spectator' ? 'spectator' : 'player'
-      const assign = memberRole === 'spectator' ? assignRoomSpectator : assignRoomPlayer
-      const resumed = assign(room, {
-        memberId: member.memberId,
-        accountId: member.accountId,
-        clientId: member.clientId,
-        displayName: member.displayName,
-        activePlugins,
-      }, now)
-      if (!resumed.ok) return resumed
-      const refreshed = {
-        ...resumed.member,
-        ...presencePatch(member),
-      }
-      return {
-        ok: true,
-        member: refreshed,
-        role: memberRole,
-        next: {
-          ...resumed.next,
-          players: resumed.next.players.map((player) => player.memberId === refreshed.memberId ? refreshed : player),
-        },
-      }
-    })
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role))
-    return true
-  }
-
-  const leavingClosesRoom = match[2] === 'close'
-  const leaveResult = await mutateLobbyRoom(ctx, roomId, (room) => {
-    const now = Date.now()
-    if (room.host?.memberId === memberId) {
-      if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
-      if (!leavingClosesRoom) {
-        return {
-          ok: true,
-          next: {
-            ...room,
-            updatedAt: now,
-            host: { ...room.host, lastSeenAt: 0, leftAt: now },
-          },
-        }
-      }
-      const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room)
-      const withoutEphemeral = withoutRoomEphemeralPlugins(room)
-      return {
-        ok: true,
-        ephemeralStoragePaths,
-        next: {
-          ...withoutEphemeral,
-          closedAt: now,
-          updatedAt: now,
-          host: { ...room.host, lastSeenAt: 0 },
-        },
-      }
-    }
-    if (leavingClosesRoom) return { ok: false, status: 403, error: 'forbidden' }
-    const players = Array.isArray(room.players) ? room.players : []
-    if (!players.some((player) => player.memberId === memberId)) {
-      return { ok: false, status: 404, error: 'member-not-found' }
-    }
-    const leaving = players.find((player) => player.memberId === memberId)
-    if (!roomMemberAccountAuthorized(leaving, account)) return { ok: false, status: 403, error: 'forbidden' }
-    return {
-      ok: true,
-      // 离开只结束当前在线状态，保留房间成员身份供同一浏览器恢复角色归属。
-      // DM“踢出”仍会彻底删除成员记录，因此不会绕过锁房或踢人操作。
-      next: {
-        ...room,
-        players: players.map((player) => player.memberId === memberId
-          ? { ...player, lastSeenAt: 0, leftAt: now }
-          : player),
-        updatedAt: now,
-      },
-    }
-  })
-  await removeRoomEphemeralPluginStorage(leaveResult.ephemeralStoragePaths ?? [])
-  writeJson(res, 200, { ok: true })
-  return true
+  return createAccountRoomHandlers(() => ({ACCOUNT_CAMPAIGN_LIMIT,ACCOUNT_CAMPAIGN_ROOM_HISTORY_LIMIT,ACCOUNT_CAMPAIGN_SCHEMA_VERSION,ACCOUNT_CHARACTER_LIMIT,ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT,ACCOUNT_PLUGIN_VERSION_LIMIT,ACCOUNT_SESSION_LIMIT,DND5E_2014_RULESET_ID,ROOM_EPHEMERAL_PLUGIN_MAX_BYTES,ROOM_HOST_TTL_MS,ROOM_PLAYER_SLOTS,RoomProtocolError,SHARED_PROTOCOL_VERSION,SHARED_STATE_CHANGED_CHANNEL,STATE_MAX_BYTES,accountAuthCapabilities,accountCampaignListResponse,accountCampaignResponse,accountCampaigns,accountPluginBlobDirectory,accountPluginBlobFile,accountPluginVersionFromUpload,accountPluginVersions,accountPublicProfile,accountSessionResponse,accountSessionToken,activeRoomPlayers,activeRoomSpectators,aiJobExpectedRevision,aiJobLeaseMatches,applyLobbyRateLimit,assertAccountPluginPackagePolicy,assertAiJobRevision,assertDeclarativeRoomPluginManifest,assertMarketplacePackageEntitlement,assignRoomPlayer,assignRoomSpectator,authenticateAccount,boundedText,campaignAiJobs,campaignScopedContext,createAccountRecord,createLobbyRoom,createRegisteredAccount,createRoomSessionToken,decodedPluginHeader,decodedPluginMetadataHeader,deleteRegisteredAccount,lobbyRoomMember,loginRegisteredAccount,logoutAccount,marketplaceCreatorPublicRecord,marketplacePaidPublishingEnabled,mutateAccount,mutateCampaignAiWorkspace,mutateLobbyRoom,mutatePluginRegistry,mutateRoomPlayerCharacterAssignment,normalizeAccountAvatar,normalizeAccountPassword,normalizeAccountRecoveryCode,normalizeCampaignDescription,normalizeCampaignId,normalizeDnd5eHouseRules,normalizeLobbyRoomCode,normalizePluginDistributionPolicy,normalizePushSubscription,normalizeRoomPluginRequirements,normalizedAccountCharacterRecord,normalizedLabel,normalizedPluginState,normalizedRoomPassword,plainObject,pluginCatalogReviewRequired,publishEventBestEffort,randomLobbyCode,readAccount,readBody,readCharactersForProjection,readJsonRequest,readLobbyRoomOptional,readPluginRegistry,readSharedStateFile,removeRoomEphemeralPluginStorage,requestAccountVerification,resetRegisteredAccountPassword,roomEphemeralPluginStoragePaths,roomHostIsOnline,roomHostPresence,roomHostedPluginFile,roomLobbyFile,roomMemberAccountAuthorized,roomMemberCharacterAssignment,roomMemberResponse,roomMemberSessionAuthorized,roomPasswordMatches,roomPasswordRecord,roomPlayerPresence,roomPluginDirectory,roomPluginDistributionPolicy,roomPluginFile,roomPluginReadiness,roomPluginVersionFile,roomRulesResponse,roomSessionTokenHash,samePluginRequirement,scopedContext,secretMatches,secretRecord,signMarketplaceProduct,syncMarketplaceAccountInstallation,tokenHash,validClientId,validateDeclarativePackageForPublication,verifiedDmWorkshopOrigin,withoutRoomEphemeralPlugins,writeCampaignSnapshot,writeJson})).handleRoomLobbyApi(req, res, parsed, ctx)
 }
 
 function eventPublisher(ctx) {
@@ -14881,6 +13322,32 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           }
           payload = normalized.event
         }
+        if(typeof payload?.requestId==='string'&&payload.requestId.startsWith('mm-spell-ward-own:')){
+          const own=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','player-action-processed','player-action-ack','combat-interrupts'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]])),identity={roomId:ctx.roomId,memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole};return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-spell-windows.json'),current=>mutateMastermindSpellWardOwnDice(current,snapshot,identity,channel,payload,Date.now(),value=>createHash('sha256').update(value).digest('hex'),mutateMastermindSpellWardOwn))})
+          if(!own.ok){writeJson(res,own.status??403,{error:own.error});return true}
+        }
+        if(typeof payload?.requestId==='string'&&payload.requestId.startsWith('tempestuous-landing-original:')){const evidence=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousLandingOriginalEvent(ctx,channel,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})});if(!evidence.ok){writeJson(res,evidence.status??403,{error:evidence.error});return true}}
+        if(typeof payload?.requestId==='string'&&(payload.requestId.startsWith('spellcasting-original-saving:')||payload.requestId.startsWith('spell-target-original-saving:'))){
+          const evidence=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchSpellcastingOriginalSavingEvent(ctx,channel,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})})
+          if(!evidence.ok){writeJson(res,evidence.status??403,{error:evidence.error});return true}
+        }
+        if(typeof payload?.requestId==='string'&&payload.requestId.startsWith('storm-fury-saving:')){
+          const evidence=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchStormFurySavingDiceEvent(ctx,channel,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})})
+          if(!evidence.ok){writeJson(res,evidence.status??403,{error:evidence.error});return true}
+        }
+        if(channel==='bountiful-opportunity-settlement-host-raw-dm-to-host'||channel==='bountiful-opportunity-settlement-source-dm-to-host'||channel==='bountiful-opportunity-settlement-confirm-dm-to-host'||channel==='bountiful-opportunity-source-dm-to-host'||channel==='bountiful-native-raw-source-dm-to-host'||channel==='bountiful-original-token-command-dm-to-host'||channel==='bountiful-original-mint-dm-to-host'||channel==='bountiful-ready-mint-dm-to-host'||channel==='dice-roll-request-player-to-dm'||channel==='dice-roll-request-dm-to-player'){
+          const evidence=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+            const result=await recordBountifulReadyDiceEvent(ctx,channel,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})
+            if(!result.ok||!result.opportunitySettlement)return result
+            const roll=result.opportunitySettlement,{value:current}=await readSharedStateFile(ctx,'combat'),id=JSON.stringify(['bountiful-original-parent',roll.spec.parentId,0]),parent=current?.bountifulOriginalParents?.[id]
+            if(!parent||parent.consumed||!['opportunity-move','opportunity-move-sequence'].includes(parent.originalAdapterId)||parent.identity.roomId!==ctx.roomId||parent.identity.hostMemberId!==roll.spec.hostMemberId)return{ok:false,status:403,error:'bountiful-opportunity-settlement:current-parent-required'}
+            const rows=parent.opportunitySettlementRolls??[],existing=rows.find(row=>row.requestId===roll.requestId)
+            if(existing&&JSON.stringify(canonicalBountifulOpportunitySettlement(existing))===JSON.stringify(canonicalBountifulOpportunitySettlement(roll)))return result
+            const committed=await atomicWriteSharedStateTransactionUnlocked(ctx,[{name:'combat',expectedRevision:sharedStateRevision(current),data:{...current,bountifulOriginalParents:{...current.bountifulOriginalParents,[id]:{...parent,opportunitySettlementRolls:existing?rows.map(row=>row.requestId===roll.requestId?roll:row):[...rows,roll]}}}}],authenticatedRoomMember.memberId,'bountiful-opportunity-journal:'+roll.requestId)
+            return committed.ok?result:{ok:false,status:409,error:'bountiful-opportunity-settlement:journal-cas-required'}
+          })
+          if(!evidence.ok){writeJson(res,evidence.status,{error:evidence.error});return true}
+        }
         payload = stampClientEvent(channel, payload, authenticatedRoomMember)
         publishEvent(ctx, channel, payload)
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -15005,6 +13472,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
       const transactionId = boundedText(payload?.transactionId, 180)
       const submittedWrites = Array.isArray(payload?.writes) ? payload.writes : []
+      const permittedWriteCount=armorNativeExtendedScAtomicEnvelope(submittedWrites,transactionId)?10:SHARED_STATE_TRANSACTION_MAX_WRITES
       const submittedJournalMutations = payload?.roomJournalMutations == null
         ? []
         : payload.roomJournalMutations
@@ -15012,7 +13480,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         !transactionId ||
         !/^[a-zA-Z0-9:._-]+$/.test(transactionId) ||
         submittedWrites.length < 1 ||
-        submittedWrites.length > SHARED_STATE_TRANSACTION_MAX_WRITES ||
+        submittedWrites.length > permittedWriteCount ||
         !Array.isArray(submittedJournalMutations) ||
         submittedJournalMutations.length > 16
       ) {
@@ -15029,6 +13497,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 400, { error: 'invalid-state-transaction-resource' })
         return true
       }
+      if((names.includes('bountiful-initiative-originals')||names.includes('mastermind-native-ward-bountifuls')||names.includes('mastermind-native-ward-outcomes')||names.includes('mastermind-native-ward-originals')||names.includes('mastermind-ward-saving-choices')||names.includes('mastermind-ward-originals')||names.includes('mastermind-ward-attacks')||names.includes('mastermind-misdirections')||names.includes('mastermind-magic-truth')||names.includes('mastermind-thought-readings')||names.includes('arcane-movement-parents')||names.includes('activity-death-parents')||names.includes('armor-native-parents')||names.includes('sc-base-prefix-rolls')||names.includes('arcane-base-prefix-rolls'))&&ctx.accessRole!=='dm'){writeJson(res,403,{error:'dm-authority-required'});return true}
       const writes = []
       const readRevisions = payload?.readRevisions ?? {}
       if (typeof readRevisions !== 'object' || Array.isArray(readRevisions) ||
@@ -15125,12 +13594,12 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writes.push({ name: 'room-journal', expectedRevision, data })
         }
       }
-      if (writes.length > SHARED_STATE_TRANSACTION_MAX_WRITES) {
+      if (writes.length > SHARED_STATE_TRANSACTION_MAX_WRITES && !armorNativeExtendedScAtomicEnvelope(writes,transactionId)) {
         writeJson(res, 400, { error: 'state-transaction-too-many-resources' })
         return true
       }
       const result = await atomicWriteSharedStateTransaction(
-        ctx,
+        {...ctx,magicTruthAuthority:{roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember?.memberId,role:ctx.accessRole},mastermindThoughtAuthority:{roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember?.memberId,role:ctx.accessRole}},
         writes,
         req?.headers?.['x-stars-writer'],
         transactionId,
@@ -15193,8 +13662,537 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
+    if(['/api/state/arcane-movement/request','/api/state/arcane-movement/requests'].includes(parsed.pathname)&&req.method==='GET'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'arcane-movement-room-member-required'});return true}
+      const identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','arcane-movement-parents'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return parsed.pathname.endsWith('/requests')?{ok:true,requests:projectArcaneMovementChoices(snapshot['arcane-movement-parents'],snapshot,identity)}:projectArcaneMovementDie(snapshot['arcane-movement-parents'],snapshot,identity,parsed.searchParams.get('requestId'))
+      });if(!result.ok){writeJson(res,result.status??403,{error:result.error});return true}writeJson(res,200,{ok:true,request:result.request,requests:result.requests});return true
+    }
+    if(['/api/state/arcane-movement/begin','/api/state/arcane-movement/issue','/api/state/arcane-movement/raw','/api/state/arcane-movement/confirm','/api/state/arcane-movement/checkpoint','/api/state/arcane-movement/choice'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'arcane-movement-room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now(),operation=parsed.pathname.split('/').at(-1),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'arcane-movement-parents.json'),current=>(operation==='begin'?issueArcaneMovementOriginal:operation==='issue'?issueArcaneMovementDie:operation==='raw'?lockArcaneMovementDie:operation==='confirm'?confirmArcaneMovementDie:operation==='checkpoint'?issueArcaneMovementCheckpoint:acceptArcaneMovementChoice)(current,snapshot,identity,payload,now,hash))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'arcane-movement-begin-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'arcane-movement:begin:'+result.parentId+':'+now,name:'arcane-movement-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,parentId:result.parentId,requestId:result.requestId,checkpointId:result.checkpointId,firstHostNow:result.firstHostNow,revision:sharedStateRevision(result.next)});return true
+    }
+    if(parsed.pathname==='/api/state/arcane-base-prefix/request'&&req.method==='GET'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      const identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','arcane-base-prefix-rolls','arcane-native-parents'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return projectArcaneBasePrefixRequest(snapshot['arcane-base-prefix-rolls'],snapshot,identity,parsed.searchParams.get('requestId'),hash)
+      })
+      if(!result.ok){writeJson(res,result.status??403,{error:result.error});return true}
+      writeJson(res,200,{ok:true,request:result.request});return true
+    }
+    if(['/api/state/arcane-base-prefix/begin','/api/state/arcane-base-prefix/issue','/api/state/arcane-base-prefix/raw','/api/state/arcane-base-prefix/confirm'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now(),operation=parsed.pathname.split('/').at(-1),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','arcane-native-parents','arcane-base-prefix-rolls','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'arcane-base-prefix-rolls.json'),current=>(operation==='issue'||operation==='begin'?issueArcaneBasePrefixRequest:operation==='raw'?lockArcaneBasePrefixRaw:confirmArcaneBasePrefixRaw)(current,snapshot,identity,operation==='begin'?{...payload,begin:true}:payload,now,hash))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'arcane-base-prefix-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'arcane-base-prefix:'+operation+':'+result.requestId+':'+now,name:'arcane-base-prefix-rolls',updatedAt:now})
+      writeJson(res,200,{ok:true,parentId:result.parentId,requestId:result.requestId,revision:sharedStateRevision(result.next)});return true
+}
+
+    if(['/api/state/mastermind-spell-window/ward-own-register','/api/state/mastermind-spell-window/ward-own-source','/api/state/mastermind-spell-window/ward-own-choice','/api/state/mastermind-spell-window/ward-own-raw','/api/state/mastermind-spell-window/ward-own-confirm','/api/state/mastermind-spell-window/ward-own-request'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!authenticatedRoom?.host?.memberId){writeJson(res,403,{error:'spell-ward-own:actual-room-member-required'});return true}
+      const payload=JSON.parse((await readBody(req)).toString('utf8')),operation=parsed.pathname.split('/').at(-1),identity={roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,hostMemberId:authenticatedRoom.host.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','player-action-processed','player-action-ack','combat-interrupts'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]));if(operation==='ward-own-request'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length!==1||typeof payload.requestId!=='string')return{ok:false,status:400,error:'spell-ward-own-dice:closed-request-id-required'};let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-spell-windows.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}return projectMastermindSpellWardOwnDice(current,snapshot,identity,payload.requestId,hash)}return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-spell-windows.json'),current=>mutateMastermindSpellWardOwn(current,snapshot,identity,operation,payload,Date.now(),hash))})
+      if(!result.ok){writeJson(res,result.status??403,{error:result.error});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-spell-ward-own:'+result.parentId+':'+Date.now(),name:'mastermind-spell-windows',updatedAt:Date.now()})
+      writeJson(res,200,{ok:true,...(operation==='ward-own-request'?{request:result.request}:{own:result.own,pending:result.pending===true,firstHostNow:result.firstHostNow})});return true
+    }
+
+    if((parsed.pathname==='/api/state/mastermind-spell-window/request'&&req.method==='GET')||(['/api/state/mastermind-spell-window/begin','/api/state/mastermind-spell-window/register',"/api/state/mastermind-spell-window/ward-bountiful-register","/api/state/mastermind-spell-window/ward-bountiful-choice","/api/state/mastermind-spell-window/ward-bountiful-raw","/api/state/mastermind-spell-window/ward-bountiful-confirm","/api/state/mastermind-spell-window/ward-bountiful-project","/api/state/mastermind-spell-window/ward-bountiful-complete",'/api/state/mastermind-spell-window/ward-register','/api/state/mastermind-spell-window/ward-complete','/api/state/mastermind-spell-window/ward-outcome-register','/api/state/mastermind-spell-window/ward-outcome','/api/state/mastermind-spell-window/ward-retarget-propose','/api/state/mastermind-spell-window/ward-retarget-accept','/api/state/mastermind-spell-window/ward-retarget-reject','/api/state/mastermind-spell-window/issue','/api/state/mastermind-spell-window/raw','/api/state/mastermind-spell-window/confirm','/api/state/mastermind-spell-window/complete','/api/state/mastermind-spell-window/ward-choice-list','/api/state/mastermind-spell-window/source'].includes(parsed.pathname)&&req.method==='POST')){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'spell-window-room-member-required'});return true}
+      let payload={};if(req.method==='POST')try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','player-action-processed','player-action-ack'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]])),file=path.join(ctx.stateRoot,'mastermind-spell-windows.json');if(operation==='request'||operation==='source'||operation==='ward-choice-list'){let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}if(operation==='ward-choice-list')return payload&&typeof payload==='object'&&!Array.isArray(payload)&&Object.keys(payload).length===0?listMastermindSpellWindowWardChoices(current,snapshot,identity,hash):{ok:false,status:400,error:'spell-ward-choice:closed-list-required'};return operation==='request'?projectMastermindSpellWindowRequest(current,snapshot,identity,parsed.searchParams.get('requestId'),hash):Object.keys(payload??{}).length===1?readMastermindSpellWindowSource(current,snapshot,identity,payload?.parentId,hash):{ok:false,status:400,error:'spell-window-parent-id-required'}}return atomicMutateJsonStateLocked(file,current=>mutateMastermindSpellWindows(current,snapshot,identity,operation,payload,now,hash))})
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'spell-window-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-spell-window:'+operation+':'+result.parentId+':'+now,name:'mastermind-spell-windows',updatedAt:now})
+      writeJson(res,200,{ok:true,...(operation==='ward-choice-list'?{choices:result.choices}:operation==='request'?{request:result.request}:operation==='source'?{parent:result.parent}:{parentId:result.parentId,requestId:result.requestId,firstHostNow:result.firstHostNow,windowIndex:result.windowIndex,complete:result.complete,revision:sharedStateRevision(result.next),...(operation.startsWith('ward-bountiful-')?{choice:result.choice}:{})})});return true
+    }
+    if(parsed.pathname==='/api/state/mastermind-ward-saving-choices'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'ward-saving-protocol-required'});return true}
+    if(['/api/state/mastermind-ward-saving/register','/api/state/mastermind-ward-saving/request','/api/state/mastermind-ward-saving/list','/api/state/mastermind-ward-saving/answer','/api/state/mastermind-ward-saving/raw','/api/state/mastermind-ward-saving/confirm','/api/state/mastermind-ward-saving/complete'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','mastermind-ward-attacks','player-action-processed','player-action-ack','mastermind-ward-originals'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]])),file=path.join(ctx.stateRoot,'mastermind-ward-saving-choices.json');if(operation==='request'||operation==='list'){let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}if(operation==='list')return listMastermindWardSavingChoices(current,snapshot,identity,payload);if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length!==1)return{ok:false,status:400,error:'ward-saving:request-id-only'};return projectMastermindWardSavingChoice(current,snapshot,identity,payload.requestId)}return atomicMutateJsonStateLocked(file,current=>mutateMastermindWardSavingChoices(current,snapshot,identity,operation,payload,now))})
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'ward-saving-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-ward-saving:'+operation+':'+result.request.id+':'+now,name:'mastermind-ward-saving-choices',updatedAt:now})
+      writeJson(res,200,{ok:true,...(result.requests?{requests:result.requests}:{request:result.request}),revision:result.next?sharedStateRevision(result.next):undefined});return true
+    }
+
+    if(['begin','issue','qualify','answer','raw','confirm','replacement-raw','replacement-confirm','complete','project','list'].some(operation=>parsed.pathname==='/api/state/bountiful-initiative-original/'+operation)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'initiative-original:actual-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]])),file=path.join(ctx.stateRoot,'bountiful-initiative-originals.json')
+        if(operation==='project'||operation==='list'){let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}if(operation==='list'&&(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)){return{ok:false,status:400,error:'initiative-original:empty-list-input-required'}}return projectBountifulInitiativeOriginal(current??{schemaVersion:1,parents:{}},snapshot,identity,payload)}
+        return atomicMutateJsonStateLocked(file,current=>mutateBountifulInitiativeOriginal(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'initiative-original-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'bountiful-initiative-original:'+operation+':'+result.preparation.id+':'+now,name:'bountiful-initiative-originals',updatedAt:now})
+      writeJson(res,200,{ok:true,...(result.preparations?{preparations:result.preparations}:{preparation:result.preparation}),revision:result.revision??(result.next?sharedStateRevision(result.next):undefined)});return true
+    }
+    if(['/api/state/mastermind-native-ward-bountiful/register','/api/state/mastermind-native-ward-bountiful/project','/api/state/mastermind-native-ward-bountiful/list','/api/state/mastermind-native-ward-bountiful/answer','/api/state/mastermind-native-ward-bountiful/raw','/api/state/mastermind-native-ward-bountiful/confirm'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'native-ward-bountiful:actual-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','mastermind-misdirections','mastermind-native-ward-originals','mastermind-native-ward-outcomes'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]])),file=path.join(ctx.stateRoot,'mastermind-native-ward-bountifuls.json')
+        if(operation==='project'||operation==='list'){let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}return projectMastermindNativeWardBountiful(current,snapshot,identity,payload,operation==='list')}
+        return atomicMutateJsonStateLocked(file,current=>mutateMastermindNativeWardBountiful(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'native-ward-bountiful-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-native-ward-bountiful:'+operation+':'+result.choice.id+':'+now,name:'mastermind-native-ward-bountifuls',updatedAt:now})
+      writeJson(res,200,{ok:true,...(result.choices?{choices:result.choices}:{choice:result.choice}),revision:result.next?sharedStateRevision(result.next):undefined});return true
+    }
+    if(['/api/state/mastermind-native-ward-outcome/register','/api/state/mastermind-native-ward-outcome/project','/api/state/mastermind-native-ward-outcome/list','/api/state/mastermind-native-ward-outcome/answer'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||ctx.accessRole!=='dm'){writeJson(res,403,{error:'native-ward-outcome:actual-Host-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','mastermind-misdirections','mastermind-native-ward-originals'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]])),file=path.join(ctx.stateRoot,'mastermind-native-ward-outcomes.json')
+        if(operation==='project'||operation==='list'){let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}return projectMastermindNativeWardOutcome(current,snapshot,identity,payload,operation==='list')}
+        return atomicMutateJsonStateLocked(file,current=>mutateMastermindNativeWardOutcomes(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'native-ward-outcome-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-native-ward-outcome:'+operation+':'+result.choice.id+':'+now,name:'mastermind-native-ward-outcomes',updatedAt:now})
+      writeJson(res,200,{ok:true,...(result.choices?{choices:result.choices}:{choice:result.choice}),revision:result.next?sharedStateRevision(result.next):undefined});return true
+    }
+
+    if(['/api/state/mastermind-native-ward-original/register','/api/state/mastermind-native-ward-original/request','/api/state/mastermind-native-ward-original/raw','/api/state/mastermind-native-ward-original/confirm','/api/state/mastermind-native-ward-original/complete'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','mastermind-ward-attacks','player-action-processed','player-action-ack','mastermind-native-ward-outcomes'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]])),file=path.join(ctx.stateRoot,'mastermind-native-ward-originals.json');if(operation==='request'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length!==1){return{ok:false,status:400,error:'ward-original:request-id-only'}}let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}return projectMastermindNativeWardOriginal(current,snapshot,identity,payload.requestId)}return atomicMutateJsonStateLocked(file,current=>mutateMastermindNativeWardOriginals(current,snapshot,identity,operation,payload,now))})
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'ward-original-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-native-ward-original:'+operation+':'+result.request.id+':'+now,name:'mastermind-native-ward-originals',updatedAt:now})
+      writeJson(res,200,{ok:true,request:result.request,revision:result.next?sharedStateRevision(result.next):undefined});return true
+    }
+    if(['/api/state/mastermind-ward-original/register','/api/state/mastermind-ward-original/request','/api/state/mastermind-ward-original/raw','/api/state/mastermind-ward-original/confirm','/api/state/mastermind-ward-original/complete','/api/state/mastermind-ward-original/abort-extra'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','mastermind-ward-attacks','player-action-processed','player-action-ack'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]])),file=path.join(ctx.stateRoot,'mastermind-ward-originals.json');if(operation==='request'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length!==1){return{ok:false,status:400,error:'ward-original:request-id-only'}}let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}return projectMastermindWardOriginal(current,snapshot,identity,payload.requestId)}return atomicMutateJsonStateLocked(file,current=>mutateMastermindWardOriginals(current,snapshot,identity,operation,payload,now))})
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'ward-original-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-ward-original:'+operation+':'+result.request.id+':'+now,name:'mastermind-ward-originals',updatedAt:now})
+      writeJson(res,200,{ok:true,request:result.request,revision:result.next?sharedStateRevision(result.next):undefined});return true
+    }
+    if(['/api/state/mastermind-ward-attack/issue','/api/state/mastermind-ward-attack/project','/api/state/mastermind-ward-attack/list','/api/state/mastermind-ward-attack/answer'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','player-action-processed','player-action-ack'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]])),file=path.join(ctx.stateRoot,'mastermind-ward-attacks.json')
+        if(operation==='project'||operation==='list'){
+          let current;try{current=JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}
+          if(current!=null&&!validMastermindWardAttacks(current))return{ok:false,status:409,error:'invalid-ward-attack-journal'}
+          if(operation==='list'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'invalid-ward-attack-list'};return{ok:true,choices:Object.keys(current?.choices??{}).flatMap(id=>{const found=projectMastermindWardAttack(current,snapshot,identity,id);return found.ok?[found.choice]:[]})}}
+          if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length!==1)return{ok:false,status:400,error:'ward-attack-id-only'}
+          return projectMastermindWardAttack(current,snapshot,identity,payload.id)
+        }
+        return atomicMutateJsonStateLocked(file,current=>mutateMastermindWardAttacks(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'ward-attack-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-ward-attack:'+operation+':'+result.id+':'+now,name:'mastermind-ward-attacks',updatedAt:now})
+      writeJson(res,200,{ok:true,...(operation==='list'?{choices:result.choices}:operation==='project'?{choice:result.choice}:{id:result.id,phase:result.phase,revision:sharedStateRevision(result.next)})});return true
+    }
+    if(['/api/state/mastermind-misdirection/begin','/api/state/mastermind-misdirection/begin-native','/api/state/mastermind-misdirection/answer','/api/state/mastermind-misdirection/project','/api/state/mastermind-misdirection/list'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-spell-windows','player-action-processed','player-action-ack','mastermind-native-ward-originals','mastermind-native-ward-outcomes'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        if(operation==='project'||operation==='list'){
+          let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-misdirections.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}
+          if(current!=null&&!validMastermindMisdirections(current))return{ok:false,status:409,error:'invalid-misdirection-journal'}
+          const spellScopes=new Map(),projectCurrentParent=id=>{
+            const sourceParentId=current?.parents?.[id]?.spellWindowOriginal?.sourceParentId
+            let scoped=snapshot
+            if(sourceParentId){if(!spellScopes.has(sourceParentId))spellScopes.set(sourceParentId,readMastermindSpellWindowSource(snapshot['mastermind-spell-windows'],snapshot,{...identity,role:'dm',memberId:identity.hostMemberId},sourceParentId,value=>createHash('sha256').update(value).digest('hex')));scoped={...snapshot,mastermindSpellSource:spellScopes.get(sourceParentId)}}
+            return projectMastermindMisdirection(current,scoped,identity,id)
+          }
+          if(operation==='list'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'invalid-misdirection-list'};return{ok:true,parents:Object.keys(current?.parents??{}).flatMap(id=>{const found=projectCurrentParent(id);return found.ok?[found.parent]:[]})}}
+          return projectCurrentParent(payload?.id)
+        }
+        let opportunityParent=operation==='begin'&&payload?.opportunityOriginal?payload:undefined
+        if(operation==='answer'){try{opportunityParent=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-misdirections.json'),'utf8')).parents?.[payload?.id]}catch(error){if(error?.code!=='ENOENT')throw error}}
+        if(opportunityParent?.opportunityOriginal)snapshot.mastermindOpportunitySource=await readBountifulOpportunitySequenceSource(ctx,{parentId:opportunityParent.parentTransactionId,mapId:opportunityParent.mapId,combatId:snapshot.combat?.combatId},{role:'dm',memberId:identity.hostMemberId})
+        let spellParent=(operation==='begin'||operation==='begin-native')&&payload?.spellWindowOriginal?payload:undefined
+        if(operation==='answer'){try{spellParent=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-misdirections.json'),'utf8')).parents?.[payload?.id]}catch(error){if(error?.code!=='ENOENT')throw error}}
+        if(spellParent?.spellWindowOriginal)snapshot.mastermindSpellSource=readMastermindSpellWindowSource(snapshot['mastermind-spell-windows'],snapshot,{...identity,role:'dm',memberId:identity.hostMemberId},spellParent.spellWindowOriginal.sourceParentId,value=>createHash('sha256').update(value).digest('hex'))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-misdirections.json'),current=>mutateMastermindMisdirection(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'mastermind-misdirection-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-misdirection:'+operation+':'+result.id+':'+now,name:'mastermind-misdirections',updatedAt:now})
+      writeJson(res,200,{ok:true,...(operation==='list'?{parents:result.parents}:operation==='project'?{parent:result.parent}:{id:result.id,phase:result.phase,revision:sharedStateRevision(result.next)})});return true
+    }
+    if(parsed.pathname.startsWith('/api/state/tempestuous-plugin-landing-original/')&&req.method==='POST'){
+      if(!authenticatedRoomMember?.memberId||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'tempestuous-plugin-landing:authenticated-room-member-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/tempestuous-plugin-landing-original/'.length);if(!['prepare','dice','inspect','read'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousPluginLandingOriginal(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname.startsWith('/api/state/tempestuous-landing-original/')&&req.method==='POST'){
+      if(!authenticatedRoomMember?.memberId||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'tempestuous-landing:authenticated-room-member-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/tempestuous-landing-original/'.length);if(!['prepare','dice','inspect','read'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousLandingOriginal(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname.startsWith('/api/state/spellcasting-original-saving/')&&req.method==='POST'){
+      if(!authenticatedRoomMember?.memberId||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'spellcasting-saving:authenticated-room-member-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/spellcasting-original-saving/'.length);if(!['prepare','dice','inspect','read','target-source','target-prepare','target-dice','target-inspect','target-read'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchSpellcastingOriginalSaving(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/spellcasting-original-preparation/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readSpellcastingOriginalPreparationSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname.startsWith('/api/state/storm-fury-push/')&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'storm-fury-push:actual-host-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/storm-fury-push/'.length);if(!['prepare','decision'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchStormFuryPushAuthority(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname.startsWith('/api/state/storm-fury-saving/')&&req.method==='POST'){
+      if(!authenticatedRoomMember?.memberId||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'storm-fury-saving:authenticated-room-member-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/storm-fury-saving/'.length)
+      if(!['prepare','dice','read','inspect'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchStormFurySavingAuthority(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname.startsWith('/api/state/storm-fury-owner/')&&req.method==='POST'){
+      if(!authenticatedRoomMember?.memberId||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'storm-fury-owner:authenticated-room-member-required'});return true}
+      const operation=parsed.pathname.slice('/api/state/storm-fury-owner/'.length)
+      if(!['prepare','window','answer','decision'].includes(operation)){writeJson(res,404,{error:'not-found'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchStormFuryOwnerAuthority(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-plugin-spell-ability-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulPluginSpellAbilityOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-plugin-spell-saving-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulPluginSpellSavingOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-death-first-original/inspect'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return inspectBountifulDeathFirstOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-death-first-repeat-saving/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulDeathFirstRepeatSavingSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-death-first-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulDeathFirstOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-death-area-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulDeathAreaOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-death-repeat-saving/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulDeathRepeatSavingSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-activity-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulActivityOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/tempestuous-after-owner/verify'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return verifyTempestuousAfterOwnerDecisionSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(/^\/api\/state\/tempestuous-plugin-saving-owned\/(read|claim)$/.test(parsed.pathname)&&req.method==='POST'){
+      if(!['dm','player'].includes(ctx.accessRole)||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'actual-room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousPluginSavingOwned(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(/^\/api\/state\/tempestuous-plugin-original\/(prepare|read|probe|publication|inputs-read|inputs-start|inputs-record|inputs-save-start|saving-read|saving-begin|saving-append|saving-answer|saving-complete|saving-material-read|saving-material)$/.test(parsed.pathname)&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousPluginOriginal(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(/^\/api\/state\/tempestuous-host-original\/(begin|read|cancel|spell-window-prefix)$/.test(parsed.pathname)&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return dispatchTempestuousHostOriginal(ctx,operation,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/tempestuous-before-preparation/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readTempestuousBeforeOriginalPreparationSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/tempestuous-before-preparation/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeTempestuousBeforeOriginalPreparationSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-damage-zero-original/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeBountifulMonsterDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-damage-zero-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulMonsterDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/storm-cast-preparation/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readStormCastOriginalPreparationSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/storm-cast-preparation/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeStormCastOriginalPreparationSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-saving-late/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember){writeJson(res,403,{error:'monster-save-late:actual-host-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulMonsterSavingLateSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-damage-zero-original/current'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return currentBountifulMonsterDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-damage-zero-original/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeBountifulMonsterDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-monster-damage-zero-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulMonsterDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-spell-damage-zero-original/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeBountifulSpellDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-spell-damage-zero-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulSpellDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-damage-zero-original/probe'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return probeBountifulDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-damage-zero-original/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulDamageZeroOriginalSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(parsed.pathname==='/api/state/bountiful-opportunity-sequence/source'&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember?.memberId){writeJson(res,403,{error:'dm-authority-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['parentId','mapId','combatId'].includes(key))||!['parentId','mapId','combatId'].every(key=>typeof payload[key]==='string'&&payload[key].length>0&&payload[key].length<=2000)){writeJson(res,400,{error:'invalid-opportunity-sequence-read'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);return readBountifulOpportunitySequenceSource(ctx,payload,{role:ctx.accessRole,memberId:authenticatedRoomMember.memberId})});writeJson(res,result.ok?200:result.status??403,result);return true
+    }
+    if(['/api/state/mastermind-magic-truth/begin-native','/api/state/mastermind-magic-truth/begin','/api/state/mastermind-magic-truth/answer','/api/state/mastermind-magic-truth/project','/api/state/mastermind-magic-truth/list'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole};
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx);const names=['characters','maps','combat','map-geometry','campaign-time','player-action-requests','player-action-processed','combat-interrupts'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,i)=>[name,values[i]]));
+        if(operation==='list'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'magic-truth-invalid-list'};let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-magic-truth.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error};if(current!=null&&!validMastermindMagicTruth(current))return{ok:false,status:409,error:'magic-truth-invalid-journal'};return{ok:true,parents:Object.keys(current?.parents??{}).flatMap(id=>{const found=projectMastermindMagicTruth(current,snapshot,identity,id);return found.ok&&found.parent.phase==='waiting'?[found.parent]:[]})}}
+        if(operation==='project'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>k!=='id'))return{ok:false,status:400,error:'magic-truth-invalid-project'};let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-magic-truth.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error};return projectMastermindMagicTruth(current,snapshot,identity,payload.id)}
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-magic-truth.json'),current=>mutateMastermindMagicTruth(current,snapshot,identity,operation,payload,now));
+      });if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'magic-truth-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'magic-truth:'+result.id+':'+now,name:'mastermind-magic-truth',updatedAt:now});writeJson(res,200,{ok:true,...(operation==='list'?{parents:result.parents}:operation==='project'?{parent:result.parent}:{id:result.id,revision:sharedStateRevision(result.next)})});return true;
+    }
+    if(['/api/state/mastermind-thought-reading/begin-native','/api/state/mastermind-thought-reading/begin','/api/state/mastermind-thought-reading/answer','/api/state/mastermind-thought-reading/project','/api/state/mastermind-thought-reading/list','/api/state/mastermind-thought-reading/issue-roll','/api/state/mastermind-thought-reading/raw','/api/state/mastermind-thought-reading/confirm','/api/state/mastermind-thought-reading/roll-request','/api/state/mastermind-thought-reading/read-result','/api/state/mastermind-thought-reading/read-results'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        if(operation==='project'||operation==='list'||operation==='roll-request'||operation==='read-result'||operation==='read-results'){
+          let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-thought-readings.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error}
+          if(current!=null&&!validMastermindThoughtReadings(current))return{ok:false,status:409,error:'invalid-thought-reading-journal'}
+          if(operation==='read-results'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'invalid-thought-reading-results'};return{ok:true,results:Object.keys(current?.parents??{}).flatMap(id=>{const found=projectMastermindThoughtResult(current,snapshot,identity,id);return found.ok?[found.result]:[]}).slice(-20)}}
+          if(operation==='read-result'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>k!=='id'))return{ok:false,status:400,error:'invalid-thought-reading-result'};return projectMastermindThoughtResult(current,snapshot,identity,payload.id)}
+          if(operation==='roll-request'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!['id','requestId'].includes(k)))return{ok:false,status:400,error:'invalid-thought-roll-project'};return projectMastermindThoughtRoll(current,snapshot,identity,payload.id,payload.requestId)}
+          if(operation==='list'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'invalid-thought-reading-list'};return{ok:true,parents:Object.keys(current?.parents??{}).flatMap(id=>{const found=projectMastermindThoughtReading(current,snapshot,identity,id);return found.ok?[found.parent]:[]})}}
+          return projectMastermindThoughtReading(current,snapshot,identity,payload?.id)
+        }
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-thought-readings.json'),current=>mutateMastermindThoughtReading(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'mastermind-thought-reading-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-thought-reading:'+operation+':'+result.id+':'+now,name:'mastermind-thought-readings',updatedAt:now})
+      writeJson(res,200,{ok:true,...(operation==='list'?{parents:result.parents}:operation==='project'?{parent:result.parent}:operation==='roll-request'?{request:result.request}:operation==='read-result'?{result:result.result}:operation==='read-results'?{results:result.results}:{id:result.id,phase:result.phase,...(result.requestId?{requestId:result.requestId}:{}),revision:sharedStateRevision(result.next)})});return true
+    }
+
+    if(['/api/state/mastermind-observation/request','/api/state/mastermind-observation/accept','/api/state/mastermind-observation/interval','/api/state/mastermind-observation/interrupt','/api/state/mastermind-observation/disclose','/api/state/mastermind-observation/project','/api/state/mastermind-observation/list'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const operation=parsed.pathname.split('/').at(-1),now=Date.now(),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','campaign-time'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        if(operation==='project'||operation==='list'){let current;try{current=JSON.parse(await readFile(path.join(ctx.stateRoot,'mastermind-observations.json'),'utf8'))}catch(error){if(error?.code!=='ENOENT')throw error};if(operation==='list'){if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).length)return{ok:false,status:400,error:'invalid-observation-list'};const observations=Object.keys(current?.records??{}).flatMap(id=>{const result=projectMastermindObservation(current,snapshot,identity,id);return result.ok?[result.observation]:[]});return{ok:true,observations}}return projectMastermindObservation(current,snapshot,identity,payload?.id)}
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-observations.json'),current=>mutateMastermindObservation(current,snapshot,identity,operation,payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'mastermind-observation-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'mastermind-observation:'+operation+':'+result.id+':'+now,name:'mastermind-observations',updatedAt:now})
+      writeJson(res,200,{ok:true,...(operation==='list'?{observations:result.observations}:operation==='project'?{observation:result.observation}:{id:result.id,status:result.status,revision:sharedStateRevision(result.next)})});return true
+    }
+    if(parsed.pathname==='/api/state/sc-base-prefix/request'&&req.method==='GET'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      const identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','sc-base-prefix-rolls'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return projectScBasePrefixRequest(snapshot['sc-base-prefix-rolls'],snapshot,identity,parsed.searchParams.get('requestId'),hash)
+      })
+      if(!result.ok){writeJson(res,result.status??403,{error:result.error});return true}
+      writeJson(res,200,{ok:true,request:result.request});return true
+    }
+    if(['/api/state/sc-base-prefix/begin','/api/state/sc-base-prefix/issue','/api/state/sc-base-prefix/raw','/api/state/sc-base-prefix/confirm'].includes(parsed.pathname)&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now(),operation=parsed.pathname.split('/').at(-1),identity={roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},hash=value=>createHash('sha256').update(value).digest('hex')
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'sc-base-prefix-rolls.json'),current=>(operation==='issue'||operation==='begin'?issueScBasePrefixRequest:operation==='raw'?lockScBasePrefixRaw:confirmScBasePrefixRaw)(current,snapshot,identity,operation==='begin'?{...payload,begin:true}:payload,now,hash))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'sc-base-prefix-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'sc-base-prefix:'+operation+':'+result.requestId+':'+now,name:'sc-base-prefix-rolls',updatedAt:now})
+      writeJson(res,200,{ok:true,parentId:result.parentId,requestId:result.requestId,revision:sharedStateRevision(result.next)});return true
+    }
+    if(parsed.pathname==='/api/state/activity-death-choice/accept'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload
+      try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now()
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','combat-interrupts']
+        const values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}))
+        const snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'activity-death-parents.json'),current=>lockActivityDeathChoice(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'death-choice-accept-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'activity-death-raw:'+payload.receiptId+':'+now,name:'activity-death-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,receiptId:payload.receiptId,parentId:payload.parentId,revision:sharedStateRevision(result.next)})
+      return true
+    }
+
+    if(parsed.pathname==='/api/state/activity-death-initiative/raw'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload
+      try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now()
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time']
+        const values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}))
+        const snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'activity-death-parents.json'),current=>lockActivityDeathInitiativeRaw(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'death-initiative-raw-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'activity-death-raw:'+payload.requestId+':'+now,name:'activity-death-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,requestId:payload.requestId,revision:sharedStateRevision(result.next)})
+      return true
+    }
+
+    if(parsed.pathname==='/api/state/armor-native/accept-choice'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload
+      try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now()
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','combat-interrupts']
+        const values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}))
+        const snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'armor-native-parents.json'),current=>lockArmorNativeDecisionFromChoice(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'armor-native-accept-choice-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'armor-native-accept-choice:'+payload.parentId+':'+now,name:'armor-native-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,requestId:payload.parentId,revision:sharedStateRevision(result.next)})
+      return true
+    }
+
+    if(parsed.pathname==='/api/state/armor-native/decision'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload
+      try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now()
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time']
+        const values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}))
+        const snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'armor-native-parents.json'),current=>lockArmorNativeDecision(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'armor-native-decision-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'armor-native-decision:'+payload.parentId+':'+now,name:'armor-native-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,requestId:payload.parentId,revision:sharedStateRevision(result.next)})
+      return true
+    }
+
+    if(parsed.pathname==='/api/state/armor-native/raw'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload
+      try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now()
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time']
+        const values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}))
+        const snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'armor-native-parents.json'),current=>lockArmorNativeRaw(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'armor-native-raw-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'armor-native-raw:'+payload.requestId+':'+now,name:'armor-native-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,requestId:payload.requestId,revision:sharedStateRevision(result.next)})
+      return true
+    }
+
     if (parsed.pathname === '/api/state/player-action-requests/append' && req.method === 'POST') {
-      if (!authenticatedRoomMember || ctx.accessRole !== 'player') {
+      if (!authenticatedRoomMember || !['player', 'dm'].includes(ctx.accessRole)) {
         writeJson(res, 403, { error: 'player-membership-required' })
         return true
       }
@@ -15206,12 +14204,21 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 400, { error: 'invalid-json' })
         return true
       }
+      if(ctx.accessRole==='player'&&payload?.action?.type==='dnd5e-bountiful-luck'&&['confirm','equipment-confirm'].includes(payload.action.bountifulLuck?.command?.phase)){
+        writeJson(res,403,{error:'bountiful-dm-confirmation-required'});return true
+      }
+      if (ctx.accessRole === 'player' && payload?.action?.type === 'dnd5e-second-chance' &&
+        ['confirm-roll', 'confirm-critical-roll'].includes(payload.action.secondChance?.phase)) {
+        writeJson(res, 403, { error: 'dm-confirmation-required' })
+        return true
+      }
       const stampedEnvelope = stampPlayerActionStateForRoomMember(
         'player-action-requests',
         { requests: [payload?.action] },
         authenticatedRoomMember,
       )
       const action = stampedEnvelope?.requests?.[0]
+      if (ctx.accessRole === 'dm' && plainObject(action)) action.sourceMode = 'dm'
       if (
         !plainObject(action) ||
         !boundedText(action.id, 220) ||
@@ -15223,6 +14230,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 422, { error: 'invalid-player-action' })
         return true
       }
+      if(action.type==='dnd5e-bountiful-luck'&&!validateBountifulLuckCommand(action.bountifulLuck)){writeJson(res,422,{error:'invalid-bountiful-original-command'});return true}
       const now = Date.now()
       // Lock order is always room transaction -> resource file. Combat-command
       // intake/terminalization writes this same queue under the room lock; the
@@ -15230,7 +14238,44 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       // overwrite a concurrently appended command (or vice versa).
       const result = await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
         await recoverSharedStateTransaction(ctx)
-        return atomicMutateJsonStateLocked(
+        if(action.type==='dnd5e-bountiful-luck'&&action.bountifulLuck?.command?.phase==='native-lucky'){
+          const read=async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}
+          const requests=await read('player-action-requests'),existing=requests?.requests?.find(row=>row.id===action.id)
+          if(existing){if(existing.roomMemberId!==authenticatedRoomMember.memberId||existing.sourceMode!==action.sourceMode)return{ok:false,status:403,error:'bountiful-native-lucky-intake:actual-controller-phase-required'};if(bountifulNativeLuckyIntakeIdentity(existing)!==bountifulNativeLuckyIntakeIdentity(action))return{ok:false,status:403,error:'bountiful-native-lucky-intake:identity-conflict'};return{ok:true,changed:false,next:requests}}
+          const[combat,characters,maps,geometry,clock]=await Promise.all(['combat','characters','maps','map-geometry','campaign-time'].map(read))
+          if(!authorizeBountifulNativeLuckyIntake(action,{combat,characters,maps,geometry,clock,requests},{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}))return{ok:false,status:403,error:'bountiful-native-lucky-intake:actual-controller-phase-required'}
+          if(requests?.requests?.some(row=>row.type==='dnd5e-bountiful-luck'&&row.bountifulLuck?.command?.phase==='native-lucky'&&row.bountifulLuck.parentId===action.bountifulLuck.parentId&&row.bountifulLuck.occurrence===action.bountifulLuck.occurrence))return{ok:false,status:403,error:'bountiful-native-lucky-intake:decision-already-queued'}
+        }
+        if(ctx.accessRole==='dm'){
+          const read=async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}
+          const requests=await read('player-action-requests'),existing=requests?.requests?.find(row=>row.id===action.id)
+          const isBountiful=action.type==='dnd5e-bountiful-luck'
+          const identity=isBountiful?bountifulDmAppendIdentity:secondChanceDmAppendIdentity
+          if(existing&&identity(existing)!==identity(action))return{ok:false,status:403,error:isBountiful?'bountiful-dm-identity-conflict':'second-chance-dm-confirmation-identity-conflict'}
+          if(existing&&isBountiful)return{ok:true,changed:false,next:requests}
+          const [combat,characters,maps,geometry,clock]=await Promise.all(['combat','characters','maps','map-geometry','campaign-time'].map(read))
+          const principal={roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId}
+          if(!existing&&(isBountiful?!authorizeBountifulDmAppend(action,{combat,characters,maps,geometry,requests,clock},principal):!authorizeSecondChanceDmOwnedAppend(action,{combat,characters,maps,geometry,clock},principal)))return{ok:false,status:403,error:isBountiful?'bountiful-dm-phase-not-authorized':'second-chance-dm-confirmation-not-authorized'}
+        }
+        if(action.type==='dnd5e-second-chance'&&['roll-result','critical-roll-result'].includes(action.secondChance?.phase)){
+          if(ctx.accessRole==='player'){
+            const read=async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch{return null}}
+            const [combat,characters,maps,geometry,clock,requests]=await Promise.all(['combat','characters','maps','map-geometry','campaign-time','player-action-requests'].map(read))
+            if(!authorizeSecondChancePlayerOriginalRawAppend(action,{combat,characters,maps,geometry,clock,requests},{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId}))return{ok:false,status:403,error:'second-chance-original-roller-phase-not-authorized'}
+          }
+          const queue=await readSharedStateFile(ctx,'player-action-requests'),existing=queue.value?.requests?.find(row=>row.id===action.id)
+          if(existing&&secondChanceDmAppendIdentity(existing)!==secondChanceDmAppendIdentity(action))return{ok:false,status:403,error:'second-chance-raw-identity-conflict'}
+          const evidenceFile=secondChanceRawEvidenceFile(ctx.stateRoot,action.id)
+          let prior;try{prior=JSON.parse(await readFile(evidenceFile,'utf8'))}catch{}
+          const identity=secondChanceDmAppendIdentity(action)
+          if(prior&&(prior.identity!==identity||prior.memberId!==authenticatedRoomMember.memberId))return{ok:false,status:403,error:'second-chance-raw-identity-conflict'}
+          if(!prior){await mkdir(path.dirname(evidenceFile),{recursive:true});await atomicWriteLocked(evidenceFile,JSON.stringify({identity,memberId:authenticatedRoomMember.memberId}))}
+        }
+        if(action.type==='dnd5e-bountiful-luck'){
+          const preflight=await preflightBountifulOriginalCommandEvidence(ctx,action,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})
+          if(!preflight.ok)return{ok:false,status:403,error:preflight.error??preflight.reason??'bountiful-original-preappend-source-required'}
+        }
+        const accepted = await atomicMutateJsonStateLocked(
           path.join(ctx.stateRoot, 'player-action-requests.json'),
           (current) => {
             const requests = Array.isArray(current?.requests) ? current.requests : []
@@ -15249,6 +14294,11 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             }
           },
         )
+        if(accepted?.ok&&accepted.changed&&action.type==='dnd5e-bountiful-luck'){
+          const evidence=await recordBountifulOriginalCommandEvidence(ctx,action,{role:ctx.accessRole,memberId:authenticatedRoomMember?.memberId})
+          if(!evidence.ok)return{ok:false,status:403,error:evidence.reason}
+        }
+        return accepted
       })
       if (!result?.ok) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'player-action-append-failed' })
@@ -15559,7 +14609,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           }
         }
         return mutateCampaignTimeState(state, mutation, now, campaignTimeAuthority, { host: room?.host, interactionEntities, restCharacterIds, restMaps })
-      }, campaignTimeAuthority.memberId, {prepareOnly})
+      }, campaignTimeAuthority.memberId, {prepareOnly, readCampaignBreathingSource: async () => {
+        const currentRoom = await readRoomForCampaign(ctx)
+        return {...await roomCampaignBreathingPolicies(ctx, currentRoom), stamp: JSON.stringify({rulesRevision: currentRoom?.rulesRevision ?? 0, requiredPlugins: currentRoom?.requiredPlugins ?? [], pluginFiles: currentRoom?.pluginFiles ?? {}})}
+      }})
       if (!result?.ok) {
         writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed',
           ...(result?.pendingTempleExpiry ? { pendingTempleExpiry: result.pendingTempleExpiry } : {}) })
@@ -15672,9 +14725,35 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             .filter((character) => characterOwnedByRoomMember(character, authenticatedRoomMember))
             .map((character) => character.id)
       }
-      const result = await atomicMutateJsonStateLocked(filePath, (queue) =>
-        mutateCombatInterruptQueue(queue, mutation, Date.now(), ctx.accessRole, authorityCharacterIds),
-      )
+      let activityDeathAuthority
+      if(isActivityDeathChoice(mutation?.interrupt)||String(mutation?.id??'').startsWith('host-death-choice:')||isArmorNativeChoice(mutation?.interrupt)||String(mutation?.id??'').startsWith('host-armor-choice:')){
+        const characters=await readCharactersForProjection(ctx)
+        activityDeathAuthority={memberId:authenticatedRoomMember?.memberId,controllers:Object.fromEntries((characters.corrupted?[]:characters.value.characters).flatMap(character=>{const controller=secondChanceCanonicalControllerMemberId(character,{roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId});return controller?[[character.id,controller]]:[]}))}
+      }
+      const result = await atomicMutateJsonStateLocked(filePath, async(queue) => {
+        const now=Date.now(),result=mutateCombatInterruptQueue(queue,mutation,now,ctx.accessRole,authorityCharacterIds,activityDeathAuthority)
+        if(!result?.ok)return result
+        const areaOwn=await recordBountifulDeathAreaOwnInterruptMutationSource(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole})
+        if(!areaOwn.ok)return{...areaOwn,changed:false}
+        const pluginTemp=await recordTempestuousPluginInterruptMutationSource(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole})
+        if(!pluginTemp.ok)return{...pluginTemp,changed:false}
+        const tempestuous=await recordTempestuousBeforeInterruptMutationSource(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole})
+        if(!tempestuous.ok)return{...tempestuous,changed:false}
+        const after=await recordTempestuousAfterInterruptMutationSource(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole})
+        if(!after.ok)return{...after,changed:false}
+        const furyId=String(mutation?.interrupt?.id??mutation?.id??'')
+        if(furyId.startsWith('storm-fury-owner:')||furyId.startsWith('storm-fury-push:')){
+          const fury=await dispatchStormFuryRoomInterruptMutation(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,role:ctx.accessRole})
+          if(!fury.ok)return{...fury,changed:false}
+        }
+        const collector=await recordBountifulCollectorInterruptMutation(ctx,{queue,mutation,result,now},{memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole})
+        if(!collector.ok)return{...collector,changed:false}
+        if(String(mutation?.interrupt?.id??mutation?.id??'').startsWith('mm-spell-ward-own-choice:')){
+          const own=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{await recoverSharedStateTransaction(ctx);const names=['maps','characters','combat','map-geometry','campaign-time','player-action-requests','mastermind-misdirections','player-action-processed','player-action-ack'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot={...Object.fromEntries(names.map((name,index)=>[name,values[index]])),'combat-interrupts':queue},identity={roomId:ctx.roomId,memberId:authenticatedRoomMember?.memberId,hostMemberId:authenticatedRoom?.host?.memberId,role:ctx.accessRole};return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'mastermind-spell-windows.json'),current=>recordMastermindSpellWardOwnInterrupt(current,snapshot,identity,mutation,result,now,value=>createHash('sha256').update(value).digest('hex')))})
+          if(!own.ok)return{...own,changed:false}
+        }
+        return result
+      })
       if (!result?.ok) {
         res.writeHead(result?.status ?? 400, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: result?.error ?? 'mutation-failed' }))
@@ -15704,9 +14783,64 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
+
+    if(parsed.pathname==='/api/state/arcane-native/requests'&&req.method==='GET'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      const names=['maps','characters','combat','map-geometry','campaign-time','arcane-native-parents','arcane-base-prefix-rolls','player-action-requests','player-action-ack','player-action-processed'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+      writeJson(res,200,{requests:[...projectArcaneNativeRequests(snapshot['arcane-native-parents'],snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole}),...projectArcaneBaseChoiceRequests(snapshot['arcane-base-prefix-rolls'],snapshot,{roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},value=>createHash('sha256').update(value).digest('hex'))]});return true
+    }
+    if(parsed.pathname==='/api/state/arcane-native/choice'&&req.method==='POST'){
+      if(!authenticatedRoomMember||!['dm','player'].includes(ctx.accessRole)){writeJson(res,403,{error:'room-member-required'});return true}
+      let payload;try{payload=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'invalid-json'});return true}
+      const now=Date.now(),result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const names=['maps','characters','combat','map-geometry','campaign-time','arcane-native-parents','arcane-base-prefix-rolls'],values=await Promise.all(names.map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}})),snapshot=Object.fromEntries(names.map((name,index)=>[name,values[index]]))
+        if(hasArcaneBaseChoice(snapshot['arcane-base-prefix-rolls'],payload)){const result=await atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'arcane-base-prefix-rolls.json'),current=>acceptArcaneBaseChoice(current,snapshot,{roomId:ctx.roomId,hostMemberId:authenticatedRoom?.host?.memberId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now,value=>createHash('sha256').update(value).digest('hex')));return{...result,choiceResource:'arcane-base-prefix-rolls'}}
+        return atomicMutateJsonStateLocked(path.join(ctx.stateRoot,'arcane-native-parents.json'),current=>acceptArcaneNativeChoice(current,snapshot,{roomId:ctx.roomId,memberId:authenticatedRoomMember.memberId,role:ctx.accessRole},payload,now))
+      })
+      if(!result?.ok){writeJson(res,result?.status??400,{error:result?.error??'arcane-choice-failed'});return true}
+      if(result.changed)publishEventBestEffort(ctx,SHARED_STATE_CHANGED_CHANNEL,{id:'arcane-native-choice:'+payload.parentId+':'+now,name:result.choiceResource??'arcane-native-parents',updatedAt:now})
+      writeJson(res,200,{ok:true,parentId:payload.parentId,revision:sharedStateRevision(result.next)});return true
+    }
+    const effectEndReceiptRoute=parsed.pathname.match(/^\/api\/state\/effect-end-confirmed\/(read|record)$/)
+    if(effectEndReceiptRoute&&req.method==='POST'){
+      if(ctx.accessRole!=='dm'||!authenticatedRoomMember||authenticatedRoom?.host?.memberId!==authenticatedRoomMember.memberId){writeJson(res,403,{error:'effect-end-receipt:actual-host-required'});return true}
+      let input;try{input=JSON.parse((await readBody(req)).toString('utf8'))}catch{writeJson(res,400,{error:'effect-end-receipt:invalid-json'});return true}
+      const result=await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+        await recoverSharedStateTransaction(ctx)
+        const resources=await Promise.all(['maps','characters','combat'].map(async name=>{try{return JSON.parse(await readFile(path.join(ctx.stateRoot,name+'.json'),'utf8'))}catch(error){if(error?.code==='ENOENT')return null;throw error}}))
+        const snapshot={maps:resources[0]?.maps,characters:resources[1]===null?[]:resources[1]?.characters,combat:resources[2]}
+        // Nested private storage cannot be reached by the generic state or
+        // transaction APIs, whose resource names cannot contain a path.
+        const file=path.join(ctx.stateRoot,'.host-confirmed','effect-end-saves.json')
+        try{JSON.parse(await readFile(file,'utf8'))}catch(error){if(error?.code!=='ENOENT')return{ok:false,status:409,error:'effect-end-receipt:invalid-private-book'}}
+        await mkdir(path.dirname(file),{recursive:true})
+        return atomicMutateJsonStateLocked(file,current=>mutateEffectEndConfirmedReceipt(current,snapshot,{roomId:ctx.roomId,role:ctx.accessRole,memberId:authenticatedRoomMember.memberId,hostMemberId:authenticatedRoom.host.memberId},effectEndReceiptRoute[1],input,Date.now()))
+      })
+      if(!result?.ok){writeJson(res,result?.status??409,{error:result?.error??'effect-end-receipt:failed'});return true}
+      writeJson(res,200,{ok:true,roomId:ctx.roomId,hostMemberId:authenticatedRoomMember.memberId,mapId:input.mapId,receipt:result.receipt,contextKey:result.contextKey,combatRevision:result.combatRevision,hasPending:result.hasPending});return true
+    }
     const stateMatch = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)
     if (stateMatch) {
       const name = safeName(stateMatch[1])
+      if((name==='arcane-movement-parents'||name==='arcane-native-parents'||name==='arcane-base-prefix-rolls')&&ctx.accessRole!=='dm'){writeJson(res,403,{error:'resource-private'});return true}
+      if(name==='mastermind-spell-windows'){writeJson(res,403,{error:'spell-window-private-protocol-required'});return true}
+      if(name==='bountiful-initiative-originals'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'initiative-original-protocol-required'});return true}
+      if(name==='mastermind-native-ward-bountifuls'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'native-ward-bountiful-protocol-required'});return true}
+      if(name==='mastermind-native-ward-outcomes'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'native-ward-outcome-protocol-required'});return true}
+      if(name==='mastermind-native-ward-originals'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'native-ward-original-protocol-required'});return true}
+      if(name==='mastermind-ward-originals'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'ward-original-protocol-required'});return true}
+      if(name==='mastermind-ward-attacks'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'ward-attack-protocol-required'});return true}
+      if(name==='mastermind-misdirections'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'mastermind-misdirection-protocol-required'});return true}
+      if(name==='mastermind-magic-truth'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'magic-truth-protocol-required'});return true}
+      if(name==='mastermind-thought-readings'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'mastermind-thought-reading-protocol-required'});return true}
+
+      if(name==='mastermind-observations'&&(req.method!=='GET'||ctx.accessRole!=='dm')){writeJson(res,403,{error:'mastermind-observation-protocol-required'});return true}
+      if (name === 'host-native-weapon-result' && ctx.accessRole !== 'dm') {
+        writeJson(res, 403, {error:'forbidden'})
+        return true
+      }
+      if((name==='activity-death-parents'||name==='armor-native-parents')&&ctx.accessRole!=='dm'){writeJson(res,403,{error:'dm-authority-required',name});return true}
       if (name === COMBAT_COMMAND_RECEIPT_RESOURCE) {
         writeJson(res, 404, { error: 'resource-private', name })
         return true
@@ -15716,6 +14850,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       const filePath = path.join(ctx.stateRoot, `${name}.json`)
+      if(name==='combat-interrupts'&&req.method==='DELETE'&&ctx.accessRole!=='dm'){
+        const stored=await readSharedStateFile(ctx,name)
+        if(stored.value?.interrupts?.some(isActivityDeathChoice)){writeJson(res,403,{error:'dm-authority-required',name});return true}
+      }
       if (req.method === 'GET') {
         let sourcePath = filePath
         let data
@@ -15765,6 +14903,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           if (roomMember && roomMember !== room.host) playerRead = true
           if (roomMember === room.host) playerRead = false
         }
+        if (playerRead && name === 'combat') value = projectSecondChanceCombatForMember(value, roomMember)
         if (playerRead && name === 'map-geometry') {
           const campaignTime = await readCampaignTimeForProjection(ctx)
           const maps = await readMapsForProjection(ctx)
@@ -15933,13 +15072,17 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 400, { error: 'invalid-expected-revision', name })
           return true
         }
+        const protectedArmorChoiceQueueWrite=name==='combat-interrupts'
+        const protectedDeathChoiceQueueWrite=name==='combat-interrupts'
+        let retiredDeathChoiceIds=[]
+        if(protectedDeathChoiceQueueWrite){let parents;try{parents=JSON.parse(await readFile(path.join(ctx.stateRoot,'activity-death-parents.json'),'utf8'))}catch{};retiredDeathChoiceIds=activityDeathRetiredChoiceIds(parents)}
         const playerCharacterWrite = name === 'characters' && ctx.accessRole === 'player' && authenticatedRoomMember
         const combatActive = playerCharacterWrite ? await sharedCombatIsActiveForAuthority(ctx) : false
         const subclassChoicePolicies = playerCharacterWrite ? await roomSubclassChoicePolicies(ctx, authenticatedRoom) : []
         const putUndoTransactionId = dmUndoTransactionId(req)
         const writeResult = await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
           await recoverSharedStateTransaction(ctx)
-          if (name === 'maps' || (!playerCharacterWrite && ['characters', 'map-geometry'].includes(name))) {
+          if (name === 'arcane-base-prefix-rolls' || name === 'sc-base-prefix-rolls' || name === 'activity-death-parents' || name === 'armor-native-parents' || name === 'maps' || (!playerCharacterWrite && ['characters', 'map-geometry'].includes(name))) {
             const { value: current } = await readSharedStateFile(ctx, name)
             const currentRevision = sharedStateRevision(current)
             if (expectedRevision != null && expectedRevision !== currentRevision) {
@@ -15958,17 +15101,19 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               value: entry.next, revision: entry.revision, writtenAt: entry.writtenAt,
               derivedEntries: result.entries.filter(entry => entry.name !== name) }
           }
+          const pactTraceResources=playerCharacterWrite?await Promise.all(['maps','map-geometry','campaign-time'].map(resource=>readSharedStateFile(ctx,resource))):null;
           return atomicWriteJsonStateCasLocked(filePath, parsedBody, {
             expectedRevision,
+            secondChanceStateRoot:ctx.stateRoot,
             writerId: req?.headers?.['x-stars-writer'],
-            mergeIncoming: playerCharacterWrite
-              ? (current, incoming) => mergePlayerCharactersStateForAuthority(
-                  current,
-                  incoming,
-                  authenticatedRoomMember.memberId,
-                  { combatActive, subclassChoicePolicies },
-                )
-              : undefined,
+            mergeIncoming: protectedDeathChoiceQueueWrite||protectedArmorChoiceQueueWrite ? (current,incoming)=>{if(ctx.accessRole==='player'||ctx.accessRole==='spectator')incoming=mergeDmOnlyChoicePlayerInterruptQueue(current,mergeBountifulD20PlayerInterruptQueue(current,incoming));if(!activityDeathChoicesUnchanged(current,incoming,retiredDeathChoiceIds)||!armorNativeChoicesUnchanged(current,incoming))throw new RoomProtocolError(403,'dm-authority-required');return incoming} : playerCharacterWrite
+              ? (current, incoming) => {
+                  const merged=mergePlayerCharactersStateForAuthority(current,incoming,authenticatedRoomMember.memberId,{combatActive,subclassChoicePolicies});
+                  const [maps,geometry,clock]=pactTraceResources;
+                  return observePactLifecycleTrace({before:current,after:merged,beforeMaps:maps.value,afterMaps:maps.value,
+                    beforeGeometry:geometry.value,afterGeometry:geometry.value,beforeClock:clock.value,afterClock:clock.value,elevation:tokenElevationFeet});
+                }
+              : name==='combat-interrupts'&&(ctx.accessRole==='player'||ctx.accessRole==='spectator') ? (current,incoming)=>mergeDmOnlyChoicePlayerInterruptQueue(current,mergeBountifulD20PlayerInterruptQueue(current,incoming)) : undefined,
             validateIncoming: (candidate) => validateSharedStateShape(name, candidate),
           })
         })
@@ -16055,10 +15200,21 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 400, { error: 'invalid-expected-revision', name })
           return true
         }
-        const deleteResult = await atomicDeleteJsonStateCasLocked(filePath, {
-          expectedRevision,
-          writerId: req?.headers?.['x-stars-writer'],
-        })
+        const deleteOptions={expectedRevision,writerId:req?.headers?.['x-stars-writer']}
+        const deleteResult=(name==='arcane-movement-parents'||name==='arcane-native-parents'||name==='arcane-base-prefix-rolls'||name==='sc-base-prefix-rolls'||name==='activity-death-parents'||name==='armor-native-parents'||name==='combat-interrupts')?await withWriteLock(sharedStateTransactionLockPath(ctx),async()=>{
+          await recoverSharedStateTransaction(ctx)
+          const current=(await readSharedStateFile(ctx,name)).value
+          let allowed
+          if(name==='arcane-native-parents')allowed=arcaneNativeTransitionAllowed(current,null)
+          else if(name==='arcane-movement-parents')allowed=arcaneMovementOriginalTransitionAllowed(current,null)
+          else if(name==='arcane-base-prefix-rolls')allowed=arcaneBasePrefixGenericTransitionAllowed(current,null)
+          else if(name==='sc-base-prefix-rolls')allowed=scBasePrefixGenericTransitionAllowed(current,null)
+          else if(name==='armor-native-parents')allowed=armorNativeRawTransitionAllowed(current,null)
+          else if(name==='activity-death-parents')allowed=activityDeathRawTransitionAllowed(current,null)
+          else{let parents;try{parents=JSON.parse(await readFile(path.join(ctx.stateRoot,'activity-death-parents.json'),'utf8'))}catch{};allowed=activityDeathChoicesUnchanged(current,null,activityDeathRetiredChoiceIds(parents))&&armorNativeChoicesUnchanged(current,null)}
+          if(!allowed)return{ok:false,conflict:true,currentRevision:sharedStateRevision(current),current}
+          return atomicDeleteJsonStateCasLocked(filePath,deleteOptions)
+        }):await atomicDeleteJsonStateCasLocked(filePath,deleteOptions)
         if (deleteResult.conflict) {
           res.writeHead(409, {
             'Content-Type': 'application/json; charset=utf-8',
@@ -16219,4 +15375,3 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 }
-

@@ -1,0 +1,3 @@
+export function tempestuousBeforeOriginalSourceFacts(wire:unknown):any
+export function tempestuousBeforeRecoveryFacts(wire:unknown):any
+export function validTempestuousBeforeOriginalFrame(frame:unknown):boolean

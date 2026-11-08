@@ -8,6 +8,7 @@ export function dnd5eConcentrationDefenseBonus(
   featureIds: readonly string[],
   concentrationSpellId: string | undefined,
   kind: 'armorClass' | 'savingThrows',
+  magicSuppressed = false,
 ): number {
   if (!concentrationSpellId?.trim()) return 0
   let bonus = 0
@@ -15,16 +16,16 @@ export function dnd5eConcentrationDefenseBonus(
     const feature = dnd5ePluginRegistryStore.features.get(id)
     if (!feature || feature.automation === 'manual') continue
     const mechanic = feature.declarativeAbility?.mechanic
-    if (mechanic?.kind === 'passive-defense') bonus += mechanic.concentrationBonuses?.[kind] ?? 0
+    if (mechanic?.kind === 'passive-defense' && !(magicSuppressed && mechanic.concentrationBonuses?.magical === true)) bonus += mechanic.concentrationBonuses?.[kind] ?? 0
   }
   return bonus
 }
 
 export function dnd5eCombatantSavingThrowEffectBonus(
-  combatant: Pick<Dnd5eCombatant, 'classState' | 'concentrating' | 'pluginFeatureIds'> & Partial<Pick<Dnd5eCombatant, 'proficiencyBonus' | 'savingThrowProficiencies'>>,
+  combatant: Pick<Dnd5eCombatant, 'classState' | 'concentrating' | 'pluginFeatureIds'> & Partial<Pick<Dnd5eCombatant, 'proficiencyBonus' | 'savingThrowProficiencies' | 'magicSuppressed'>>,
   ability?: AbilityKey,
 ): number {
   return dnd5eActiveSavingThrowBonus(combatant.classState.activeEffects, ability, combatant) +
     dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds,
-      combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows')
+      combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows', combatant.magicSuppressed)
 }

@@ -1,3 +1,6 @@
+import {withOriginalD20Preview} from './allyNaturalOneCheckpoint'
+import type { Dnd5eAbilityCheckPurpose } from './contextualSkillChecks'
+import { dnd5eTurnMovementSpent } from './turnEconomy'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { dnd5eRemoteSensorCanHearToken } from './remoteSensorHearing'
 import { recognizeAreasByVisualSearch, canSeeRecognizableArea } from './areaVisualRecognition'
@@ -76,6 +79,7 @@ export function prepareDnd5eAbilityCheck(input: {
 
   const skill = payload.skill ? SKILLS.find((candidate) => candidate.key === payload.skill) : undefined
   if (
+    (payload.requestedPurpose != null && (payload.requestedPurpose !== 'detect-lies' || payload.ability !== 'wis' || payload.skill !== 'insight' || payload.toolId != null)) ||
     (payload.toolId != null && (payload.skill != null || payload.context != null || !DND5E_TOOL_CHOICES.some(tool => tool.id === payload.toolId))) ||
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
     (payload.totalOnly && (payload.dc !== 0 || payload.spendAction === true)) ||
@@ -155,6 +159,7 @@ export function prepareDnd5eAbilityCheck(input: {
       bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
       reactionAvailable: input.turnEconomy.reaction.current > 0,
       movementRemaining: input.turnEconomy.movement.current,
+      movementSpent: dnd5eTurnMovementSpent(input.turnEconomy),
     }
   }
   return {
@@ -234,18 +239,30 @@ export function previewPreparedDnd5eAbilityCheck(
   d20Second?: number,
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
   effectRollDice?: Readonly<Record<string,readonly number[]>>,
+  hostConfirmedPurpose?: Dnd5eAbilityCheckPurpose,
 ): Extract<Dnd5eCombatEvent, { type: 'ability-check-resolved' }> | undefined {
+  return withOriginalD20Preview(()=>{
   const result = resolveDnd5eHeadlessAction(prepared.state, headlessAbilityCheckAction(prepared, {
     d20,
     d20Second,
     postD20Adjustment,
     effectRollDice,
-  }),{transactionId:prepared.action.id})
+  }),{transactionId:prepared.action.id}, { abilityCheckPurpose: confirmedAbilityCheckPurpose(prepared, hostConfirmedPurpose) })
   return result.events.find((event): event is Extract<Dnd5eCombatEvent, { type: 'ability-check-resolved' }> =>
     event.type === 'ability-check-resolved')
+
+  })
+}
+
+/** Caller is the DM authority route. This value is never read from the player payload. */
+function confirmedAbilityCheckPurpose(prepared: PreparedDnd5eAbilityCheck, confirmed?: Dnd5eAbilityCheckPurpose) {
+  return confirmed === 'detect-lies' && prepared.payload.requestedPurpose === confirmed &&
+    prepared.payload.ability === 'wis' && prepared.payload.skill === 'insight' ? confirmed : undefined
 }
 
 export function resolvePreparedDnd5eAbilityCheck(input: {
+  /** DM-local confirmation established before rolling, separate from the shared request. */
+  hostConfirmedPurpose?: Dnd5eAbilityCheckPurpose
   effectRollDice?: Readonly<Record<string,readonly number[]>>
   prepared: PreparedDnd5eAbilityCheck
   d20: number
@@ -260,7 +277,8 @@ export function resolvePreparedDnd5eAbilityCheck(input: {
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   strokeOfLuck?: boolean
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
-  const result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAbilityCheckAction(input.prepared, input),{transactionId:input.prepared.action.id})
+  const { hostConfirmedPurpose, prepared, ...rollInput } = input
+  const result = resolveDnd5eHeadlessAction(prepared.state, headlessAbilityCheckAction(prepared, rollInput),{transactionId:prepared.action.id}, { abilityCheckPurpose: confirmedAbilityCheckPurpose(prepared, hostConfirmedPurpose) })
   if (!result.ok) return { result }
   const application = planDnd5eMapResultApplication({
     state: result.state,

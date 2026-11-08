@@ -1,0 +1,225 @@
+import {actualMapsExtra,actualMapsMint} from './bountifulLuck.boundExtraMap.testSupport.ts'
+import {prepareBountifulDeferredExtraD20} from './bountifulLuckDeferredD20'
+import {isCombatInterruptKind} from '../../lib/combatInterruptProtocol'
+import {recordCombatInterruptRollOptions,type SharedCombatInterruptQueueState} from '../../lib/combatInterruptQueue'
+import {writeDicePoolCheckpoint,readDicePoolCheckpoint} from '../../presentation/maps/dicePoolCheckpoint'
+import {captureBountifulOriginalRawIssuer} from './bountifulOriginalRawIssuer'
+import {bountifulLuckTestContent} from './bountifulLuckTestContent'
+import {bountifulDeferredD20RequestId} from './bountifulLuckDeferredD20'
+import {commitD20ChoiceReroll} from '../../pages/maps/commitD20ChoiceReroll'
+import {createD20ChoiceRerollContribution,createD20RollConfirmationInterrupt,durableD20RollId} from '../../lib/rollConfirmation'
+import {dnd5eCoreInspirationChoiceRerollOption} from '../../lib/d20InterruptPolicy'
+import {beginBountifulEquipmentOriginal} from './bountifulLuckEquipmentOriginal'
+import {recordBountifulOriginalAfterDice} from './bountifulLuckNormalAck'
+import {it,expect,vi} from 'vitest'
+import {prepareDnd5eLocalContentJson} from './localContentCollection'
+import {dnd5eRulesPluginFromContentPackageV2} from './contentPackageV2'
+import {registerDnd5eRulesPlugin} from './pluginApi'
+import {normalizeCharacter} from '../../store/characters'
+import {prepareDnd5eEquipmentAttack,resolvePreparedDnd5eEquipmentAttack} from './equipmentAttackAction'
+import {DND5E_SHORTBOW} from './equipment'
+import {applyDnd5eInventoryMutation} from './items'
+import type {BattleMap} from '../../store/maps'
+import type {SharedPlayerActionState} from '../../lib/sharedCombatTypes'
+import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'
+import {driveBountifulOriginalParent,BountifulOriginalParentPending} from './bountifulLuckPersistentRoomDriver'
+import {bountifulOriginalDieRollId,nextBountifulOriginalDieOwner,type BountifulOriginalDieReceipt} from './bountifulLuckReceipt'
+import {resolveBountifulOriginalForNormalAck,publishBountifulOriginalThroughNormalAck} from './bountifulLuckNormalAck'
+import {createDnd5eTurnEconomyCounts,spendDnd5eTurnResource} from './turnEconomy'
+import type {PublishPlayerActionAckInput} from '../../lib/playerActionAckPublish'
+vi.mock('../../lib/roomSession',()=>({getRoomSession:()=>({roomId:'room',memberId:'host',role:'dm'})}))
+
+it.each([17,1])('Host persisted full-parent request identity auto-routes the real generic choice (%i) into the exact BL parent and ordinary ACK',async replacement=>{
+ const {package:pkg}=await prepareDnd5eLocalContentJson(bountifulLuckTestContent)
+ const dispose=registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(pkg))
+ try{
+  const make=(id:string,feat:boolean)=>normalizeCharacter({id,name:id,roomMemberId:id+'-member',race:'半身人',dnd5eRaceId:'halfling',charClass:'战士',level:4,abilities:{str:10,dex:14,con:14,int:10,wis:10,cha:10},currentHp:30,maxHp:30,dnd5eFeatIds:feat?[pkg.manifest.id+':bountiful-luck']:[]})
+  const actor=make('ally',false);actor.race='人类';actor.dnd5eRaceId='human';actor.inspiration=1;actor.dnd5eCombatState={bardicInspirationDie:6,bardicInspirationSourceId:'first-token',bardicInspirationRoundsRemaining:10};if(DND5E_SHORTBOW.dnd5e?.kind!=='weapon')throw Error('Actual bow weapon required');actor.equipment={mainWeapon:{...DND5E_SHORTBOW,id:'test:twenty-sided:dnd5e-shortbow',baseEquipmentId:'dnd5e-shortbow',name:'Synthetic twenty-sided damage bow',dnd5e:{...DND5E_SHORTBOW.dnd5e,damage:{count:1,sides:20,type:'piercing'}}}};
+  const characters=[applyDnd5eInventoryMutation([actor],{type:'grant',characterId:actor.id,templateId:'srd-5.1:item:arrows',quantity:20}).characters[0],make('first',true),make('second',true),make('target',false)]
+  const map:BattleMap={id:'map',name:'Map',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:characters.map((c,index)=>({id:c.id+'-token',characterId:c.id,type:index===3?'enemy':'player',label:c.name,x:25+50*index,y:25,size:1,color:'',emoji:''}))}
+  const action:SharedPlayerActionState={id:('parent-'+replacement),mapId:'map',combatId:'combat',sourceMode:'player',status:'pending',roomMemberId:'ally-member',type:'dnd5e-weapon-attack',actorTokenId:'ally-token',characterId:'ally',targetTokenId:'target-token',round:1,initiativeIndex:0,seq:1,updatedAt:1}
+  const prepared=prepareDnd5eEquipmentAttack({action,map,characters,attacksUsed:0,initiativeOrder:map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,emoji:'',color:'',roll:20-index}))})
+  if(!prepared.ok)throw Error(prepared.reason)
+  type Resource={_sync:{revision:number};[key:string]:unknown}
+  let data:Record<string,Resource>={combat:{_sync:{revision:1},active:true,mapId:'map',combatId:'combat',round:1,initiativeIndex:0},characters:{_sync:{revision:2},characters},maps:{_sync:{revision:3},maps:[map]},'player-action-requests':{_sync:{revision:4},requests:[action]}}
+  data['player-action-ack']={_sync:{revision:0},id:''}
+  data['player-action-processed']={_sync:{revision:0},actionIds:[]}
+  const writes:string[][]=[]
+  const gateway:Pick<SharedRoomGatewayPort,'loadResource'|'saveResourcesAtomically'>={loadResource:async<T>(name:string)=>structuredClone(data[name]??null)as T,saveResourcesAtomically:async(batch,options)=>{for(const write of batch)expect(write.expectedRevision).toBe(data[write.name]._sync.revision);for(const [name,value]of Object.entries(options?.readRevisions??{}))expect(data[name]?._sync.revision??0).toBe(value);const next=structuredClone(data);for(const write of batch)next[write.name]={...write.data as object,_sync:{revision:data[write.name]._sync.revision+1}};data=next;writes.push(batch.map(row=>row.name));return{status:'committed',transactionId:options?.transactionId??'',revisions:{}}}}
+  const rawRollId=durableD20RollId({mapId:'map',sourceMode:'dm',transactionId:('parent-'+replacement),occurrenceIndex:0})+':pool:1d20'
+  const source={prepared:prepared.prepared,d20:1,damageRolls:[] as number[],...captureBountifulOriginalRawIssuer({mapId:'map',parentId:('parent-'+replacement),mode:'dm',rollId:rawRollId,cursor:1,raw:[1]})}
+  await expect(beginBountifulEquipmentOriginal({action,source},gateway,{showChoice:async()=>{},requestRoll:async()=>{}})).rejects.toBeInstanceOf(BountifulOriginalParentPending)
+  const untouched=structuredClone(data.characters),sequence:string[]=[],rolls:string[]=[]
+  const append=(receipt:BountifulOriginalDieReceipt,actorTokenId:string,characterId:string,memberId:string,command:object)=>{
+   const rows=data['player-action-requests'].requests as object[]
+   data['player-action-requests'].requests=[...rows,{id:'response-'+rows.length,roomMemberId:memberId,type:'dnd5e-bountiful-luck',status:'pending',sourceMode:'player',mapId:'map',combatId:'combat',actorTokenId,characterId,bountifulLuck:{parentId:('parent-'+replacement),occurrence:receipt.identity.occurrence,command}}]
+  }
+  // A closed or unanswered UI does not manufacture a decline or any cost.
+  await expect(driveBountifulOriginalParent({mapId:'map',parentId:('parent-'+replacement)},gateway,{showChoice:async()=>{},requestRoll:async()=>{}})).rejects.toBeInstanceOf(BountifulOriginalParentPending)
+  expect(data.characters).toEqual(untouched)
+  const stage=await beginBountifulEquipmentOriginal({action,source},gateway,{
+   showChoice:async receipt=>{const next=nextBountifulOriginalDieOwner(receipt);if(!next)throw Error('No real owner');sequence.push(next.ownerId+':'+receipt.request.dieIndex);const control=receipt.controllers[next.ownerId];append(receipt,next.ownerId,control.characterId,control.memberId,{phase:'reaction',...next,decision:'decline'})},
+   requestRoll:async(receipt,refresh)=>{rolls.push(receipt.identity.roller.tokenId+':'+receipt.request.dieIndex);const roller=receipt.identity.roller,id=bountifulOriginalDieRollId(receipt),value=12;append(receipt,roller.tokenId,requireCharacterRoller(roller),roller.memberId,{phase:'roll',rollRequestId:id,value});const fresh=await refresh();expect(fresh.rawReroll?.memberId).toBe('ally-member');append(fresh,roller.tokenId,requireCharacterRoller(roller),'host',{phase:'confirm',rollRequestId:id,rawValue:value,value})}
+  })
+  if(!stage)throw Error('Real equipment raw did not issue its private parent')
+  expect(stage.rawDice).toEqual([1]);expect(stage.retainedDice).toEqual([1])
+  expect(stage.originalSource).not.toBe(source)
+  expect(stage.originalSource.prepared).not.toBe(source.prepared)
+  expect(stage.originalSource.prepared.state).not.toBe(stage.previewState)
+  const originalSnapshot=JSON.stringify(stage.originalSource)
+  stage.previewState.combatants['target-token'].currentHp=1
+  expect(JSON.stringify(stage.originalSource)).toBe(originalSnapshot)
+  expect(source.prepared.state.combatants['target-token'].currentHp).toBe(30)
+  expect(sequence).toEqual(['first-token:0','second-token:0'])
+  expect(rolls).toEqual([])
+  expect(stage.rawDice).toEqual([1]);expect(stage.retainedDice).toEqual([1])
+  expect(stage.receipts).toHaveLength(1)
+  expect(data.characters).toEqual(untouched)
+  expect(writes.every(names=>names.length<3)).toBe(true)
+
+
+  const option=dnd5eCoreInspirationChoiceRerollOption(characters[0],'ally-token','normal')
+  if(!option)throw Error('Real core Inspiration option missing')
+  const prompt=createD20RollConfirmationInterrupt({mapId:'map',combatId:'combat',rollId:bountifulDeferredD20RequestId(('parent-'+replacement),rawRollId,0,0),bountifulParent:{parentId:('parent-'+replacement),sourceOccurrence:0,dieIndex:0,rawRollId},label:'Normal post-original reroll',originalValue:1,rollerCharacterId:'ally',eligibleModifiers:[option]})
+  const contribution=createD20ChoiceRerollContribution({interruptId:prompt.id,characterId:'ally',characterName:characters[0].name,featureId:option.featureId,featureLabel:option.featureLabel,decision:'use'})
+  prompt.contributions=[contribution];prompt.status='rolling'
+  data['combat-interrupts']={_sync:{revision:1},mapId:'map',interrupts:[prompt],updatedAt:1}
+
+  if(contribution.kind!=='choice-reroll')throw Error('actual choice contribution required');
+  const extraInput={mapId:'map',interruptId:prompt.id,acceptedContributionId:contribution.id,expectedContribution:contribution};
+  const proof=await prepareBountifulDeferredExtraD20(extraInput,gateway);
+  expect(proof.rollerCharacterId).toBe('ally');expect(proof.count).toBe(1);
+  expect(await prepareBountifulDeferredExtraD20(structuredClone(extraInput),gateway)).toEqual(proof);
+  await expect(prepareBountifulDeferredExtraD20({...extraInput,expectedContribution:{...contribution,createdAt:contribution.createdAt+1}},gateway)).rejects.toThrow('locked-accepted-contribution-required');
+  await expect(prepareBountifulDeferredExtraD20({...extraInput,acceptedContributionId:'old-contribution'},gateway)).rejects.toThrow('authenticated-contribution-required');
+  const originalQueue=structuredClone(data['combat-interrupts']);
+  const checkForged=async(change:(row:typeof prompt)=>void)=>{
+    const altered=structuredClone(prompt);change(altered);
+    data['combat-interrupts']={...structuredClone(originalQueue),interrupts:[altered]};
+    const copied=altered.contributions?.[0];
+    if(!copied||copied.kind!=='choice-reroll')throw Error('test needs concrete choice');
+    await expect(prepareBountifulDeferredExtraD20({mapId:'map',interruptId:altered.id,acceptedContributionId:copied.id,expectedContribution:copied},gateway)).rejects.toThrow();
+    data['combat-interrupts']=structuredClone(originalQueue);
+  };
+  await checkForged(row=>{row.id='ordinary-roll-with-copied-bountiful-payload';row.contributions![0].id=row.id+':ally:choice-reroll'});
+  await checkForged(row=>{row.actorCharId='other'});
+  await checkForged(row=>{row.payload.originalValue=20});
+  await checkForged(row=>{row.payload.bountifulParent!.parentId='old-parent'});
+  await checkForged(row=>{row.payload.bountifulParent!.rawRollId='copied-old-die'});
+  await checkForged(row=>{row.payload.eligibleModifiers![0].featureId='foreign-core-source'});
+  await checkForged(row=>{row.status='done'});
+  await checkForged(row=>{row.mapId='other-map'});
+  const originalCharacters=structuredClone(data.characters);
+  const changedCharacters=structuredClone(characters);changedCharacters[0].inspiration=0;data.characters.characters=changedCharacters;
+  await expect(prepareBountifulDeferredExtraD20(extraInput,gateway)).rejects.toThrow('stale-original-materials');
+  data.characters=originalCharacters;
+  const beforeRaw=structuredClone(data.characters),cursor=new Map([[action.id,source.hostOriginalDiceCursor]]);
+  const raw=await actualMapsExtra(prompt,contribution.id,gateway,async(count,sides,_label,_target,options)=>{
+    const id=actualMapsMint(count,sides,options,cursor,action.id);
+    writeDicePoolCheckpoint(id,sides,[replacement],true);
+    return readDicePoolCheckpoint(id,count,sides)!.values;
+  });
+  expect(raw).toEqual([replacement]);expect(data.characters).toEqual(beforeRaw);
+  const queue=data['combat-interrupts'];
+  const rolled=recordCombatInterruptRollOptions({mapId:'map',interrupts:[prompt],updatedAt:1},prompt.id,{contributionId:contribution.id,values:[1,...raw!]},3);
+  if(!rolled)throw Error('actual queue did not retain raw options');
+  data['combat-interrupts']={...rolled,_sync:{revision:queue._sync.revision+1}};
+  await expect(prepareBountifulDeferredExtraD20(extraInput,gateway)).rejects.toThrow('locked-accepted-contribution-required');
+  // Real raw options survive while the generic cost and original HP are still
+  // unpublished. A fresh page resumes the original raw cursor and skips extra
+  // dice, exactly as the actual Maps handler does when rollOptions is present.
+  const restored=await gateway.loadResource<SharedCombatInterruptQueueState>('combat-interrupts');
+  const restoredPrompt=restored?.interrupts[0];
+  if(!restoredPrompt||!isCombatInterruptKind(restoredPrompt,'roll-confirmation'))throw Error('Actual restored raw prompt required');
+  expect(restoredPrompt.payload.rollOptions?.values).toEqual([1,replacement]);
+  const reloadedCursor=new Map([[action.id,source.hostOriginalDiceCursor]]);
+  const damageRequestId=actualMapsMint(1,20,{},reloadedCursor,action.id);
+  let damageForNative=readDicePoolCheckpoint(damageRequestId,1,20)?.values;
+  if(!damageForNative){writeDicePoolCheckpoint(damageRequestId,20,[3],true);damageForNative=readDicePoolCheckpoint(damageRequestId,1,20)!.values;}
+  const input={mapId:'map',interruptId:prompt.id,acceptedContributionId:contribution.id,now:4}
+  const count=writes.length
+  await expect(commitD20ChoiceReroll({...input,deferToParent:{parentId:'foreign',sourceOccurrence:0,dieIndex:0}},gateway)).rejects.toThrow('real-private-parent-required')
+  await expect(commitD20ChoiceReroll({...input,deferToParent:{parentId:('parent-'+replacement),sourceOccurrence:0,dieIndex:1}},gateway)).rejects.toThrow('original-die-required')
+  const actualPrompt=(data['combat-interrupts'].interrupts as typeof prompt[])[0]
+  const actualRollId=actualPrompt.payload.rollId
+  actualPrompt.payload.rollId='foreign-raw:0'
+  await expect(commitD20ChoiceReroll(input,gateway)).rejects.toThrow('authenticated-original-request-required')
+  actualPrompt.payload.rollId=actualRollId
+  actualPrompt.actorCharId='other'
+  await expect(commitD20ChoiceReroll(input,gateway)).rejects.toThrow('authenticated-original-request-required')
+  actualPrompt.actorCharId='ally'
+  actualPrompt.payload.originalValue=20
+  await expect(commitD20ChoiceReroll(input,gateway)).rejects.toThrow('authenticated-original-request-required')
+  actualPrompt.payload.originalValue=1
+  expect(writes).toHaveLength(count)
+  const response=await commitD20ChoiceReroll(input,gateway)
+  expect(response.finalValue).toBe(replacement)
+  expect((data.characters.characters as typeof characters)[0].inspiration).toBe(1)
+  expect(writes.slice(count)).toEqual([['combat','combat-interrupts']])
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  const first=Object.values(data.combat.bountifulOriginalParents as Record<string,BountifulOriginalDieReceipt>)[0]
+  expect(first.postOriginalD20).toEqual([expect.objectContaining({parentId:('parent-'+replacement),actorId:'ally-token',characterId:'ally',rawRollId,interruptId:prompt.id,contributionId:contribution.id,originalValue:1,selectedValue:replacement,featureId:option.featureId,resourceCosts:option.resourceCosts})])
+  expect(await commitD20ChoiceReroll(input,gateway)).toEqual(response)
+  expect(writes).toHaveLength(count+1)
+  await expect(commitD20ChoiceReroll({...input,acceptedContributionId:'foreign'},gateway)).rejects.toThrow('reroll-contribution-mismatch')
+  expect(writes).toHaveLength(count+1)
+  const finalSource={...source,damageRolls:replacement===17?damageForNative:[]}
+  await expect(recordBountifulOriginalAfterDice({action,source:{...finalSource,bardicInspirationRoll:7},resolve:resolvePreparedDnd5eEquipmentAttack,authorityUnchanged:()=>true},gateway)).rejects.toThrow('real-continuation-rejected')
+  const liveFirst=Object.values(data.combat.bountifulOriginalParents as Record<string,BountifulOriginalDieReceipt>)[0]
+  const realFacts=structuredClone(liveFirst.postOriginalD20)
+  if(!realFacts?.length)throw Error('Missing authenticated deferred source')
+  liveFirst.postOriginalD20=realFacts.map(fact=>({...fact,readyOrdinal:fact.readyOrdinal+1}))
+  await expect(recordBountifulOriginalAfterDice({action,source:finalSource,resolve:resolvePreparedDnd5eEquipmentAttack,authorityUnchanged:()=>true},gateway)).rejects.toThrow('real-continuation-rejected')
+  liveFirst.postOriginalD20=realFacts.map(fact=>({...fact,resourceCosts:[{...fact.resourceCosts[0],amount:2}]}))
+  await expect(recordBountifulOriginalAfterDice({action,source:finalSource,resolve:resolvePreparedDnd5eEquipmentAttack,authorityUnchanged:()=>true},gateway)).rejects.toThrow('real-continuation-rejected')
+  liveFirst.postOriginalD20=realFacts
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  await recordBountifulOriginalAfterDice({action,source:finalSource,resolve:resolvePreparedDnd5eEquipmentAttack,authorityUnchanged:()=>true},gateway)
+  const resolved=await resolveBountifulOriginalForNormalAck({action,source:finalSource,resolve:resolvePreparedDnd5eEquipmentAttack,options:{combatRevision:1,authorityUnchanged:()=>true,confirm:async()=>({accepted:false}),roll:async()=>[]}},gateway)
+  expect(resolved.result.ok).toBe(true)
+  expect(resolved.result.events).toContainEqual(expect.objectContaining({type:'attack-resolved',d20:replacement,total:replacement+4,hit:replacement===17}))
+  if(!resolved.application)throw Error('Real application missing')
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  const normalActorEconomy=spendDnd5eTurnResource(createDnd5eTurnEconomyCounts('combat:1:ally-token',30),'action').economy
+  const notifications:string[]=[]
+  const ackInput:PublishPlayerActionAckInput={
+   ack:{id:'ack:parent',actionId:('parent-'+replacement),mapId:'map',combatId:'combat',recipientMemberId:'ally-member',status:'accepted',round:1,initiativeIndex:0,updatedAt:2},
+   snapshots:{characters:resolved.application.characters,maps:[resolved.application.map],updatedAt:2,combat:{mapId:'map',combatId:'combat',active:true,round:1,initiativeIndex:0,initiativeOrder:map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,emoji:'',color:'',roll:20-index})),updatedAt:2,dnd5eTurnEconomyByToken:{'ally-token':normalActorEconomy}}},
+   processed:{mapId:'map',combatId:'combat',actionIds:[('parent-'+replacement)],updatedAt:2},expectedRevisions:{'player-action-ack':0,'player-action-processed':0},
+   saveSharedResource:async()=>{throw Error('No independent resource write permitted')},
+   commitSharedResources:async(batch,options)=>{await gateway.saveResourcesAtomically(batch,options);return{}},
+   loadSharedResource:gateway.loadResource,publishAck:async ack=>{notifications.push(ack.id)},
+  }
+  // Equal IDs and generic success cannot manufacture the live private brand.
+  await expect(publishBountifulOriginalThroughNormalAck(structuredClone(action),ackInput,gateway)).rejects.toThrow('issued-result-required')
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  data['map-geometry']={_sync:{revision:1}}
+  await expect(publishBountifulOriginalThroughNormalAck(action,ackInput,gateway)).rejects.toThrow('stale-original-resources')
+  delete data['map-geometry']
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  await publishBountifulOriginalThroughNormalAck(action,ackInput,gateway)
+  const finalWrites=writes.filter(names=>names.includes('characters'))
+  expect(finalWrites).toEqual([['characters','maps','combat','player-action-processed','player-action-ack']])
+  const economies=data.combat.dnd5eTurnEconomyByToken as Record<string,{action:{current:number};reaction:{current:number}}>
+  expect(economies['ally-token'].action.current).toBe(0) // normal Maps postprocessing retained
+  expect(economies['second-token']).toBeUndefined()
+  const parents=Object.values(data.combat.bountifulOriginalParents as Record<string,BountifulOriginalDieReceipt>)
+  expect(parents).toHaveLength(1);expect(parents.every(row=>row.consumed?.transactionId===('parent-'+replacement))).toBe(true)
+  expect((data['player-action-processed'].actionIds as string[])).toEqual([('parent-'+replacement)])
+  expect(data['player-action-ack'].actionId).toBe(('parent-'+replacement))
+  const finalCharacters=data.characters.characters as typeof characters
+  expect(finalCharacters.find(c=>c.id==='ally')?.dnd5eInventory?.entries.find(e=>e.item.ammunitionKind==='arrow')?.quantity).toBe(19)
+  expect(finalCharacters.find(c=>c.id==='target')?.currentHp).toBe(replacement===17?25:30)
+  expect((data.characters.characters as typeof characters).find(c=>c.id==='ally')?.dnd5eCombatState?.bardicInspirationDie).toBe(6)
+  expect((data.characters.characters as typeof characters).find(c=>c.id==='ally')?.inspiration).toBe(0)
+  // A repeated/reloaded ACK observes the durable consumed parent; no extra CAS.
+  await publishBountifulOriginalThroughNormalAck(structuredClone(action),ackInput,gateway)
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(1)
+  expect(notifications).toEqual(['ack:parent','ack:parent'])
+  const afterFinal=writes.length
+  expect(await commitD20ChoiceReroll(input,gateway)).toEqual(response)
+  expect(writes).toHaveLength(afterFinal)
+ }finally{dispose()}
+})
+
+function requireCharacterRoller(roller:{characterId?:string}){if(!roller.characterId)throw Error("This Character-only fixture requires its actual Character roller");return roller.characterId}

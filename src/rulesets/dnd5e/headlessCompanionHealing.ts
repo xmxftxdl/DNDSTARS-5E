@@ -5,6 +5,8 @@ import type { Dnd5eCombatant, Dnd5eHeadlessCombatState } from './headlessCombatE
 import { dnd5eActiveMaximizeHealingDice } from './activeEffects'
 
 export interface Dnd5eCompanionSceneSnapshot {
+  /** Canonical wind-control Activity preparation only; never a player payload fact. */
+  weatherControlCombatActive?:boolean
   map: BattleMap
   geometry: MapGeometryState | null
   worldMinute?: number

@@ -146,6 +146,7 @@ for (const directory of ['src/domain', 'src/application', 'src/ports']) {
 
 const mapsPage = await source('src/pages/MapsPage.tsx')
 const mapsWorkspacePage = await source('src/pages/MapsWorkspacePage.tsx')
+const mapsWorkspaceView = await source('src/presentation/maps/MapsWorkspaceView.tsx')
 const mapCanvas = await source('src/components/map/MapCanvas.tsx')
 const mapViewportLayer = await source('src/presentation/maps/MapViewportLayer.tsx')
 const mapPersistentAreaLayers = await source('src/components/map/MapPersistentAreaLayers.tsx')
@@ -221,9 +222,11 @@ const requiredMigrations = [
   [mapsWorkspacePage, "from '../presentation/maps/useCombatInteraction'", 'MapsPage CombatInteraction boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useCombatDialog'", 'MapsPage combat dialog boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useDicePresentation'", 'MapsPage dice presentation boundary'],
-  [mapsWorkspacePage, "from '../presentation/maps/DicePresentationOverlays'", 'MapsPage dice overlay boundary'],
+  [mapsWorkspacePage, "from '../presentation/maps/MapsWorkspaceView'", 'MapsPage view boundary'],
+  [mapsWorkspaceView, 'from "./DicePresentationOverlays"', 'MapsPage dice overlay boundary'],
   [await source('src/pages/mapsWorkspaceRuntime.ts'), "from '../composition/browserCombatController'", 'MapsPage CombatController boundary'],
-  [mapsWorkspacePage, "from '../application/maps/MovementHazardCoordinator'", 'MapsPage movement hazard boundary'],
+  [mapsWorkspacePage, "from './maps/movementHazardsProducer'", 'MapsPage movement producer boundary'],
+  [await source('src/pages/maps/movementHazardsProducer.ts'), 'from "../../application/maps/MovementHazardCoordinator"', 'MapsPage movement hazard boundary'],
   [mapsWorkspacePage, "from '../application/maps/ForcedMovementPersistentAreaCoordinator'", 'MapsPage forced-movement area boundary'],
   [pluginApi, "from './plugins/pluginDeclarativeCompiler'", 'plugin declarative compiler boundary'],
   [pluginApi, "from './plugins/pluginRegistryContracts'", 'plugin registry contract boundary'],

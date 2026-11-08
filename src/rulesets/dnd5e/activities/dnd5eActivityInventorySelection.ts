@@ -1,6 +1,6 @@
 import type { Character } from '../../../types/character'
 import { normalizeDnd5eInventory, dnd5eInventoryItemTemplate } from '../items'
-import { dnd5eWeaponDamageSource } from '../equipment'
+import { dnd5eWeaponDamageSource,dnd5eWeaponProficient,dnd5eWeaponPropertyIds } from '../equipment'
 import type { Dnd5eActivityEquipmentSnapshotV1, Dnd5eActivityInventoryItemSnapshotV1 } from './dnd5eActivityExecutor'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { dnd5eActivityOutcomeAllowsChoicesV1 } from './dnd5eActivityChoices'
@@ -51,9 +51,9 @@ function inventoryBindingOperations(activity: Dnd5eActivityDefinitionV1, choices
   return selectedOutcomes(activity, choices)
     .flatMap(outcome => outcome.operations.flatMap(operation => operation.kind === 'apply-effect'
       ? (activity.effects?.find(effect => effect.id === operation.effectId)?.modifiers ?? [])
-        .filter((modifier): modifier is Extract<Dnd5eEffectModifierV1, {kind:'weapon-enchantment'|'armor-enchantment'}> =>
+        .filter((modifier): modifier is Extract<Dnd5eEffectModifierV1, {kind:'weapon-enchantment'|'armor-enchantment'|'bound-weapon-ability'}> =>
           modifier.kind === 'weapon-enchantment' && modifier.weaponSlot === 'inventory-item' ||
-          modifier.kind === 'armor-enchantment' && modifier.itemSelection === 'inventory-item')
+          modifier.kind === 'armor-enchantment' && modifier.itemSelection === 'inventory-item' || modifier.kind==='bound-weapon-ability')
         .map(modifier => ({target:operation.target, modifier})) : []))
 }
 
@@ -71,7 +71,7 @@ export function dnd5eActivityInventorySelectionOptions(activity: Dnd5eActivityDe
     const owners = target === 'actor' ? [actor] : targets
     return owners.flatMap(owner => {
       const inventory = normalizeDnd5eInventory(owner)
-      const eligible = dnd5eActivityInventorySnapshot(owner).items.filter(item => item.kind === (modifier.kind === 'weapon-enchantment' ? 'weapon' : 'armor'))
+      const eligible = dnd5eActivityInventorySnapshot(owner).items.filter(item => item.kind === (modifier.kind === 'armor-enchantment' ? 'armor' : 'weapon') && (modifier.kind!=='bound-weapon-ability' || owner.id===actor.id && item.proficient===true && !item.weaponProperties?.includes('two-handed')))
       const local = eligible.map(item => {
         const entry = inventory.entries.find(candidate => candidate.instanceId === item.inventoryInstanceId)!
         return {id:JSON.stringify([owner.id,entry.instanceId]), ownerId:owner.id, instanceId:entry.instanceId,
@@ -79,8 +79,8 @@ export function dnd5eActivityInventorySelectionOptions(activity: Dnd5eActivityDe
       })
       // Public hints expose no templates, names, bonuses or private inventory.
       // Only the selected identity/revision travels back; Host resolves real facts.
-      const hints = (owner.dnd5eExposedEnchantmentItems ?? []).filter(item =>
-        item.kind === (modifier.kind === 'weapon-enchantment' ? 'weapon' : 'armor') &&
+      const hints = (modifier.kind==='bound-weapon-ability'?[]:owner.dnd5eExposedEnchantmentItems ?? []).filter(item =>
+        item.kind === (modifier.kind === 'armor-enchantment' ? 'armor' : 'weapon') &&
         !local.some(option => option.instanceId === item.instanceId))
       return [...local, ...hints.map((item,index) => ({id:JSON.stringify([owner.id,item.instanceId]),ownerId:owner.id,
         instanceId:item.instanceId,revision:item.revision,equipped:item.equipped,
@@ -122,7 +122,7 @@ export function dnd5eActivityInventorySnapshot(character: Character): NonNullabl
     if (equipment.dnd5e?.kind === 'weapon' && !['simple', 'martial'].includes(equipment.dnd5e.category)) return []
     return [{kind, itemId: equipment.id, inventoryInstanceId: entry.instanceId,
       weaponId: kind === 'weapon' ? equipment.id : undefined,
-      ...(kind === 'weapon' ? { weaponBaseId: equipment.baseEquipmentId ?? equipment.id, intrinsicAttackBonus: equipment.effects?.weaponAttackBonus ?? 0, intrinsicDamageBonus: equipment.effects?.weaponDamageBonus ?? 0 } : {}),
+      ...(kind === 'weapon' ? { weaponBaseId: equipment.baseEquipmentId ?? equipment.id, intrinsicAttackBonus: equipment.effects?.weaponAttackBonus ?? 0, intrinsicDamageBonus: equipment.effects?.weaponDamageBonus ?? 0,proficient:dnd5eWeaponProficient(character,equipment),weaponProperties:dnd5eWeaponPropertyIds(equipment.dnd5e?.kind==='weapon'?equipment.dnd5e.properties:undefined) } : {}),
       roles: kind === 'weapon' ? ['weapon'] : ['other'],
       magical: entry.item.magicItem != null || entry.item.category === 'magic-item' ||
         (kind === 'weapon' ? dnd5eWeaponDamageSource(equipment)?.magical === true : equipment.dnd5e?.kind === 'armor' && equipment.dnd5e.magical === true),

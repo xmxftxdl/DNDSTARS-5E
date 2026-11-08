@@ -1,3 +1,4 @@
+import type{Dnd5eAbilityTargetLimit}from'./dnd5eAbilityTargetLimit'
 import type { AutomationCapability } from '../../../domain/automation/automationCapability'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
@@ -62,6 +63,8 @@ export type Dnd5eActivityInvocationV1 =
   | {
       kind: 'triggered'
       event: Dnd5eTriggerEventV1
+      /** Same owner's optional replacement settles before its automatic fallback. */
+      priority?: number
       confirmation: Dnd5eActivityConfirmationV1
       retention?: Dnd5eActivityTriggerRetentionV1
       /** An explicit decline also consumes the exact single-use granting effect. */
@@ -90,6 +93,8 @@ export type Dnd5eActivityEventSourceV1 = (
       crossedInitialSpaceTags?: readonly string[]
       result?: 'hit' | 'miss' | 'critical-hit' | 'critical-miss'
       damageType?: Dnd5eDamageType
+      /** Derived from Host-owned Pact identity and this exact equipped attack weapon. */
+      pactWeapon?: true
       weaponId?: string
       /** Host-resolved equipment type, distinct from the owned inventory instance. */
       weaponBaseId?: string
@@ -113,7 +118,7 @@ export type Dnd5eActivityEventSourceV1 = (
         damageTypes?: readonly Dnd5eDamageType[]
       }
     }
-  | { kind: 'spell'; id: string; activityId?: string; level: number; school?: import('../spellbook').Dnd5eSpellbookSchoolId; castingClassId?: string }
+  | { kind: 'spell'; id: string; activityId?: string; damageTypes?: readonly Dnd5eDamageType[]; level: number; school?: import('../spellbook').Dnd5eSpellbookSchoolId; castingClassId?: string }
   | { kind: 'skill'; id: string; activityId?: string }
   | { kind: 'item' | 'feature' | 'action'; id: string; activityId?: string }
   | {
@@ -172,6 +177,8 @@ export type Dnd5eActivityTargetV1 =
       kind: 'creature'
       /** Opt-in single-target damaging attacks may also select authored physical objects. */
       allowObjectAttack?: true
+      /** Opt-in rider on actual class-spell damage to one physical object; no new attack. */
+      allowObjectSpellDamage?: true
       /** Explicit room-wide same-plane companion lookup for rest HP transfers. */
       roomCompanion?: { bondKey: string; sourceActivityId: string }
       /** Host must obtain explicit consent from every selected target's controller. */
@@ -202,6 +209,7 @@ export type Dnd5eActivityTargetV1 =
       count: number
       /** Defaults to one. Zero allows optional victims while actor effects still resolve. */
       minimumCount?: number
+      maximumCountAbilityModifier?: Dnd5eAbilityTargetLimit
       includeSelf?: boolean
       allowDuplicateTargets?: boolean
       /** Host checks perception from each selected creature back to the actor. */
@@ -377,6 +385,8 @@ export type Dnd5eActivityCheckV1 =
       automaticSuccessIfConditionImmune?: Dnd5eStandardConditionId
       /** Host communication facts cause success, not an ineligible action. */
       automaticSuccessIfCannotHearSource?: true
+      /** Unknown senses do not grant an automatic success; both must be explicitly unavailable. */
+      automaticSuccessIfCannotHearOrSeeSource?: true
       automaticSuccessIfNoSharedLanguage?: true
       /** Environmental exposure only; protected targets automatically pass this save. */
       environmentalHazard?: import('../environmentalProtection').Dnd5eEnvironmentalHazard
@@ -402,7 +412,7 @@ export type Dnd5eActivityCheckV1 =
     }
   | {
       id: string
-      kind: 'ability-check' | 'skill-check' | 'concentration-check'
+      kind: 'ability-check' | 'concentration-check'
       rollId: string
       ability: AbilityKey
       skill?: string
@@ -412,6 +422,20 @@ export type Dnd5eActivityCheckV1 =
       /** Resolve this caster check only in the selected closed mode. */
       appliesWhenChoice?: { choiceId: string; optionIds: readonly string[] }
     }
+  | ({
+      id: string
+      kind: 'skill-check'
+      rollId: string
+      ability: AbilityKey
+      skill?: string
+      rollMode?: 'normal' | 'advantage' | 'disadvantage' | 'host-derived'
+      scope?: 'shared' | 'per-target'
+      appliesWhenChoice?: { choiceId: string; optionIds: readonly string[] }
+    } & (
+      | { dc: Dnd5eFormulaV1; reportTotalOnly?: never }
+      /** Report a Host skill total for later adjudication, with no invented DC or success. */
+      | { reportTotalOnly: true; dc?: never }
+    ))
   | {
       id: string
       /** Two independent Host d20 recipes; ties favor target unless explicitly declared. */
@@ -476,6 +500,8 @@ export interface Dnd5eActivityChoiceDefinitionV1 {
   id: string
   label: string
   /** Host rolls first, then the DM selects an installed creature from the matching CR band. */
+  /** Host obtains this target fact from an authenticated, persisted DM answer. */
+  dmWorldFact?: { factId: string }
   dmSelection?: { afterCheckId: string; challengeRatingByTotal: readonly {
     minimum: number; maximum: number; maximumChallengeRating: number
   }[] }
@@ -522,6 +548,8 @@ export interface Dnd5eActivityMechanicOperationV1 {
 }
 
 export type Dnd5eActivityOperationV1 =
+  /** Post-packet Host continuation. The controller never supplies a plane fact. */
+  | { id: string; kind: 'weapon-hit-banishment'; target: 'target'; maximumHitPoints: 50 }
   | { id: string; kind: 'secondary-weapon-damage'; target: 'actor'; damageOperationId: string; rangeFeet: number; requiresLineOfSight: boolean }
   | { id:string;kind:'reaction-follow';target:'actor';pushOperationId:string;movementBudget:'walking-speed';targetRadiusFeet:number }
   | {
@@ -563,6 +591,7 @@ export type Dnd5eActivityOperationV1 =
     }
   | { id: string; kind: 'reveal-target-location'; target: 'target' }
   | { id: string; kind: 'read-damage-traits'; target: 'target' }
+  | { id: string; kind: 'read-sensory-deception'; target: 'actor'; rangeFeet: 30 }
   | { id: string; kind: 'detect-planar-portal'; target: 'actor'; rangeFeet: number }
   | { id: string; kind: 'temporary-hit-points'; target: Dnd5eActivityOperationTargetV1; amount: Dnd5eFormulaV1; sourceEffectId?: string; replacement?: 'replace' }
   | {
@@ -613,6 +642,7 @@ export type Dnd5eActivityOperationV1 =
   | {
       id: string
       kind: 'apply-standard-condition'
+      sleep?: 'forced'
       target: Dnd5eActivityOperationTargetV1
       condition: Dnd5eStandardConditionId
       duration: Dnd5eEffectDurationV1
@@ -647,6 +677,23 @@ export type Dnd5eActivityOperationV1 =
       condition: Dnd5eStandardConditionId
       sourceCreatureTypes?: readonly string[]
     }
+  | {
+      id: string
+      kind: 'transfer-effect'
+      target: 'target'
+      sourceSpellId: string
+      tags: readonly string[]
+      /** Move the original source-owned concentration instance after its bearer reached zero on an earlier turn. */
+      timing: 'later-source-turn-after-bearer-zero'
+    }
+  | {
+      id:string
+      kind:'transfer-owned-curse-on-bearer-death'
+      target:'target'
+      sourceActivityId:string
+      destinationChoiceId:string
+    }
+  | {id:string;kind:'heal-owned-curse-on-bearer-death';target:'target';sourceActivityId:string}
   | {
       id: string
       kind: 'remove-effect'
@@ -730,8 +777,10 @@ export type Dnd5eActivityOperationV1 =
       maximumDistanceFromActorFeet?: number
       /** Teleport destination must adjoin a previously selected continuation target. */
       continuationTargetRadiusFeet?: number
+      /** Destination must adjoin the currently selected creature(s), bound by Host targets. */
+      selectedTargetRadiusFeet?: number
       /** Host-derived vertical endpoint. `area-top` uses the validated Activity area volume; `ground` uses terrain elevation. */
-      verticalDestination?: 'area-top' | 'ground'
+      verticalDestination?: 'area-top' | 'ground' | 'space'
       /** Ascend only as far as the first mapped solid permits; damage remains a separate declared outcome. */
       stopAtMappedObstacle?: true
       /** Host chooses the farthest legal destination in the declared direction. */
@@ -832,6 +881,10 @@ export type Dnd5eActivityOperationV1 =
       kind: 'summon'
       /** Grants a spell-equivalent summon benefit without a spell-cast event or slot cost. */
       spellEffectSourceId?: string
+      /** Host-bound dead target from this creature-killed continuation, never a client anchor. */
+      placementOrigin?: 'killed-target'
+      /** Closed original Shadow6 summon policy; Host captures the one chosen body. */
+      illOmenHound?: true
       placementRangeFeet?: number
       requiresVisiblePlacement?: boolean
       /** Summon from a target actually killed by this earlier damage operation. */
@@ -846,6 +899,8 @@ export type Dnd5eActivityOperationV1 =
       /** Select an installed monster ID from this activity's declared choice options. */
       monsterChoiceId?: string
       bondKey?: string
+      /** Persistent bond ends at the original source's next completed long rest. */
+      endsOnSourceLongRest?: true
       /** Prevent these bond keys from coexisting across packages, including dismissed bonds. */
       exclusiveBondKeys?: readonly string[]
       /** Reject creation while any living creature in this persistent bond remains, including dismissed ones. */
@@ -878,6 +933,8 @@ export type Dnd5eActivityOperationV1 =
       /** Conjure Elemental keeps the creature for its remaining duration, but ends caster control and flips its side. */
       becomesHostileAfterConcentrationEnds?: true
       /** Optional Host-derived combat profile shared by summons and companions. */
+      /** Initial temporary HP only; the Host evaluates this at creature creation. */
+      temporaryHitPoints?: Dnd5eFormulaV1
       minimumMaximumHitPoints?: Dnd5eFormulaV1
       armorClassBonus?: Dnd5eFormulaV1
       weaponAttackBonus?: Dnd5eFormulaV1
@@ -1217,6 +1274,9 @@ export type Dnd5eActivityOperationV1 =
   | {
       id: string
       kind: 'grant-weapon-attack'
+      /** This one bonus attack may repeat Sneak Attack only against a new target. */
+      additionalSneakAttackDifferentTarget?: true
+      allowUnarmedStrikes?: true
       /** Additional attack remains part of the action that emitted the trigger. */
       inheritTriggerAttackOrigin?: true
       available?: 'immediate' | 'next-own-turn'
@@ -1465,6 +1525,10 @@ export type Dnd5eActivityOperationV1 =
   | {
       id: string
       kind: 'manual-adjudication'
+      /** Explicit registered recipe intent, never inferred from prompt prose. */
+      purpose?: 'magical-truth-detection'
+      /** Only this closed purpose can address a creature's spoken truth. */
+      target?: 'target'
       prompt: string
       reason: string
       requiresDmApproval: true
@@ -1544,6 +1608,8 @@ export interface Dnd5eActivityDefinitionV1 {
   endsGrantSourceConcentration?: true
   /** Finite charges consumed from the authorizing actor-owned Effect on success. Defaults to one. */
   effectGrantChargeCost?: number
+  /** Explicit outer spell concentration cap by chosen slot; never inferred from individual effects. */
+  concentrationCastLevelProfiles?: readonly { minimumCastLevel: number; maximumRounds: number }[]
   /** Spell concentration starts only when this cast leaves a concentration Effect. */
   concentrationRequiresEffect?: true
   carriedRollIds?: readonly string[]

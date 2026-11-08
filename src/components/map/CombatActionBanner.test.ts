@@ -1,3 +1,4 @@
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
@@ -209,7 +210,7 @@ describe('CombatActionBanner', () => {
   })
 
   it('keeps banners, transient controls, initiative, and player actions in a stable stacking order', () => {
-    const mapsPageSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+    const mapsPageSource = readMapsWorkspaceSource()
     const playerHotbarSource = readFileSync(new URL('./PlayerMapSpellHotbar.tsx', import.meta.url), 'utf8')
     const wallOfFireSource = readFileSync(new URL('../../pages/maps/WallOfFireTargetingControls.tsx', import.meta.url), 'utf8')
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')

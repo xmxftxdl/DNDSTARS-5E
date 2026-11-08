@@ -1,3 +1,8 @@
+import{setDnd5eSubclassAdditionalKnownSpellReader}from'./pluginSubclassAdditionalKnownSpells'
+import{setDnd5eSubclassLiveSpellListReader}from'./pluginSubclassLiveSpellLists'
+import type { AutomationCapability } from '../../../domain/automation/automationCapability'
+import { captureDnd5eSourceEnvelopeAutomationV1 } from '../activities/dnd5eUnifiedContentRegistry'
+import {setEldritchInvocationReaders} from '../eldritchInvocationOptions'
 import type { ClassResourceDefinition } from '../../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Character } from '../../../types/character'
@@ -201,7 +206,8 @@ function unifiedFeatureDefinition(
   if (feature.sourceFeatId) {
     const feat = unifiedOwnedDefinition(feature.ownerPluginId, ['feat'], feature.sourceFeatId)
     if (feat) return feat
-  } else if (!feature.sourceSubclassId) {
+  } else {
+    // Explicit owned features keep their own native source; subclass ownership is not a summary alias.
     const direct = unifiedOwnedDefinition(feature.ownerPluginId, ['feature'], feature.id)
     if (direct) return direct
   }
@@ -229,6 +235,47 @@ export function dnd5ePluginFeatureRuntimeSourceV1(
   const feature = pluginFeatures.get(featureId)
   if (!feature) return undefined
   return unifiedFeatureDefinition(feature) ? 'unified-content' : 'legacy-adapter'
+}
+
+// Bound to the actual raw feature lifetime, so a removed native definition
+// cannot be mistaken for a legacy-only feature. No closure enters snapshots.
+const nativeEnvelopeBySubclass=new WeakMap<RegisteredDnd5ePluginSubclass,()=>AutomationCapability|undefined>()
+export function bindDnd5ePluginSubclassEnvelopeRegistrationV1(subclass:RegisteredDnd5ePluginSubclass):void{
+ if(nativeEnvelopeBySubclass.has(subclass))return
+ const definition=unifiedOwnedDefinition(subclass.ownerPluginId,['subclass'],subclass.id)
+ if(definition)nativeEnvelopeBySubclass.set(subclass,captureDnd5eSourceEnvelopeAutomationV1(subclass.ownerPluginId,definition.kind,definition.id)??(()=>undefined))
+}
+/** Read only the actual registered native subclass instance and its original envelope closure.
+ * Runtime payload IDs may differ from projected ContentDefinition IDs. No alias
+ * guessing, JSON reconstruction or legacy-only fallback grants a native source. */
+export function captureDnd5ePluginSubclassEnvelopeRegistrationV1(packageId:string,subclassId:string):(()=>AutomationCapability|undefined)|undefined {
+ const subclass=pluginSubclasses.get(subclassId)
+ if(!subclass||subclass.ownerPluginId!==packageId)return undefined
+ const capture=nativeEnvelopeBySubclass.get(subclass)
+ if(!capture)return undefined
+ return()=>pluginSubclasses.get(subclassId)===subclass&&subclass.ownerPluginId===packageId?capture():undefined
+}
+/** Original native registration remains authoritative after generic removal or replacement. */
+export function dnd5ePluginSubclassCurrentEnvelopeFullV1(subclassId:string):boolean{
+ const subclass=pluginSubclasses.get(subclassId);if(!subclass)return false
+ const native=nativeEnvelopeBySubclass.get(subclass)
+ return native?native()?.level==='full':!unifiedOwnedDefinition(subclass.ownerPluginId,['subclass'],subclass.id)
+}
+const nativeEnvelopeByFeature = new WeakMap<RegisteredDnd5ePluginFeature, () => AutomationCapability | undefined>()
+export function bindDnd5ePluginFeatureEnvelopeRegistrationV1(feature: RegisteredDnd5ePluginFeature): void {
+  if (nativeEnvelopeByFeature.has(feature)) return
+  const definition = unifiedFeatureDefinition(feature)
+  if (definition) nativeEnvelopeByFeature.set(feature,
+    captureDnd5eSourceEnvelopeAutomationV1(feature.ownerPluginId, definition.kind, definition.id) ?? (() => undefined))
+}
+/** Read-only mechanical source gate. New legacy feature objects keep their
+ * existing contract; a once-native feature remains bound to its registration. */
+export function dnd5ePluginFeatureCurrentEnvelopeFullV1(featureId: string): boolean {
+  const feature = pluginFeatures.get(featureId)
+  if (!feature) return false
+  const native = nativeEnvelopeByFeature.get(feature)
+  if (native) return native()?.level === 'full'
+  return !unifiedFeatureDefinition(feature)
 }
 
 function cloneRegisteredFeature(feature: RegisteredDnd5ePluginFeature): RegisteredDnd5ePluginFeature {
@@ -328,6 +375,31 @@ export function runtimeDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeat
   return runtimeFeatureList
 }
 
+
+// Internal scalar consumers only. Classification caches frozen plain data
+// shape, never an actor, Source, Native outcome, or publication permission.
+const readonlyCatalogDataLists=new WeakSet<object>()
+function immutablePlainCatalogData(features:readonly RegisteredDnd5ePluginFeature[]):boolean{
+ if(readonlyCatalogDataLists.has(features))return true
+ try{
+  const pending:unknown[]=[features],seen=new WeakSet<object>()
+  while(pending.length){const value=pending.pop();if(value===null||value===undefined)continue
+   if(typeof value==='function'||typeof value==='symbol')return false
+   if(typeof value!=='object')continue
+   if(seen.has(value))continue;seen.add(value)
+   const prototype=Object.getPrototypeOf(value)
+   if((!Array.isArray(value)&&prototype!==Object.prototype&&prototype!==null)||!Object.isFrozen(value))return false
+   for(const key of Reflect.ownKeys(value)){if(typeof key!=='string')return false;const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||!('value'in descriptor))return false;pending.push(descriptor.value)}
+  }
+  readonlyCatalogDataLists.add(features);return true
+ }catch{return false}
+}
+/** Unknown or special graphs retain the editable getter and its errors. */
+export function readonlyDnd5ePluginFeatureData(): readonly RegisteredDnd5ePluginFeature[] {
+ const features=runtimeDnd5ePluginFeatures()
+ return immutablePlainCatalogData(features)?features:registeredDnd5ePluginFeatures()
+}
+
 export function registeredDnd5ePluginResources(): readonly RegisteredDnd5ePluginResource[] {
   return [...pluginResources.values()]
     .map((resource) => ({
@@ -357,9 +429,10 @@ export function registeredDnd5ePluginSubclasses(
         maxSelectionsByLevel: group.maxSelectionsByLevel?.map((step) => ({ ...step })),
         options: group.options.map((option) => ({ ...option })),
       })),
+      additionalKnownSpells:subclass.additionalKnownSpells?.map(slot=>({...slot,spellsByOption:{...slot.spellsByOption},...(slot.replacementClassSpellListIds?{replacementClassSpellListIds:[...slot.replacementClassSpellListIds]}:{})})),
       spellLists: subclass.spellLists?.map((list) => ({
         ...list,
-        entries: list.entries.map((entry) => ({ ...entry, spellIds: [...entry.spellIds] })),
+        entries: list.entries.map((entry) => ({ ...entry, spellIds: [...entry.spellIds], ...(entry.classSpellListIds?{classSpellListIds:[...entry.classSpellListIds]}:{}) })),
       })),
       declarativeSpellcasting: subclass.declarativeSpellcasting
         ? structuredClone(subclass.declarativeSpellcasting)
@@ -889,6 +962,7 @@ export function dnd5eCharacterHasPluginFeature(character: Character, featureId: 
   const registered = pluginFeatures.get(featureId)
   const feature = registered ? runtimeFeatureSnapshot(registered) : dnd5ePluginFeatureDefinition(featureId)
   if (!feature || !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return false
+  if (isRegisteredInvocationFeature(feature) && dnd5eCharacterClassLevel(character,'warlock') >= 2 && character.dnd5eClassChoices?.classes?.warlock?.selections?.['eldritch-invocations']?.includes(feature.id)) return true
   if (feature.grantedBySubclass === true) return true
   if (feature.grantedByFeat === true) {
     return !!feature.sourceFeatId && character.dnd5eFeatIds?.includes(feature.sourceFeatId) === true
@@ -903,11 +977,64 @@ export function dnd5eCharacterHasPluginFeature(character: Character, featureId: 
 /** Closed boolean capability projection shared by equipment and spell-component authorities. */
 export function dnd5ePluginBooleanStaticModifierForCharacter(
   character: Character,
-  key: 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents' | 'swimSpeedEqualsWalking' | 'canBreatheWater',
+  key: 'initiativeAdvantage' | 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents' | 'swimSpeedEqualsWalking' | 'canBreatheWater' | 'doesNotRequireSleep' | 'cannotBeForcedToSleep',
 ): boolean {
-  if (dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)?.staticModifiers?.[key] === true) return true
-  return runtimeDnd5ePluginFeatures().some((feature) =>
-    feature.automation !== 'manual' && feature.staticModifiers?.[key] === true &&
-    dnd5eCharacterHasPluginFeature(character, feature.id)
-  )
+  const race=dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  const raceDefinition=race?unifiedOwnedDefinition(race.ownerPluginId,['race'],race.id):undefined
+  if (race?.staticModifiers?.[key] === true && (key!=='initiativeAdvantage' ||
+    race.automation==='full' && (!raceDefinition || raceDefinition.automation.level==='full'))) return true
+  return runtimeDnd5ePluginFeatures().some((feature) => {
+    const definition=key==='initiativeAdvantage'?unifiedFeatureDefinition(feature):undefined
+    const enabled=key==='initiativeAdvantage'
+      ?feature.automation==='full' && (!definition || definition.automation.level==='full')
+      :feature.automation!=='manual'
+    return enabled && feature.staticModifiers?.[key]===true && dnd5eCharacterHasPluginFeature(character,feature.id)
+  })
 }
+
+/** Explicit self-bound PHB invocation slot; names and arbitrary feature tags do
+ * not confer membership. Normal owned checks retain every source requirement. */
+function isInvocationSelfRequirement(featureId:string,requirement:NonNullable<RegisteredDnd5ePluginFeature['classChoiceRequirements']>[number]){
+ return requirement.classId==='warlock'&&requirement.groupId==='eldritch-invocations'&&requirement.anyOf.length===1&&requirement.anyOf[0]===featureId
+}
+function isRegisteredInvocationFeature(feature:RegisteredDnd5ePluginFeature){
+ return feature.automation==='full'&&(!feature.declarativeAbility||feature.declarativeAbility.automation==='full')&&feature.classChoiceRequirements?.some(requirement=>isInvocationSelfRequirement(feature.id,requirement))===true
+}
+let invocationFeatureSnapshot:ReturnType<typeof runtimeDnd5ePluginFeatures>|undefined
+let invocationOptions:readonly import('../classes').Dnd5eClassChoiceOption[]=[]
+setEldritchInvocationReaders({options:()=>{
+ const features=runtimeDnd5ePluginFeatures()
+ if(features!==invocationFeatureSnapshot){
+  invocationFeatureSnapshot=features
+  invocationOptions=features.filter(isRegisteredInvocationFeature).map(feature=>({id:feature.id,invocationFeatureId:feature.id,name:feature.name,summary:feature.summary,description:feature.description,minimumClassLevel:Math.max(2,...(feature.classRequirements??[]).filter(row=>row.classId==='warlock').map(row=>row.minimumLevel))}))
+ }
+ return invocationOptions
+},available:(character,id)=>{
+ if(typeof character.charClass!=='string'||typeof character.race!=='string')return false
+ const feature=runtimeDnd5ePluginFeatures().find(row=>row.id===id)
+ if(!feature||!isRegisteredInvocationFeature(feature)||dnd5eCharacterClassLevel(character as Character,'warlock')<2)return false
+ // Selection UI cannot require the not-yet-selected option. Remove only this
+ // exact self requirement; actual level/known-spell/capability/Blade checks stay.
+ return dnd5ePluginFeatureAvailableForCharacter({...feature,classChoiceRequirements:feature.classChoiceRequirements?.filter(requirement=>!isInvocationSelfRequirement(feature.id,requirement))},character as Character)
+}})
+
+/** List configuration is read only from its still-current validated native registration.
+ * This does not promote the subclass's unrelated manual ability summaries. */
+setDnd5eSubclassLiveSpellListReader((subclassId,classLevel,classId)=>{
+ const source=pluginSubclasses.get(subclassId);if(!source||source.classId!==classId)return[]
+ const native=nativeEnvelopeBySubclass.get(source);if(!native||!native())return[]
+ return [...new Set((source.spellLists??[]).filter(list=>list.mode==='expanded-list').flatMap(list=>list.entries.filter(entry=>entry.classLevel<=classLevel).flatMap(entry=>entry.classSpellListIds??[])))]
+})
+
+setDnd5eSubclassAdditionalKnownSpellReader((subclassId,classLevel,classId,selections)=>{
+ const source=pluginSubclasses.get(subclassId);if(!source||source.classId!==classId)return[]
+ const native=nativeEnvelopeBySubclass.get(source);if(!native||!native())return[]
+ return(source.additionalKnownSpells??[]).flatMap(slot=>{
+  if(classLevel<slot.level)return[]
+  const group=source.choiceGroups?.find(g=>g.id===slot.choiceGroupId),selected=selections[source.id+'/'+slot.choiceGroupId]
+  if(!group||!Array.isArray(selected)||selected.length!==1||!group.options.some(o=>o.id===selected[0]))return[]
+  const declared=slot.spellsByOption[selected[0]];if(typeof declared!=='string')return[]
+  const owned=source.ownerPluginId+':'+declared,spellId=pluginSpells.has(declared)?declared:pluginSpells.has(owned)?owned:declared
+  return[{sourceId:source.id+'/additional-known/'+slot.id,name:slot.name,classId:source.classId,spellId,choiceGroupId:slot.choiceGroupId,choiceOptionId:selected[0],grantedAtClassLevel:slot.level,...(slot.replacementClassSpellListIds?{replacementClassSpellListIds:[...slot.replacementClassSpellListIds]}:{})}]
+ })
+})

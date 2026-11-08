@@ -10,7 +10,7 @@ const actionTypes: SharedPlayerActionState['type'][] = [
   'dnd5e-class-feature', 'dnd5e-racial-action', 'dnd5e-plugin-action', 'dnd5e-item-use',
   'dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-spell-whisper-reply', 'dnd5e-persistent-area-move',
   'dnd5e-adjudicated-spell', 'dnd5e-map-interaction', 'move-token', 'disengage', 'dodge',
-  'dnd5e-basic-action',
+  'dnd5e-basic-action', 'dnd5e-bountiful-luck', 'dnd5e-second-chance', 'dnd5e-pact-weapon',
 ]
 
 describe('combat banner coverage', () => {

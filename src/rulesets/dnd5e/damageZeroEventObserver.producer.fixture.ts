@@ -1,0 +1,5 @@
+/** Verbatim actual before/proposed browser response callbacks. */
+export const actualEventObservers={
+  "before": "response=>{if(response.request().method()!=='POST'||!response.url().includes('/api/events'))return;let body:any;try{body=response.request().postDataJSON()}catch{return}if(typeof body?.channel==='string'&&body.channel.startsWith('dice-roll-'))diceTasks.push((async()=>{dicePosts.push({side,status:response.status(),channel:body.channel,payload:body.payload,response:await response.json().catch(()=>null)})})())}",
+  "proposed": "response=>{const pathname=new URL(response.url()).pathname;if(response.request().method()!=='POST'||!pathname.startsWith('/api/events/'))return;const channel=decodeURIComponent(pathname.slice('/api/events/'.length));if(!channel.startsWith('dice-roll-'))return;let payload:unknown;try{payload=response.request().postDataJSON()}catch(error){payload={observerParseError:String(error),unparsedBody:response.request().postData()}}diceTasks.push((async()=>{dicePosts.push({side,status:response.status(),channel,payload,response:await response.json().catch(()=>null)})})())}"
+} as const

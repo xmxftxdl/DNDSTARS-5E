@@ -33,6 +33,7 @@ export interface MapsManualSettlementPlan {
 }
 
 export function planMapsManualSettlement(input: {
+  headlessState?: Dnd5eHeadlessCombatState
   map: BattleMap
   characters: readonly Character[]
   targetId: string
@@ -68,6 +69,7 @@ export function planMapsManualSettlement(input: {
           roll: Math.max(1, 20 - (index % 20)),
         })),
     })
+    if(input.headlessState)snapshot.state=structuredClone(input.headlessState)
     const before = snapshot.state.combatants[token.id]
     const resolved = resolveDnd5eDmHitPointAdjustment(
       snapshot.state,
@@ -140,6 +142,7 @@ export function planMapsManualSettlement(input: {
           roll: Math.max(1, 20 - (index % 20)),
         })),
     })
+    if(input.headlessState)snapshot.state=structuredClone(input.headlessState)
     const before = snapshot.state.combatants[token.id]
     const resolved = resolveDnd5eDmHitPointAdjustment(
       snapshot.state,
@@ -200,6 +203,7 @@ export function planMapsManualSettlement(input: {
           roll: Math.max(1, 20 - (index % 20)),
         })),
     })
+    if(input.headlessState)snapshot.state=structuredClone(input.headlessState)
     const before = snapshot.state.combatants[token.id]
     const resolved = resolveDnd5eDmHitPointAdjustment(
       snapshot.state,

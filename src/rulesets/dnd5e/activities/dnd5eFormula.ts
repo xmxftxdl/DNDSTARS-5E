@@ -1,3 +1,8 @@
+import{visitActivityEffectOriginalFormulaMissing}from'./activityEffectOriginalMissing'
+import{supplementFailedD20ActivityDamage,failedD20HasActivityAdjustment}from'../failedD20BonusCheckpoint'
+import {masterDuelistHasActivityReplacement,supplementMasterDuelistActivityDamage} from '../masterDuelistCheckpoint'
+import {supplementIncomingCriticalDamage,incomingCriticalFormulaRolls,incomingAttackHasReplacement} from '../incomingAttackRerollCheckpoint'
+import type {Dnd5eSpellDamageDieRerollUse} from '../spellDamageDieRerolls'
 import type { AbilityKey } from '../../../lib/dnd'
 import { SKILLS } from '../../../lib/dnd'
 
@@ -67,11 +72,13 @@ export type Dnd5eFormulaV1 =
   | { kind: 'clamp'; value: Dnd5eFormulaV1; minimum?: number; maximum?: number }
 
 export interface Dnd5eFormulaRollResult {
+  spellDamageDieRerolls?: readonly Dnd5eSpellDamageDieRerollUse[]
   values: readonly number[]
 }
 
 /** Host-derived evidence from a validated dice node, before outer formula arithmetic. */
 export interface Dnd5eFormulaDiceEvidenceV1 {
+  spellDamageDieRerolls?: readonly Dnd5eSpellDamageDieRerollUse[]
   rollId: string
   count: number
   sides: number
@@ -81,11 +88,15 @@ export interface Dnd5eFormulaDiceEvidenceV1 {
 }
 
 export interface Dnd5eFormulaEvaluationContext {
+  transformSpellDamageDice?: (group:{id:string;sides:number;rolls:readonly number[]},uses:readonly Dnd5eSpellDamageDieRerollUse[])=>readonly number[]
   /** Host-owned; invoked only for an explicit damage-roll boundary containing consumed dice. */
   damageRollBonus?: (rollId: string) => number
   onDiceEvaluated?: (evidence: Dnd5eFormulaDiceEvidenceV1) => void
   actor: Dnd5eFormulaActorSnapshot
   target?: Dnd5eFormulaActorSnapshot
+  masterDuelistDamageTargetId?:string
+  failedD20DamageTargetId?:string
+  diceScopeId?: string
   castLevel?: number
   rolls: Readonly<Record<string, Dnd5eFormulaRollResult>>
   /** Critical-hit or other Host-owned dice multiplication by stable roll id. */
@@ -379,8 +390,21 @@ export function evaluateDnd5eFormulaV1(
     if (!finiteInteger(maximumMultiplier, multiplier, 10)) {
       throw new Dnd5eFormulaEvaluationError(`invalid maximum dice multiplier: ${formula.rollId}`)
     }
-    const submittedCount = formula.count * maximumMultiplier
-    const roll = context.rolls[formula.rollId]
+    let submittedCount = formula.count * maximumMultiplier
+    const submittedRoll = context.rolls[formula.rollId]
+    const scopeKey=context.diceScopeId&&context.rolls[formula.rollId+':'+context.diceScopeId]?formula.rollId+':'+context.diceScopeId:formula.rollId
+    const supplemented = multiplier===2 && submittedRoll ? supplementIncomingCriticalDamage({count:formula.count,sides:formula.sides,rolls:submittedRoll.values,critical:true},scopeKey) : undefined
+    const cached=incomingCriticalFormulaRolls()[scopeKey]
+    const beforeMaster = supplemented ? {...submittedRoll,values:[...supplemented.rolls]} : cached ? {values:[...cached]} : submittedRoll
+    const master=context.masterDuelistDamageTargetId?supplementMasterDuelistActivityDamage({targetId:context.masterDuelistDamageTargetId,rollId:scopeKey,count:formula.count,sides:formula.sides,rolls:beforeMaster?.values??[],critical:multiplier===2}):undefined
+    const beforeFailed=master?{...beforeMaster,values:[...master]}:beforeMaster
+    const failed=context.failedD20DamageTargetId?supplementFailedD20ActivityDamage({targetId:context.failedD20DamageTargetId,rollId:scopeKey,count:formula.count,sides:formula.sides,rolls:beforeFailed?.values??[],critical:multiplier===2}):undefined
+    const roll=failed?{...beforeFailed,values:[...failed]}:beforeFailed
+    // A newly critical target does not require rolling an unused extra die for
+    // an independent normal target in the same Activity. A shared pool can use
+    // the genuine supplemented cache during this same Executor pass.
+    if((incomingAttackHasReplacement()||masterDuelistHasActivityReplacement()||failedD20HasActivityAdjustment())&&multiplier===1&&maximumMultiplier===2&&roll?.values.length===formula.count)submittedCount=formula.count
+    if(!roll)visitActivityEffectOriginalFormulaMissing(formula.rollId,submittedCount,formula.sides)
     if (
       !roll || roll.values.length !== submittedCount ||
       roll.values.some((value) => !finiteInteger(value, 1, formula.sides))
@@ -389,13 +413,16 @@ export function evaluateDnd5eFormulaV1(
     if (!finiteInteger(minimum, 1, formula.sides)) {
       throw new Dnd5eFormulaEvaluationError(`invalid minimum die value: ${formula.rollId}`)
     }
+    if(roll.spellDamageDieRerolls?.length&&context.maximizeDiceRollIds?.includes(formula.rollId))throw new Dnd5eFormulaEvaluationError('cannot reroll maximized damage dice')
     const rawValues = roll.values.slice(0, requiredCount)
+    if(roll.spellDamageDieRerolls?.length&&!context.transformSpellDamageDice)throw new Dnd5eFormulaEvaluationError(`spell damage reroll outside owned spell damage: ${formula.rollId}`)
+    const selectedValues=roll.spellDamageDieRerolls?.length?context.transformSpellDamageDice!({id:formula.rollId,sides:formula.sides,rolls:roll.values},roll.spellDamageDieRerolls).slice(0,requiredCount):rawValues
     const values = context.maximizeDiceRollIds?.includes(formula.rollId)
       ? rawValues.map(() => formula.sides)
-      : rawValues.map(value => Math.max(minimum, value))
+      : selectedValues.map(value => Math.max(minimum, value))
     const total = values.reduce((sum, value) => sum + value, 0)
     context.onDiceEvaluated?.({ rollId: formula.rollId, count: requiredCount, sides: formula.sides,
-      submittedCount, rawValues, values })
+      submittedCount, rawValues, values, ...(roll.spellDamageDieRerolls?.length?{spellDamageDieRerolls:structuredClone(roll.spellDamageDieRerolls)}:{}) })
     return total
   }
   if (formula.kind === 'add') {

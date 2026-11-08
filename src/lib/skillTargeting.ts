@@ -1,10 +1,10 @@
 import type { BattleMap, Token } from '../store/maps'
+import { multipartTokenOccupiedCells } from '../rulesets/dnd5e/multipartMapGeometry'
 import {
   cellDistance,
   cellKey,
   DND_FEET_PER_CELL,
   feetToMovementCells,
-  tokenOccupiedCellsAt,
   type GridCell,
 } from './gridCombat'
 
@@ -539,7 +539,7 @@ export function canPlaceCircleCenter(
 export function tokensInCells(map: BattleMap, tokens: Token[], cells: GridCell[]): Token[] {
   const set = new Set(cells.map(cellKey))
   return tokens.filter((token) =>
-    tokenOccupiedCellsAt(token, map, token).some((cell) => set.has(cellKey(cell))),
+    multipartTokenOccupiedCells(token, map).some((cell) => set.has(cellKey(cell))),
   )
 }
 
@@ -561,7 +561,7 @@ export function tokensInAoe(
   }
   const center = aoe.origin === 'self' ? casterCell : anchorCell
   const radiusCells = Math.max(0, aoe.radiusFeet / DND_FEET_PER_CELL)
-  return tokens.filter((token) => tokenOccupiedCellsAt(token, map, token)
+  return tokens.filter((token) => multipartTokenOccupiedCells(token, map)
     .some((cell) => cellTouchesCircle(cell, center, radiusCells)))
 }
 

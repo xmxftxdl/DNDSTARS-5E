@@ -61,7 +61,8 @@
     "e2e:report": "playwright show-report",
     "generate:srd-monsters": "node scripts/generate-srd-monsters.mjs",
     "preview": "vite preview",
-    "generate:srd-activities": "node scripts/generate-srd-activities.mjs"
+    "generate:srd-activities": "node scripts/generate-srd-activities.mjs",
+    "test:private": "node scripts/testing/run-private-tests.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box-threejs": "^0.0.12",

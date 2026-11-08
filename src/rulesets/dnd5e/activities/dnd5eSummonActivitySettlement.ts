@@ -80,9 +80,12 @@ export function settleDnd5eSummonActivityCapability(state:Dnd5eHeadlessCombatSta
     // Do not create a persistent bond or commit its casting cost for an absent dependency.
     if (!getDnd5eSrdMonster(proposal.monsterId)) return false
     if(!dnd5eSummonBondAllowsRecall(actor,proposal,packageId))return false
+    if(proposal.endsOnSourceLongRest && (!proposal.persistent || proposal.concentration ||
+      (actor.lastLongRestWorldMinute !== null && !(Number.isSafeInteger(actor.lastLongRestWorldMinute) && Number(actor.lastLongRestWorldMinute) >= 0)))) return false
     const definitionId=`summon-bond:${proposal.bondKey}`
-    const bond=createDnd5eMechanicalEffect({id:`${encodeURIComponent(packageId ?? 'srd-5.1')}:${definitionId}:${encodeURIComponent(actor.id)}`,definitionId,label:'坐骑契约',targetId:actor.id,source:{kind:'spell',actorId:actor.id,rulesId:activityId,pluginId:packageId,magical:true},duration:{type:'permanent'},stackingKey:`${packageId ?? 'srd-5.1'}:${definitionId}`,stackingPolicy:'replace'})
-    bond.grantedActivities=[...proposal.bondDismissActivityId?[proposal.bondDismissActivityId]:[],...proposal.bondActivityIds??[]]
+    const bond=createDnd5eMechanicalEffect({id:`${encodeURIComponent(packageId ?? 'srd-5.1')}:${definitionId}:${encodeURIComponent(actor.id)}`,definitionId,label:'坐骑契约',targetId:actor.id,source:{kind:'spell',actorId:actor.id,rulesId:activityId,pluginId:packageId,magical:true,...(proposal.endsOnSourceLongRest?{characterId:actor.classState.wardingBondParticipantCharacterId ?? actor.id,lastLongRestWorldMinute:actor.lastLongRestWorldMinute}: {})},breakOn:proposal.endsOnSourceLongRest?['source-long-rest-complete']:undefined,duration:{type:'permanent'},stackingKey:`${packageId ?? 'srd-5.1'}:${definitionId}`,stackingPolicy:'replace'})
+    const grantedActivities=[...proposal.bondDismissActivityId?[proposal.bondDismissActivityId]:[],...proposal.bondActivityIds??[]]
+    if(grantedActivities.length)bond.grantedActivities=grantedActivities
     bond.tags=[`bond-monster:${proposal.monsterId}`,...proposal.creatureTypeOverride?[`bond-type:${proposal.creatureTypeOverride}`]:[],
       ...(proposal.exclusiveBondKeys ?? []).map(key => `exclusive-bond-key:${key}`)]
     proposal.bondEffectId = bond.id

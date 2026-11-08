@@ -1,10 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { describe, expect, it } from 'vitest'
 
-const workspaceSource = readFileSync(
-  new URL('../MapsWorkspacePage.tsx', import.meta.url),
-  'utf8',
-).replace(/\r\n/g, '\n')
+const workspaceSource = readMapsWorkspaceSource().replace(/\r\n/g, '\n')
 
 describe('manual monster end-turn authority boundary', () => {
   it('preflights Headless restrictions before rolling boundary dice', () => {

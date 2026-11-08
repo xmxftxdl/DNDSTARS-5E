@@ -1,3 +1,4 @@
+import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
@@ -60,7 +61,7 @@ describe('repeated spell projectile targeting', () => {
   })
 
   it('keeps the projectile-allocation prompt above the initiative toolbar and below banners', () => {
-    const source = readFileSync(new URL('../MapsWorkspacePage.tsx', import.meta.url), 'utf8')
+    const source = readMapsWorkspaceSource()
     expect(source).toContain('map-combat-action-bar')
     const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
     const promptLayer = css.match(

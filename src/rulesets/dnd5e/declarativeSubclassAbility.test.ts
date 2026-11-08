@@ -1,3 +1,5 @@
+import { dnd5ePassiveSkillCheckEffects } from './passiveSkillCheckEffects'
+import { resolveDnd5eAbilityCheck } from './checks'
 import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
@@ -133,6 +135,29 @@ function stateFor(pluginId: string, input: {
 }
 
 describe('DeclarativeSubclassAbilityV1', () => {
+  it('projects passive checks from current owned subclass features and removes stale persisted grants', () => {
+    const candidate = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], rolls: [],
+      mechanic: { kind: 'passive-skill-checks', minimumSkillCheckD20: [{ ability: 'wis', skill: 'insight', purpose: 'detect-lies', minimum: 8 }] } })
+    const { dispose } = register('com.example.passive-checks', subclass([candidate]))
+    try {
+      const hero = character(3, 'com.example.passive-checks:arc-guard')
+      const effects = dnd5ePassiveSkillCheckEffects(hero, [])
+      expect(effects).toHaveLength(1)
+      expect(resolveDnd5eAbilityCheck({ character: hero, ability: 'wis', rolls: [2], context: { skill: 'insight', purpose: 'detect-lies' } }).roll.d20).toBe(8)
+      expect(dnd5ePassiveSkillCheckEffects(character(2, 'com.example.passive-checks:arc-guard'), effects)).toHaveLength(0)
+      expect(dnd5ePassiveSkillCheckEffects(character(3, 'champion'), effects)).toHaveLength(0)
+    } finally { dispose() }
+  })
+
+  it('validates purpose-scoped passive skill checks without permitting action costs or broad purposes', () => {
+    const candidate = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], rolls: [],
+      mechanic: { kind: 'passive-skill-checks', minimumSkillCheckD20: [{ ability: 'wis', skill: 'insight', purpose: 'detect-lies', minimum: 8 }] } })
+    expect(() => validateDeclarativeSubclassAbilityV1(candidate)).not.toThrow()
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, cost: { economy: 'bonus-action' } })).toThrow()
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, mechanic: { kind: 'passive-skill-checks' } })).toThrow()
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, trigger: { kind: 'active-use' } })).toThrow()
+  })
+
   it('validates bounded passive extra Flurry attacks with distinct targets', () => {
     const candidate = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], rolls: [],
       mechanic: { kind: 'flurry-extra-attacks', additionalAttacks: 3, distinctTargets: true } })

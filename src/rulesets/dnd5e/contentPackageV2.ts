@@ -1,3 +1,6 @@
+import { DND5E_DAMAGE_TYPES } from './damageTypes'
+import {validDnd5eInherentFeatureFlight} from './inherentFeatureFlightContract'
+import {DND5E_SRD_CLASS_DEFINITIONS,dnd5eClassSpellSlots,dnd5ePactSlotLevel} from './classes'
 import { SKILLS } from '../../lib/dnd'
 import { validDnd5eInherentFeatureLight } from './inherentFeatureLightContract'
 import { getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
@@ -15,6 +18,7 @@ import {
 } from './declarativePluginPackage'
 import {
   declarativeSubclassCompatibilityReportV1,
+  declarativeAbilityCompatibilityV1,
   type DeclarativeSubclassDefinitionV1,
 } from './declarativeSubclassAbility'
 import {
@@ -442,6 +446,7 @@ export function dnd5eContentPackageAutomationCoverageV2(
         )
       const passiveReferences = ability.passiveImplementationReferences
       const passiveGrantImplemented = (grant: Dnd5eBuildGrantV1): boolean => supportedGrant(grant) ||
+        grant.kind === 'tag' && grant.key === 'skill-expertise' && SKILLS.some(skill => skill.key === grant.value) ||
         grant.kind === 'proficiency' && grant.category === 'saving-throw' && ['str','dex','con','int','wis','cha'].includes(grant.id) ||
         grant.kind === 'proficiency' && grant.category === 'skill' && SKILLS.some(skill => skill.key === grant.id) ||
         grant.kind === 'spell' && grant.mode === 'cantrip' && (
@@ -454,6 +459,22 @@ export function dnd5eContentPackageAutomationCoverageV2(
         ability.effects.length === 0 && !ability.activityEffects?.length && !hasExplicitActivity &&
         !(subclass.combatHooks ?? []).some(hook => hook.abilityId === ability.id) &&
         passiveReferences.every(ref => {
+          if (ref.kind === 'sneak-target-bonus') {
+            const activity = value.content.activities?.find(entry => entry.id === ref.id)
+            const source = activity?.legacySource
+            const sibling = source?.kind === 'subclass-ability' && subclass.abilities.find(entry =>
+              source.id === `${subclass.id}:${entry.id}` && entry.id !== ability.id && entry.level <= ability.level)
+            if (!activity || !sibling || subclass.classId !== 'rogue' || ability.level !== 17 ||
+              activity.automation.level !== 'full' || activity.target.kind !== 'creature' || activity.target.count !== 1 ||
+              !contentActivityHasExecutableAutomation(activity) || dnd5eActivityAutomationAnalysisV1(activity).capability.level !== 'full') return false
+            return activity.effects?.some(effect => effect.stacking === 'replace' &&
+              effect.modifiers?.some(modifier => modifier.kind === 'sneak-attack-target' &&
+                modifier.bonusDice?.minimumRogueLevel === ability.level && modifier.bonusDice.count === 3) &&
+              activity.outcomes.some(outcome => outcome.when.kind === 'check' && outcome.when.result === 'success' &&
+                activity.checks?.some(check => check.id === (outcome.when.kind === 'check' ? outcome.when.checkId : '') &&
+                  check.kind === 'opposed-ability-check' && check.scope === 'per-target' && check.tiesFavor !== 'source') &&
+                outcome.operations.some(operation => operation.kind === 'apply-effect' && operation.effectId === effect.id && operation.target === 'actor'))) === true
+          }
           if (ref.kind === 'bound-source-bonus') {
             const activity = value.content.activities?.find(entry => entry.id === ref.id)
             const source = activity?.legacySource
@@ -486,6 +507,29 @@ export function dnd5eContentPackageAutomationCoverageV2(
                 sibling.predicates?.subclassChoices?.some(choice => choice.groupId === group.id && choice.optionId === option.id) &&
                 projectedAutomation('subclass-ability', `${subclass.id}:${sibling.id}`)?.status === 'full'))
           }
+          if(ref.kind==='spell-list'||ref.kind==='additional-known-spell'){
+            // These links report only this subclass's already executed source data.
+            // They never grant a feature, spell, resource, action or current-full authority.
+            const core=DND5E_SRD_CLASS_DEFINITIONS.find(entry=>entry.id===subclass.classId)
+            if(!core?.spellcasting||subclass.spellcasting)return false
+            const classList=(id:string)=>DND5E_SRD_CLASS_DEFINITIONS.some(entry=>entry.id===id&&!!entry.spellcasting)
+            const spell=(id:string)=>getDnd5eSrdSpellCatalogEntry(id)??value.content.spells.find(entry=>entry.id===id||value.manifest.id+':'+entry.id===id)
+            if(ref.kind==='spell-list'){
+              const list=subclass.spellLists?.find(entry=>entry.id===ref.id)
+              return !!list&&list.mode==='expanded-list'&&list.entries.length>0&&list.entries.every(entry=>
+                entry.classLevel===ability.level&&((entry.classSpellListIds?.length??0)>0||entry.spellIds.length>0)&&
+                (entry.classSpellListIds??[]).every(classList)&&entry.spellIds.every(id=>!!spell(id)))
+            }
+            const slot=subclass.additionalKnownSpells?.find(entry=>entry.id===ref.id),kind=core.spellcasting.kind
+            if(!slot||slot.level!==ability.level||!['full-known','half-known','one-third-known','pact'].includes(kind))return false
+            const group=subclass.choiceGroups?.find(entry=>entry.id===slot.choiceGroupId)
+            if(!group||group.level!==ability.level||group.maxSelections!==1||group.maxSelectionsByLevel?.some(step=>step.maxSelections!==1)||group.options.length<1)return false
+            const maximum=kind==='pact'?dnd5ePactSlotLevel(slot.level):dnd5eClassSpellSlots(core,slot.level).length
+            const keys=Object.keys(slot.spellsByOption)
+            return keys.length===group.options.length&&keys.every(id=>group.options.some(option=>option.id===id))&&group.options.every(option=>{
+              const declared=spell(slot.spellsByOption[option.id]);return !!declared&&declared.level>0&&declared.level<=maximum
+            })&&(slot.replacementClassSpellListIds===undefined||slot.replacementClassSpellListIds.length>0&&slot.replacementClassSpellListIds.every(classList))
+          }
           if (ref.kind === 'feature') {
             const feature = value.content.features.find(entry => entry.id === ref.id)
             const modifiers = feature?.staticModifiers
@@ -493,14 +537,52 @@ export function dnd5eContentPackageAutomationCoverageV2(
             const owned = !!feature && feature.grantedBySubclass === true &&
               feature.sourceClassId === subclass.classId &&
               feature.sourceSubclassId === `${value.manifest.id}:${subclass.id}` &&
-              feature.minimumLevel === ability.level && feature.automation === 'full' &&
-              !feature.declarativeAbility
+              feature.minimumLevel === ability.level && feature.automation === 'full'
             if (!owned) return false
+            const declared = feature!.declarativeAbility
+            if (declared) {
+              // Report only this already executed, closed Sorcerer spell source.
+              // This association never creates a grant or a runtime capability.
+              const mechanic = declared.mechanic
+              return !modifiers && declared.id === feature!.id && declared.level === ability.level &&
+                declared.automation === 'full' && declared.trigger.kind === 'active-use' &&
+                declared.targeting.kind === 'self' && !declared.cost && !declared.predicates &&
+                !declared.requirements?.length && !declared.rolls?.length && !declared.choices?.length &&
+                !declared.limits && !declared.duration && declared.effects.length === 0 &&
+                !declared.activityEffects?.length && !declared.activityOutcomeReferences?.length &&
+                !declared.passiveImplementationReferences?.length && !declared.canModifyEnemyD20 &&
+                !value.content.activities?.some(activity => activity.legacySource?.kind === 'feature' && activity.legacySource.id === feature!.id) &&
+                mechanic?.kind === 'alternate-resource-spellcasting' && mechanic.classId === subclass.classId &&
+                mechanic.classId === 'sorcerer' && mechanic.ability === 'cha' &&
+                mechanic.resourceScope === 'core' && mechanic.resourceId === 'dnd5e-sorcery-points' &&
+                mechanic.grants.length > 0 && mechanic.grants.every(grant => {
+                  const spell = getDnd5eSrdSpellCatalogEntry(grant.spellId) ?? value.content.spells.find(entry => entry.id === grant.spellId)
+                  return !!spell && grant.minimumLevel === ability.level && grant.castAtLevel >= spell.level
+                }) && declarativeAbilityCompatibilityV1(declared).effective === 'full'
+            }
             const supportedModifiers = !!modifiers && Object.keys(modifiers).length > 0 &&
-              Object.keys(modifiers).every(key => key === 'inherentLight'
+              Object.keys(modifiers).every(key => key === 'darkvisionRangeFeet'
+                ? Number.isFinite(modifiers.darkvisionRangeFeet) && modifiers.darkvisionRangeFeet! >= 0 && modifiers.darkvisionRangeFeet! <= 10_000
+                : key === 'inherentFlight' ? validDnd5eInherentFeatureFlight(modifiers.inherentFlight) : key === 'inherentLight'
                 ? validDnd5eInherentFeatureLight(modifiers.inherentLight)
                 : key === 'skillCheckAbilityBonuses'
                 ? !!modifiers.skillCheckAbilityBonuses?.length
+                : key === 'initiativeBonusFromAbility'
+                  ? ['str','dex','con','int','wis','cha'].includes(String(modifiers.initiativeBonusFromAbility))
+                : key === 'preventOpportunityAttacksFromMeleeAttackTargets'
+                  ? modifiers.preventOpportunityAttacksFromMeleeAttackTargets === true
+                : key === 'isolatedTargetSneakAttack'
+                  ? modifiers.isolatedTargetSneakAttack === true
+                : key === 'damageResistances' || key === 'damageImmunities'
+                ? !!modifiers[key]?.length && modifiers[key]!.length <= DND5E_DAMAGE_TYPES.length &&
+                  new Set(modifiers[key]).size === modifiers[key]!.length &&
+                  modifiers[key]!.every(type => DND5E_DAMAGE_TYPES.includes(type))
+                : key === 'initiativeAdvantage'
+                ? modifiers.initiativeAdvantage === true
+                : key === 'existingMovementSpeedBonuses'
+                ? !!modifiers.existingMovementSpeedBonuses && Object.keys(modifiers.existingMovementSpeedBonuses).length > 0 &&
+                  Object.entries(modifiers.existingMovementSpeedBonuses).every(([mode, bonus]) =>
+                    ['walk', 'climb', 'swim', 'fly'].includes(mode) && Number.isInteger(bonus) && bonus >= 1 && bonus <= 1000)
                 : key === 'standFromProneMovementCostFeet' &&
                   Number.isFinite(modifiers.standFromProneMovementCostFeet) &&
                   modifiers.standFromProneMovementCostFeet! >= 0 && modifiers.standFromProneMovementCostFeet! <= 500)
@@ -989,6 +1071,17 @@ export function dnd5eRulesPluginFromContentPackageV2(
           packageId: value.manifest.id,
           packageVersion: value.manifest.version,
           definitions: dnd5eContentDefinitionsFromPackageV2(value).map(definition => {
+            // Preserve the archived preview exactly. Only the validated runtime removes synthetic summaries already executed by native mechanics/build grants.
+            const payload = definition.payload as Record<string, unknown>
+            const trigger = payload.trigger as {kind?:unknown} | undefined
+            const nativeImplicit = definition.kind === 'feature' && definition.automation.level === 'full' &&
+              (trigger?.kind === 'passive' || payload.mechanic != null) && !!definition.activities?.length &&
+              definition.activities.every(candidate => {
+                const source = (candidate as Dnd5eActivityDefinitionV1).legacySource
+                return source?.kind === 'subclass-ability' && !value.content.activities?.some(activity =>
+                  activity.legacySource?.kind === source.kind && activity.legacySource.id === source.id)
+              })
+            if (nativeImplicit) return { ...definition, activities: [] }
             // Runtime provenance must not alter the archived content projection.
             const explicit = definition.kind === 'feature' && definition.activities?.some(candidate => {
               const source = (candidate as Dnd5eActivityDefinitionV1).legacySource

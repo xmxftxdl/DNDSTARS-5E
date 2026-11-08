@@ -1,3 +1,5 @@
+import{getRoomSession}from'../lib/roomSession'
+import{cloneDnd5eSceneWeatherFacts,validDnd5eSceneWeatherFacts,type Dnd5eSceneWeatherFactsV1}from'../../shared/dnd5e-scene-weather-facts.mjs'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { canWriteSharedState } from '../lib/appMode'
@@ -52,6 +54,7 @@ interface MapGeometryStoreState {
   setVision: (mapId: string, patch: Partial<MapGeometryVisionSettings>) => void
   setEnvironment: (mapId: string, environment: Dnd5eMapEnvironment) => void
   setWeather: (mapId: string, weather: Dnd5eMapWeather) => void
+  setWeatherFacts:(mapId:string,facts:Dnd5eSceneWeatherFactsV1|undefined)=>boolean
   setOverheadSpace: (mapId: string, overheadSpace: Dnd5eOverheadSpace) => void
   clearMap: (mapId: string) => void
   duplicateEntity: (mapId: string, entityId: string, offset?: number) => string | undefined
@@ -438,6 +441,10 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           return { maps, ...pushHistory(state, mapId, current) }
         })
         publish(get())
+      },
+      setWeatherFacts:(mapId,facts)=>{
+        const session=getRoomSession();if(session&&session.role!=='dm'||!canWriteSharedState()||facts!==undefined&&!validDnd5eSceneWeatherFacts(facts))return false
+        set(state=>{const current=state.maps.find(map=>map.mapId===mapId)??createEmptyMapGeometry(mapId),maps=mutateMap(state.maps,mapId,map=>{const{weatherFacts:_weather,...rest}=map;return facts===undefined?rest:{...rest,weatherFacts:cloneDnd5eSceneWeatherFacts(facts)!}});setMapGeometryRuntime(maps);return{maps,...pushHistory(state,mapId,current)}});publish(get());return true
       },
       setWeather: (mapId, weather) => {
         set((state) => {
