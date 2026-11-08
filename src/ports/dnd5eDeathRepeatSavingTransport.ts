@@ -1,0 +1,4 @@
+import type{BountifulOriginalDieReceipt}from'../rulesets/dnd5e/bountifulLuckReceipt'
+import type{SecondChanceParentWire}from'../lib/secondChanceParentWire'
+export type BountifulDeathRepeatSavingIdentity={parentId:string;mapId:string;combatId:string}
+export interface BountifulDeathRepeatSavingBook extends BountifulDeathRepeatSavingIdentity{ok:true;present:true;roomId:string;hostMemberId:string;actorId:string;characterId:string;memberId:string;requestId:string;effectTimestamp:number;effectId:string;ability:string;dc:number;mode:'normal'|'advantage'|'disadvantage';count:1|2;sides:20;timing:'target-turn-end';stageSignature:string;originalSource:SecondChanceParentWire;originalRows:BountifulOriginalDieReceipt[];lateOriginalRows?:BountifulOriginalDieReceipt[];raw?:{memberId:string;values:number[]};confirmed?:{memberId:string;values:number[]};complete?:boolean}

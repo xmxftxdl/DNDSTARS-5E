@@ -1,8 +1,8 @@
 export const AI_MODEL_POLICY_VERSION: 1
 export const AI_MODEL_POLICY: Readonly<{
   providerId: 'external-account'
-  generalModelId: 'gpt-5.6-luna'
-  pdfExtractionModelId: 'gpt-5.6-luna'
+  generalModelId: 'gpt-6.1-sol'
+  pdfExtractionModelId: 'gpt-6.1-sol'
   pdfSynthesisModelId: 'gpt-5.6-sol'
   imageModelId: 'gpt-image-2'
   imageQuality: 'low'

@@ -4,12 +4,13 @@ import { createPortal } from 'react-dom'
 /** Keep dice above map panels while reserving higher layers for blocking confirmations. */
 export const DICE_OVERLAY_Z_INDEX = 2_147_483_637
 
-export type DiceOverlayLayer = 'backdrop' | 'dice' | 'foreground'
+export type DiceOverlayLayer = 'backdrop' | 'dice' | 'foreground' | 'confirmation'
 
 const DICE_OVERLAY_LAYER_Z_INDEX: Record<DiceOverlayLayer, number> = {
   backdrop: DICE_OVERLAY_Z_INDEX - 2,
   dice: DICE_OVERLAY_Z_INDEX - 1,
   foreground: DICE_OVERLAY_Z_INDEX,
+  confirmation: DICE_OVERLAY_Z_INDEX + 1,
 }
 
 export const DICE_OVERLAY_ROOT_CLASS_NAME = 'pointer-events-none fixed inset-0 isolate'

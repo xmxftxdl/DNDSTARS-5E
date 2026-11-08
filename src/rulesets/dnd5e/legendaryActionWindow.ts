@@ -113,7 +113,9 @@ export function dnd5eLegendaryActionWindowCandidates(input: {
           name: action.name,
           description: action.description,
           cost,
-          affordable: currentPoints >= cost,
+          affordable: currentPoints >= cost && (!action.multipartHeadId || (token.dnd5eCombatState?.monsterMultipart
+            ? !token.dnd5eCombatState.monsterMultipart.pendingHeadDeaths && token.dnd5eCombatState.monsterMultipart.heads.some(h=>h.alive&&h.id===action.multipartHeadId)
+            : /^head-[1-4]$/.test(action.multipartHeadId))),
           automation,
           windowExecution: action.rule?.kind === 'teleport'
             ? 'teleport-placement'

@@ -1,3 +1,4 @@
+import {runtimeDnd5ePluginFeatures} from './plugins/pluginContentCatalog'
 import {
   DND_FEET_PER_CELL,
   cellDistance,
@@ -195,7 +196,7 @@ export function dnd5eUtilityProjectionAttackAdvantageApplies(
   actor: Dnd5eCombatant,
   target: Dnd5eCombatant,
 ): boolean {
-  const passiveProjectionAdvantage = registeredDnd5ePluginFeatures().some((feature) => {
+  const passiveProjectionAdvantage = runtimeDnd5ePluginFeatures().some((feature) => {
     const mechanic = feature.declarativeAbility?.mechanic
     if (
       feature.automation !== 'full' || mechanic?.kind !== 'persistent-projection' ||

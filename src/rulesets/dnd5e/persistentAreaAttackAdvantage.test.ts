@@ -83,7 +83,7 @@ it('rejects a later beam reaction after an earlier beam pushes the target outsid
   if (!ordinary.ok) return
   expect(ordinary.state.combatants.target.position).toEqual({ x: 25, y: 25 })
   const invalid = resolveDnd5eHeadlessAction(state, { ...action, targetAttacks: action.targetAttacks!.map((roll, index) =>
-    index === 1 ? { ...roll, d20Second: 18, effectRolls: [1], areaAttackAdvantageReaction: { areaId: 'hawk', sourceId: 'owner' } } : roll) })
+    {if(roll.wardFailureChoice!==undefined)throw Error('Actual concrete attack roll fixture required');return index === 1 ? { ...roll, d20Second: 18, effectRolls: [1], areaAttackAdvantageReaction: { areaId: 'hawk', sourceId: 'owner' } } : roll}) })
   expect(invalid.ok).toBe(false)
   expect(invalid.state.combatants.owner.turn.reactionAvailable).toBe(true)
   expect(invalid.state.combatants.target.position).toEqual(state.combatants.target.position)
@@ -152,7 +152,7 @@ it('supports one projectile and rejects spending the same reaction on a second p
   expect(result.state.combatants.owner.turn.reactionAvailable).toBe(false)
   const original = structuredClone(state)
   const bad = resolveDnd5eHeadlessAction(state, { ...action, targetAttacks: action.targetAttacks!.map((roll, i) =>
-    i === 1 ? { ...roll, d20Second: 18, effectRolls: [2, 2], areaAttackAdvantageReaction: use } : roll) })
+    {if(roll.wardFailureChoice!==undefined)throw Error('Actual concrete attack roll fixture required');return i === 1 ? { ...roll, d20Second: 18, effectRolls: [2, 2], areaAttackAdvantageReaction: use } : roll}) })
   expect(bad.ok).toBe(false)
   expect(bad.state.combatants.owner.turn.reactionAvailable).toBe(true)
   expect(bad.state.combatants.attacker.classResources['dnd5e-spell-slot-2'].current).toBe(1)

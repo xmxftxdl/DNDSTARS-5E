@@ -1,0 +1,587 @@
+{
+  "before": {
+    "maps": [
+      {
+        "id": "map",
+        "name": "Map",
+        "width": 1600,
+        "height": 1200,
+        "gridSize": 50,
+        "gridOffsetX": 0,
+        "gridOffsetY": 0,
+        "feetPerCell": 5,
+        "showGrid": true,
+        "tokens": [
+          {
+            "id": "caster",
+            "characterId": "owner",
+            "label": "Owner",
+            "type": "player",
+            "x": 325,
+            "y": 325,
+            "size": 1,
+            "color": "",
+            "emoji": "",
+            "hp": 122,
+            "maxHp": 122
+          }
+        ]
+      }
+    ],
+    "characters": [
+      {
+        "rulesetId": "dnd5e-2014-srd-5.1",
+        "id": "owner",
+        "name": "Owner",
+        "player": "Player",
+        "avatar": "🧝",
+        "accent": "from-arcane-500 to-arcane-600",
+        "race": "人类",
+        "charClass": "法师",
+        "dnd5eClassLevels": {
+          "wizard": 20
+        },
+        "level": 20,
+        "background": "侍僧",
+        "experience": 0,
+        "reputation": 0,
+        "abilities": {
+          "str": 10,
+          "dex": 10,
+          "con": 14,
+          "int": 6,
+          "wis": 10,
+          "cha": 10
+        },
+        "savingThrows": [],
+        "skills": [],
+        "maxHp": 122,
+        "currentHp": 122,
+        "tempHp": 0,
+        "hitDice": "20d6",
+        "ac": 10,
+        "speed": 30,
+        "initiativeBonus": 0,
+        "saveDC": 12,
+        "passivePerception": 10,
+        "inspiration": 0,
+        "dnd5eClassChoices": {
+          "classes": {
+            "wizard": {
+              "selections": {
+                "wizard-spellbook": [
+                  "local.xge.repaired.archer93:tensers-transformation"
+                ],
+                "spell-prepared": [
+                  "local.xge.repaired.archer93:tensers-transformation"
+                ]
+              },
+              "subclass": "evocation"
+            }
+          }
+        },
+        "equipment": {
+          "mainWeapon": {
+            "id": "dnd5e-arcane-focus",
+            "name": "奥术法器",
+            "slot": "mainWeapon",
+            "allowedSlots": [
+              "mainWeapon",
+              "offHand"
+            ],
+            "spellcastingFocusClassIds": [
+              "wizard",
+              "sorcerer",
+              "warlock"
+            ]
+          }
+        },
+        "conditions": [],
+        "backstory": "",
+        "notes": "",
+        "dmNotes": "",
+        "visibleToPlayers": true,
+        "dnd5ePluginFeatureIds": [
+          "test.homunculus-defense:defense"
+        ],
+        "classResources": {
+          "dnd5e-arcane-recovery": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-signature-spell-1": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-signature-spell-2": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-spell-slot-1": {
+            "current": 4,
+            "max": 4
+          },
+          "dnd5e-spell-slot-2": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-3": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-4": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-5": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-6": {
+            "current": 0,
+            "max": 2
+          },
+          "dnd5e-spell-slot-7": {
+            "current": 2,
+            "max": 2
+          },
+          "dnd5e-spell-slot-8": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-spell-slot-9": {
+            "current": 1,
+            "max": 1
+          }
+        },
+        "dnd5eInventory": {
+          "schemaVersion": 3,
+          "revision": 2,
+          "entries": [
+            {
+              "instanceId": "ff911a05-5e8f-43cc-ba39-d30544f38969",
+              "templateId": "srd-5.1:item:arcane-focus",
+              "item": {
+                "id": "srd-5.1:item:arcane-focus",
+                "name": "奥术法器",
+                "englishName": "Arcane focus",
+                "category": "adventuring-gear",
+                "icon": "spellcasting-focus",
+                "description": "奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。",
+                "rulesText": "奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。",
+                "weightLb": 1,
+                "cost": {
+                  "amount": 10,
+                  "currency": "gp"
+                },
+                "stackable": false,
+                "equipment": {
+                  "id": "dnd5e-arcane-focus",
+                  "name": "奥术法器",
+                  "slot": "mainWeapon",
+                  "allowedSlots": [
+                    "mainWeapon",
+                    "offHand"
+                  ],
+                  "spellcastingFocusClassIds": [
+                    "wizard",
+                    "sorcerer",
+                    "warlock"
+                  ]
+                },
+                "source": {
+                  "book": "SRD 5.1",
+                  "license": "CC BY 4.0"
+                }
+              },
+              "quantity": 1,
+              "identified": true,
+              "acquiredAt": 1793614339226,
+              "contaminants": [],
+              "equippedSlot": "mainWeapon"
+            }
+          ],
+          "currency": {
+            "cp": 0,
+            "sp": 0,
+            "ep": 0,
+            "gp": 0,
+            "pp": 0
+          },
+          "authorityGrantReceipts": [],
+          "authorityUseReceipts": []
+        },
+        "concentrating": false,
+        "roomId": "NE887U",
+        "roomMemberId": "5bf7cbd1-72fd-498a-9b5e-8a9e9833819d",
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "activeEffects": [
+            {
+              "schemaVersion": 1,
+              "id": "end-save:activity_3Alocal.xge.repaired.archer93_3Atensers-transformation_3Atensers-transformation-effect_3Amodifiers_3A0:caster:caster:modifiers-0",
+              "definitionId": "pending:effect-end-save",
+              "kind": "mark",
+              "label": "谭森变形术强化（结束豁免）",
+              "source": {
+                "kind": "spell",
+                "actorId": "caster",
+                "characterId": "owner",
+                "actorName": "Owner",
+                "rulesId": "local.xge.repaired.archer93:tensers-transformation",
+                "pluginId": "local.xge.repaired.archer93",
+                "spellLevel": 6,
+                "spellSaveDc": 12,
+                "magical": false
+              },
+              "appliedAt": 1793614362639,
+              "duration": {
+                "type": "permanent"
+              },
+              "stackingKey": "end-save:activity_3Alocal.xge.repaired.archer93_3Atensers-transformation_3Atensers-transformation-effect_3Amodifiers_3A0:caster:caster:modifiers-0",
+              "stackingPolicy": "replace",
+              "pendingEndSavingThrow": {
+                "ability": "con",
+                "dc": 15,
+                "exhaustionOnFailure": 1
+              },
+              "visibility": "public"
+            }
+          ],
+          "wardingBondMaterialEquipped": false,
+          "wardingBondParticipantCharacterId": "owner",
+          "turnStartResolvedTurnKey": "map-map:1:exploration:caster",
+          "leveledSpellTurnKey": "map-map:1:exploration:caster",
+          "lastCompletedConcentration": {
+            "spellId": "local.xge.repaired.archer93:tensers-transformation",
+            "completedWorldMinute": 110
+          }
+        },
+        "hitPointDice": [
+          {
+            "sides": 6,
+            "current": 20,
+            "max": 20
+          }
+        ],
+        "hitPointMaximumMode": "fixed",
+        "dnd5eWorldTimeAppliedMinute": 110,
+        "exhaustionLevel": 0,
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "deathSaveStable": false
+      }
+    ]
+  },
+  "after": {
+    "maps": [
+      {
+        "id": "map",
+        "name": "Map",
+        "width": 1600,
+        "height": 1200,
+        "gridSize": 50,
+        "gridOffsetX": 0,
+        "gridOffsetY": 0,
+        "feetPerCell": 5,
+        "showGrid": true,
+        "tokens": [
+          {
+            "id": "caster",
+            "characterId": "owner",
+            "label": "Owner",
+            "type": "player",
+            "x": 325,
+            "y": 325,
+            "size": 1,
+            "color": "",
+            "emoji": "",
+            "hp": 122,
+            "maxHp": 122
+          }
+        ]
+      }
+    ],
+    "characters": [
+      {
+        "rulesetId": "dnd5e-2014-srd-5.1",
+        "id": "owner",
+        "name": "Owner",
+        "player": "Player",
+        "avatar": "🧝",
+        "accent": "from-arcane-500 to-arcane-600",
+        "race": "人类",
+        "charClass": "法师",
+        "dnd5eClassLevels": {
+          "wizard": 20
+        },
+        "level": 20,
+        "background": "侍僧",
+        "experience": 0,
+        "reputation": 0,
+        "abilities": {
+          "str": 10,
+          "dex": 10,
+          "con": 14,
+          "int": 6,
+          "wis": 10,
+          "cha": 10
+        },
+        "savingThrows": [],
+        "skills": [],
+        "maxHp": 122,
+        "currentHp": 122,
+        "tempHp": 0,
+        "hitDice": "20d6",
+        "ac": 10,
+        "speed": 30,
+        "initiativeBonus": 0,
+        "saveDC": 12,
+        "passivePerception": 10,
+        "inspiration": 0,
+        "dnd5eClassChoices": {
+          "classes": {
+            "wizard": {
+              "selections": {
+                "wizard-spellbook": [
+                  "local.xge.repaired.archer93:tensers-transformation"
+                ],
+                "spell-prepared": [
+                  "local.xge.repaired.archer93:tensers-transformation"
+                ]
+              },
+              "subclass": "evocation"
+            }
+          }
+        },
+        "equipment": {
+          "mainWeapon": {
+            "id": "dnd5e-arcane-focus",
+            "name": "奥术法器",
+            "slot": "mainWeapon",
+            "allowedSlots": [
+              "mainWeapon",
+              "offHand"
+            ],
+            "spellcastingFocusClassIds": [
+              "wizard",
+              "sorcerer",
+              "warlock"
+            ]
+          }
+        },
+        "conditions": [],
+        "backstory": "",
+        "notes": "",
+        "dmNotes": "",
+        "visibleToPlayers": true,
+        "dnd5ePluginFeatureIds": [
+          "test.homunculus-defense:defense"
+        ],
+        "classResources": {
+          "dnd5e-arcane-recovery": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-signature-spell-1": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-signature-spell-2": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-spell-slot-1": {
+            "current": 4,
+            "max": 4
+          },
+          "dnd5e-spell-slot-2": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-3": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-4": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-5": {
+            "current": 3,
+            "max": 3
+          },
+          "dnd5e-spell-slot-6": {
+            "current": 0,
+            "max": 2
+          },
+          "dnd5e-spell-slot-7": {
+            "current": 2,
+            "max": 2
+          },
+          "dnd5e-spell-slot-8": {
+            "current": 1,
+            "max": 1
+          },
+          "dnd5e-spell-slot-9": {
+            "current": 1,
+            "max": 1
+          }
+        },
+        "dnd5eInventory": {
+          "schemaVersion": 3,
+          "revision": 2,
+          "entries": [
+            {
+              "instanceId": "ff911a05-5e8f-43cc-ba39-d30544f38969",
+              "templateId": "srd-5.1:item:arcane-focus",
+              "item": {
+                "id": "srd-5.1:item:arcane-focus",
+                "name": "奥术法器",
+                "englishName": "Arcane focus",
+                "category": "adventuring-gear",
+                "icon": "spellcasting-focus",
+                "description": "奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。",
+                "rulesText": "奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。",
+                "weightLb": 1,
+                "cost": {
+                  "amount": 10,
+                  "currency": "gp"
+                },
+                "stackable": false,
+                "equipment": {
+                  "id": "dnd5e-arcane-focus",
+                  "name": "奥术法器",
+                  "slot": "mainWeapon",
+                  "allowedSlots": [
+                    "mainWeapon",
+                    "offHand"
+                  ],
+                  "spellcastingFocusClassIds": [
+                    "wizard",
+                    "sorcerer",
+                    "warlock"
+                  ]
+                },
+                "source": {
+                  "book": "SRD 5.1",
+                  "license": "CC BY 4.0"
+                }
+              },
+              "quantity": 1,
+              "identified": true,
+              "acquiredAt": 1793614339226,
+              "contaminants": [],
+              "equippedSlot": "mainWeapon"
+            }
+          ],
+          "currency": {
+            "cp": 0,
+            "sp": 0,
+            "ep": 0,
+            "gp": 0,
+            "pp": 0
+          },
+          "authorityGrantReceipts": [],
+          "authorityUseReceipts": []
+        },
+        "concentrating": false,
+        "roomId": "NE887U",
+        "roomMemberId": "5bf7cbd1-72fd-498a-9b5e-8a9e9833819d",
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "wardingBondMaterialEquipped": false,
+          "wardingBondParticipantCharacterId": "owner",
+          "turnStartResolvedTurnKey": "map-map:1:exploration:caster",
+          "leveledSpellTurnKey": "map-map:1:exploration:caster",
+          "lastCompletedConcentration": {
+            "spellId": "local.xge.repaired.archer93:tensers-transformation",
+            "completedWorldMinute": 110
+          }
+        },
+        "hitPointDice": [
+          {
+            "sides": 6,
+            "current": 20,
+            "max": 20
+          }
+        ],
+        "hitPointMaximumMode": "fixed",
+        "dnd5eWorldTimeAppliedMinute": 110,
+        "exhaustionLevel": 0,
+        "deathSaveSuccesses": 0,
+        "deathSaveFailures": 0,
+        "deathSaveStable": false
+      }
+    ]
+  },
+  "combat": {
+    "mapId": "map",
+    "combatId": "tensers-transformation-audit",
+    "active": false,
+    "round": 1,
+    "initiativeIndex": 0,
+    "initiativeOrder": [
+      {
+        "tokenId": "caster",
+        "slotId": "caster",
+        "label": "Owner",
+        "roll": 20,
+        "color": "",
+        "emoji": ""
+      }
+    ],
+    "settlementMode": "automatic",
+    "monsterControl": {
+      "schemaVersion": 1,
+      "mode": "manual",
+      "pauseRequested": false,
+      "updatedAt": 1793614355039
+    },
+    "dnd5eTurnEconomyByToken": {},
+    "effectiveRules": {
+      "schemaVersion": 1,
+      "revision": 1,
+      "hash": "fnv1a-6c26167e",
+      "sourceOrder": [
+        "srd",
+        "house-rules",
+        "character-options",
+        "temporary-effects",
+        "final-settlement"
+      ],
+      "houseRules": {
+        "declarativeAbilityDamageMultiplier": 1,
+        "criticalHitMode": "double-dice",
+        "advantageMode": "standard",
+        "shortRestMinutes": 60,
+        "longRestHours": 8,
+        "combatBannersEnabled": true,
+        "spellAnimationsEnabled": true,
+        "spellcastingPrerequisitesEnabled": true,
+        "encumbranceEnabled": true
+      },
+      "requiredPlugins": [
+        {
+          "id": "local.xge.repaired.archer93",
+          "version": "0.99.0",
+          "integrity": "sha256-nhbZNxKZIdmHZtlpK1yY1yuO+G5bNsFBuD74G2sGduE=",
+          "stateSchemaVersion": 1
+        }
+      ]
+    },
+    "updatedAt": 1793614363273,
+    "campaignRoundClock": {
+      "combatId": "tensers-transformation-audit",
+      "round": 1,
+      "pendingRounds": 0,
+      "pendingRoundCredits": {}
+    },
+    "_sync": {
+      "schemaVersion": 1,
+      "revision": 2,
+      "writerId": "dm:18f3a2c2-81c6-40dc-b3ae-db3c9b35b629:tensers-transformation-dm-1793614335766",
+      "writtenAt": 1793614363539
+    }
+  }
+}

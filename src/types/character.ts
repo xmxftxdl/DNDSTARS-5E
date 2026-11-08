@@ -39,6 +39,8 @@ export type Dnd5eAdvancementAsiChoice =
   | Dnd5eAdvancementFeatChoice
 
 export interface Dnd5eAdvancementSpellSelectionsV1 {
+  /** Source-qualified additional known slots; replacements share the ordinary per-level replacement budget. */
+  additionalKnownSpells?: Record<string,string>
   /** 本职业升级确认后的完整戏法列表。 */
   cantrips: string[]
   /** “已知法术”职业升级确认后的完整已知法术列表。 */
@@ -125,6 +127,7 @@ export interface Dnd5eLevelAdvancementRecordV1 {
 }
 
 export interface Character {
+  dnd5eInitiativeResourceRecoveryReceipts?:Record<string,{combatId:string;rollReceiptId:string}>
   /** 5.2.1 仅用于识别并迁移旧存档；新数据统一写入 2014 / SRD 5.1。 */
   rulesetId?: 'dnd5e-2014-srd-5.1'
   /** 野蛮人20级“原始斗士”已将力量与体质各提高4；用于防止刷新或等级同步时重复叠加。 */
@@ -327,6 +330,7 @@ export interface Character {
     withinReachMovementByAttacker?: Record<string, import('../rulesets/dnd5e/withinReachMovementProgress').Dnd5eWithinReachMovementProgress>
     /** Opportunity-attack movement stop keyed to the affected creature's active turn. */
     movementStoppedTurnKey?: string
+    sceneReactionSpent?:{schemaVersion:1;roomId:string;parentTransactionId:string}
     normalReactionSpentThisTurn?: boolean
     specialOpportunityReactionUsed?: boolean
     reactionAvailableBeforeSpecial?: boolean
@@ -379,6 +383,8 @@ export interface Character {
     deathRound?: number
     deathInitiativeIndex?: number
     /** Host-confirmed cause used by resurrection magic that excludes death from old age. */
+    falseHydraConsumedBy?: string
+    deathWorldMinute?: number
     deathCause?: 'other' | 'old-age'
     /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
     soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
@@ -419,6 +425,8 @@ export interface Character {
     /** 反魅惑演奏持续至吟游诗人下一回合结束；2 表示发动回合与下个回合。 */
     countercharmRoundsRemaining?: number
     sneakAttackTurnKey?: string
+    /** Host-recorded actual Sneak Attack targets, bounded to recent turn identities. */
+    sneakAttackTargetsByTurnKey?: Record<string, string[]>
     colossusSlayerTurnKey?: string
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string
@@ -469,6 +477,8 @@ export interface Character {
     /** 散打宗 11 级：长休后获得的庇护术效果，攻击或对敌施法后结束。 */
     tranquilityActive?: boolean
     disadvantageNegationReceipts?: Record<string, import('../rulesets/dnd5e/disadvantageNegation').DisadvantageNegationReceipt>
+    /** Native source-qualified uses keyed by [feature id, original cast parent]. */
+    spellDamageSelectedAbilityBonusUses?: Record<string,true>
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
     activityTriggerReceipts?: { combatId: string; ids: string[] }
@@ -490,6 +500,7 @@ export interface Character {
     knownCreatureLocations?: Record<string, import('../rulesets/dnd5e/knownCreatureLocations').Dnd5eKnownCreatureLocation>
     damageTraitReports?: Record<string, import('../rulesets/dnd5e/damageTraitReport').Dnd5eDamageTraitReceipt>
     planarPortalReports?: Record<string, import('../rulesets/dnd5e/planarPortalReport').Dnd5ePlanarPortalReceipt>
+    sensoryDeceptionReports?: Record<string, import('../rulesets/dnd5e/sensoryDeceptionReport').Dnd5eSensoryDeceptionReceipt>
     activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
     activityBasicActionGrants?: Record<string, Dnd5eActivityBasicActionGrantV1>
     /** Temporary structured spells granted by a Host-settled interception. */

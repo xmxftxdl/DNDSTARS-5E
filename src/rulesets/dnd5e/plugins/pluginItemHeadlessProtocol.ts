@@ -75,7 +75,13 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
     } else if (use.targeting != null) {
       throw new Error(`Invalid plugin item targeting: ${itemId}`)
     }
-    if (use.effect.kind === 'healing') {
+    if (use.effect.kind === 'tentacle-rod-2014') {
+      if (use.economy !== 'action' || use.consumeQuantity !== 0 || use.resourceCost || use.chargesPerItem ||
+          use.targeting?.kind !== 'creature' || use.targeting.rangeFeet !== 15 || use.targeting.includeSelf !== true ||
+          !input.hasEquipment || Object.keys(use.effect).some(key => key !== 'kind')) {
+        throw new Error(`Invalid 2014 tentacle rod declaration: ${itemId}`)
+      }
+    } else if (use.effect.kind === 'healing') {
       if (
         !finiteInteger(use.effect.dice.count, 1, 40) || !finiteInteger(use.effect.dice.sides, 2, 100) ||
         !finiteInteger(use.effect.dice.bonus, -1_000, 1_000)

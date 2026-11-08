@@ -1,5 +1,6 @@
 import { mapForSolidMaterialTraversal, mapGeometryForSolidMaterialTraversal, type MapTraversableSolidMaterial } from './mapSolidMaterialTraversal'
 import { mapClimbSupported } from './mapClimbing'
+import { mapForObjectCreatureTraversal, mapGeometryForObjectCreatureTraversal, mapObjectCreatureTraversalStepIsDifficult } from './mapObjectCreatureTraversal'
 import {mapGeometryForEtherealTravel} from './mapEtherealGeometry'
 import { mapStairWalkingEdges, type MapStairWalkingEdge } from './mapStairPaths'
 import { dnd5eEntitySupportElevation } from '../rulesets/dnd5e/entitySupport'
@@ -32,13 +33,14 @@ import { dnd5eNormalGroundTerrainAt } from '../rulesets/dnd5e/normalGroundTerrai
 function solidTerrainTraversalElevation(input: {
   map: BattleMap; geometry?: MapGeometryState; token: Token
   passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
+  passThroughObjectsAndCreatures?: boolean
 }, position: { x: number; y: number }, elevationFeet: number): number | undefined {
-  if (!input.passThroughSolidMaterials?.length) return undefined
+  if (!input.passThroughSolidMaterials?.length && !input.passThroughObjectsAndCreatures) return undefined
   const buried = mapGeometryFootprintTerrainSamples({ geometry: input.geometry, at: position,
     halfSizePixels: Math.max(1, input.map.gridSize * Math.max(1, input.token.size) / 2) })
     .filter(surface => elevationFeet < surface.elevationFeet - 1e-7)
-  return buried.length && buried.every(({ material }) =>
-    (material === 'earth' || material === 'stone') && input.passThroughSolidMaterials!.includes(material))
+  return buried.length && (input.passThroughObjectsAndCreatures || buried.every(({ material }) =>
+    (material === 'earth' || material === 'stone') && input.passThroughSolidMaterials!.includes(material)))
     ? elevationFeet : undefined
 }
 
@@ -92,6 +94,7 @@ export interface MapGeometryPathTreeInput {
   /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
   ignoreGeometryCollision?: boolean
   passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
+  passThroughObjectsAndCreatures?: boolean
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   maximumVisited?: number
@@ -228,6 +231,7 @@ export function findMapGeometryPath(input: {
   /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
   ignoreGeometryCollision?: boolean
   passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
+  passThroughObjectsAndCreatures?: boolean
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   allowOccupiedDestination?: boolean
@@ -244,7 +248,13 @@ export function findMapGeometryPath(input: {
   /** @deprecated Use the classified callbacks above; retained for extension compatibility. */
   additionalCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
 }): MapPathResult | undefined {
-  input = { ...input, map: mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials) }
+  const originalTraversalInput = input
+  input = { ...input, map: mapForObjectCreatureTraversal(
+    mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials), input.passThroughObjectsAndCreatures),
+    passThroughTokenIds: input.passThroughObjectsAndCreatures
+      ? [...new Set([...(input.passThroughTokenIds ?? []), ...input.map.tokens
+        .filter(token => token.id !== input.token.id && token.type !== 'obstacle' && !token.dnd5eSpellEffect)
+        .map(token => token.id)])] : input.passThroughTokenIds }
   const gridSize = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const columns = Math.max(1, Math.ceil(input.map.width / gridSize))
@@ -253,14 +263,15 @@ export function findMapGeometryPath(input: {
   const destination = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
   const pathGeometry = input.ignoreGeometryCollision
     ? mapGeometryForEtherealTravel(input.geometry)
-    : geometryWithOpenableDoors(mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.allowOpenUnlockedDoors)
+    : geometryWithOpenableDoors(mapGeometryForObjectCreatureTraversal(
+      mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.passThroughObjectsAndCreatures), input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
   const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
   const startTerrainElevation = standingSurfaceElevation(input.map, pathGeometry, input.token, startPosition, input.ignoreGeometryCollision)
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
-  const startElevation = input.ignoreGeometryCollision
+  const startElevation = input.ignoreGeometryCollision || input.passThroughObjectsAndCreatures
     ? storedStartElevation
     : Math.max(startTerrainElevation, storedStartElevation)
   const targetElevation = Number.isFinite(input.targetElevationFeet)
@@ -346,7 +357,7 @@ export function findMapGeometryPath(input: {
         const from = points[index - 1]
         const to = points[index]
         distanceFeet += stepDistances[index]
-        for (const door of input.ignoreGeometryCollision ? [] : input.geometry?.doors ?? []) {
+        for (const door of input.ignoreGeometryCollision || input.passThroughObjectsAndCreatures ? [] : input.geometry?.doors ?? []) {
           if (
             mapGeometryDoorOpenState(door) === 'closed' &&
             mapGeometryDoorLockState(door) === 'unlocked' &&
@@ -374,7 +385,9 @@ export function findMapGeometryPath(input: {
           to: destinationPosition, fromElevationFeet: startElevation, toElevationFeet: elevationsFeet[0],
           minimumPassageGapInches: input.minimumPassageGapInches }).blocked) return undefined
         distanceFeet = solidVerticalDistance
-        const multiplier = Math.max(terrainMultiplierAtPoint(pathGeometry, destinationPosition,
+        const multiplier = Math.max(
+          input.passThroughObjectsAndCreatures && !input.ignoreDifficultTerrain ? 2 : 1,
+          terrainMultiplierAtPoint(pathGeometry, destinationPosition,
           { ...input, elevationFeet: elevationsFeet[0], tokenHeightFeet }),
           input.ignoreDifficultTerrain ? 1 : input.additionalDifficultTerrainMultiplier?.(verticalToken, destinationPosition) ?? 1) *
           Math.max(1, input.additionalSpeedCostMultiplier?.(verticalToken, destinationPosition) ?? 1,
@@ -478,6 +491,10 @@ export function findMapGeometryPath(input: {
           ? Math.max(feetPerCell, Math.abs(nextElevation - current.elevationFeet)) : feetPerCell)
       const stepToken = { ...input.token, elevationFeet: nextElevation }
       const difficultTerrainMultiplier = Math.max(
+        input.passThroughObjectsAndCreatures && !input.ignoreDifficultTerrain && mapObjectCreatureTraversalStepIsDifficult({
+          ...originalTraversalInput, from: currentPosition, to: position,
+          fromElevationFeet: current.elevationFeet, toElevationFeet: nextElevation,
+        }) ? 2 : 1,
         terrainMultiplierAtPoint(pathGeometry, position, {
           ...input,
           elevationFeet: nextElevation,
@@ -676,7 +693,13 @@ class PathMinHeap {
 export function createMapGeometryPathTree(
   input: MapGeometryPathTreeInput,
 ): MapGeometryPathTree {
-  input = { ...input, map: mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials) }
+  const originalTraversalInput = input
+  input = { ...input, map: mapForObjectCreatureTraversal(
+    mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials), input.passThroughObjectsAndCreatures),
+    passThroughTokenIds: input.passThroughObjectsAndCreatures
+      ? [...new Set([...(input.passThroughTokenIds ?? []), ...input.map.tokens
+        .filter(token => token.id !== input.token.id && token.type !== 'obstacle' && !token.dnd5eSpellEffect)
+        .map(token => token.id)])] : input.passThroughTokenIds }
   if (input.climbVerticalSurfaces) return {
     visitedCells: 0, truncated: false,
     pathTo(to) {
@@ -696,13 +719,14 @@ export function createMapGeometryPathTree(
   )
   const pathGeometry = input.ignoreGeometryCollision
     ? mapGeometryForEtherealTravel(input.geometry)
-    : geometryWithOpenableDoors(mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.allowOpenUnlockedDoors)
+    : geometryWithOpenableDoors(mapGeometryForObjectCreatureTraversal(
+      mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.passThroughObjectsAndCreatures), input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
   const startTerrainElevation = standingSurfaceElevation(input.map, pathGeometry, input.token, startPosition, input.ignoreGeometryCollision)
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
-  const startElevation = input.ignoreGeometryCollision
+  const startElevation = input.ignoreGeometryCollision || input.passThroughObjectsAndCreatures
     ? storedStartElevation
     : Math.max(startTerrainElevation, storedStartElevation)
   const flightElevation = input.canFly && Number.isFinite(input.targetElevationFeet)
@@ -845,6 +869,10 @@ export function createMapGeometryPathTree(
       }
       const stepToken = { ...input.token, elevationFeet: nextElevation }
       const difficultTerrainMultiplier = Math.max(
+        input.passThroughObjectsAndCreatures && !input.ignoreDifficultTerrain && mapObjectCreatureTraversalStepIsDifficult({
+          ...originalTraversalInput, from: currentPosition, to: position,
+          fromElevationFeet: current.elevationFeet, toElevationFeet: nextElevation,
+        }) ? 2 : 1,
         terrainMultiplierAtPoint(pathGeometry, position, {
           ...input,
           elevationFeet: nextElevation,
@@ -926,11 +954,13 @@ export function createMapGeometryPathTree(
       stepDistances.reverse()
       // Match findMapGeometryPath's single-cell vertical movement semantics:
       // a flyer can change elevation without changing its anchor cell.
-      if (cells.length === 1 && (flightElevation != null || input.passThroughSolidMaterials?.length)) {
+      if (cells.length === 1 && (flightElevation != null || input.passThroughSolidMaterials?.length || input.passThroughObjectsAndCreatures)) {
         elevationsFeet[0] = elevationAtPosition(destinationPosition)
       }
       const destinationElevation =
         elevationsFeet.at(-1) ?? destinationNode.elevationFeet
+      if (input.passThroughObjectsAndCreatures && input.targetElevationFeet != null &&
+        Math.abs(destinationElevation - input.targetElevationFeet) > 1e-4) return undefined
       if (mapGeometryPlacementBlocked({
         geometry: pathGeometry,
         map: input.map,
@@ -945,7 +975,7 @@ export function createMapGeometryPathTree(
       for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1]
         const target = points[index]
-        for (const door of input.ignoreGeometryCollision ? [] : input.geometry?.doors ?? []) {
+        for (const door of input.ignoreGeometryCollision || input.passThroughObjectsAndCreatures ? [] : input.geometry?.doors ?? []) {
           if (
             mapGeometryDoorOpenState(door) === 'closed' &&
             mapGeometryDoorLockState(door) === 'unlocked' &&
@@ -969,7 +999,9 @@ export function createMapGeometryPathTree(
           map: input.map, token: input.token, to: destinationPosition, fromElevationFeet: startElevation,
           toElevationFeet: destinationElevation, minimumPassageGapInches: input.minimumPassageGapInches }).blocked) return undefined
         const verticalToken = { ...input.token, elevationFeet: destinationElevation }
-        const multiplier = Math.max(terrainMultiplierAtPoint(pathGeometry, destinationPosition,
+        const multiplier = Math.max(
+          input.passThroughObjectsAndCreatures && !input.ignoreDifficultTerrain ? 2 : 1,
+          terrainMultiplierAtPoint(pathGeometry, destinationPosition,
           { ...input, elevationFeet: destinationElevation, tokenHeightFeet }),
           input.ignoreDifficultTerrain ? 1 : input.additionalDifficultTerrainMultiplier?.(verticalToken, destinationPosition) ?? 1) *
           Math.max(1, input.additionalSpeedCostMultiplier?.(verticalToken, destinationPosition) ?? 1,

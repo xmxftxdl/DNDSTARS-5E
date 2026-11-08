@@ -1,3 +1,16 @@
+import{settleActivityAttackOriginalDice}from'./activityAttackOriginalDice'
+import{visitActivityAttackOriginalMissing}from'./activityAttackOriginalMissing'
+import{visitActivitySavingOriginalMissing}from'./activitySavingOriginalMissing'
+import{settleActivitySavingOriginalDice}from'./activitySavingOriginalDice'
+import{activityAbilityOriginalMissingActive,visitActivityAbilityOriginalMissing}from'./activityAbilityOriginalMissing'
+import{settleActivityAbilityOriginalDice}from'./activityAbilityOriginalDice'
+import{dnd5eAbilityTargetMaximum}from'./dnd5eAbilityTargetLimit'
+import{failedD20ActivityAdjustment}from'../failedD20BonusCheckpoint'
+import {masterDuelistActivityForcedMiss,recordMasterDuelistActivityMode,masterDuelistActivityOverride,masterDuelistNativeModeAfterOverride} from '../masterDuelistCheckpoint'
+import {resolveDnd5eRollMode as masterResolveRollMode} from '../rollMode'
+import{dnd5eActivityWithSoulThoughtPolicy}from'./dnd5eActivitySoulThoughtPolicy'
+import {rethrowIncomingAttackRerollInterruption} from '../incomingAttackRerollCheckpoint'
+import {applyDnd5eSpellDamageDieRerolls} from '../spellDamageDieRerolls'
 import { groupDnd5eActivityDamageProposals, type Dnd5eActivityDamageComponent } from './dnd5eActivityDamageGroups'
 import { materializeDnd5eEquipmentWeaponDamage, type Dnd5eEquipmentWeaponDamageSnapshot } from './dnd5eEquipmentWeaponDamage'
 import { dnd5eActivityCommunicationSaveSucceeds } from './dnd5eActivityCommunicationSave'
@@ -58,7 +71,7 @@ import {
   type Dnd5eFormulaV1,
 } from './dnd5eFormula'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
-import { dnd5eInterruptedFeatureSpellActivity } from './dnd5eInterruptedFeatureSpell'
+import { dnd5eInterruptedFeatureSpellActivity,dnd5eInterruptedFeatureSpellOriginal } from './dnd5eInterruptedFeatureSpell'
 import type { Dnd5eActivityBasicActionGrantActionV1 } from './dnd5eActivityBasicActionGrant'
 import {
   dnd5eActivityAutomationAnalysisV1,
@@ -114,6 +127,10 @@ export interface Dnd5eActivityEquipmentSnapshotV1 {
 }
 
 export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
+  /** Native Host source/permission projection; never a wire field. */
+  soulThoughtPolicy?:'blocked'|'real'|'false'
+
+  pluginFeatureIds?: readonly string[]
   temporaryHp?: number
   temporaryHitPointsSource?: { actorId: string; rulesId: string; effectDefinitionId?: string }
   /** Host class state, never a player-authored choice. */
@@ -124,6 +141,8 @@ export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
   id: string
   /** Current Host effects, including suspension and instance identity; never command facts. */
   rollDiceEffects?: Parameters<typeof dnd5eRollDiceRecipes>[0]['effects']
+  /** Host-evaluated ability floors, including active/suspended effect filtering. */
+  minimumAbilityCheckD20ByAbility?: Partial<Record<AbilityKey, number>>
   /** Immutable Host stat-block identity used only by closed Activity predicates. */
   statBlockId?: string
   name?: string
@@ -159,7 +178,7 @@ export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
   savingThrowModifiers?: Partial<Record<AbilityKey, number>>
   savingThrowProficiencies?: readonly AbilityKey[]
   skillProficiencyRanks?: Readonly<Record<string, 0 | 1 | 2>>
-  activeEffectDefinitionIds?: readonly { definitionId: string; stackingKey?: string; sourceActorId?: string; sourceCharacterId?: string; tags?: readonly string[]; spellLevel?: number; suspended?: boolean }[]
+  activeEffectDefinitionIds?: readonly { definitionId: string; stackingKey?: string; sourceActorId?: string; sourceCharacterId?: string; sourceRulesId?: string; sourcePluginId?: string; sourcePluginAvailable?: boolean; tags?: readonly string[]; spellLevel?: number; suspended?: boolean }[]
   abilityCheckModifiers?: Partial<Record<AbilityKey, number>>
   skillCheckModifiers?: Readonly<Record<string, number>>
   /** Immutable Host equipment projection used only by closed Activity predicates. */
@@ -182,6 +201,7 @@ export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
   d20RollModifier?: number
   /** Source-relative sensory fact supplied by the Host for this execution. */
   canHearActivitySource?: boolean
+  canSeeActivitySource?: boolean
   /** Transient map-derived fact: spell effects cannot operate on this snapshot. */
   magicSuppressed?: boolean
   /** Spell-level barriers that currently contain this snapshot. */
@@ -197,6 +217,16 @@ export interface Dnd5eActivityActorSnapshot extends Dnd5eFormulaActorSnapshot {
 export type Dnd5eActivityRollMode = 'normal' | 'advantage' | 'disadvantage'
 
 export interface Dnd5eActivityExecutionInput {
+  /** Actual Host scene facts after current native weather controls; never a submitted command. */
+  activityRoundScopeKnown?:boolean
+  activityUsedThisRound?:boolean
+  sceneWeatherExploration?:boolean
+  sceneWeatherWorldSecond?:number
+  sceneWeatherFacts?:import('../../../../shared/dnd5e-scene-weather-facts.mjs').Dnd5eSceneWeatherFactsV1
+  /** Genuine Host-issued spell-healing roles only; other formulas retain their original rolls. */
+  healingRolls?: Readonly<Record<string,Dnd5eFormulaRollResult>>
+  /** Host resolves the owner of the actual damage source, never command data. */
+  resolveSpellDamageFeatureIds?: (targetId:string,attribution?:'actor'|'grant-source')=>readonly string[]
   /** Host preview only; validate original content before removing interrupted spell effects. */
   featureSpellInvocationInterrupted?: boolean
   resolveDamageRollBonus?: (targetId: string, attribution?: 'grant-source') => number
@@ -205,6 +235,10 @@ export interface Dnd5eActivityExecutionInput {
   /** Live Host turn owner, never taken from player command data. */
   /** Host-owned combat scope; never read from the submitted command. */
   combatActive?: boolean
+  /** Host encounter state, never a player-declared round. */
+  combatRound?: number
+  attackActionUsed?: boolean
+  actionEconomyAvailable?: Partial<Record<'action' | 'bonus-action' | 'reaction', boolean>>
   currentTurnActorId?: string
   /** Optional dice context for UI previews only; authoritative execution uses its enclosing transaction. */
   effectDicePreview?: Dnd5eRollDicePreviewContext
@@ -265,6 +299,8 @@ export interface Dnd5eActivityExecutionInput {
   saveFactsByTargetId?: import('./dnd5eActivitySaveFacts').Dnd5eActivitySaveFactsV1
   /** Host-owned chain history; never read from player command data. */
   continuationTargetIds?: readonly string[]
+  /** Internal reference anchors: resolve overwrites this with the actual selected targets before effect suppression. */
+  movementAnchorTargetIds?: readonly string[]
   usedTurnKeys?: ReadonlySet<string>
   dmApproved?: boolean
   /** Host-owned event envelope. Never accept this object from a client payload. */
@@ -298,11 +334,16 @@ export interface Dnd5eActivityCheckResult {
   skill?: string
   rollMode?: Dnd5eActivityRollMode
   d20: number
+  /** Selected original die, before Host skill/ability floors. */
+  rawD20?: number
+  reliableTalentApplied?: boolean
+  rawOpposedD20?: number
+  opposedReliableTalentApplied?: boolean
   modifier: number
   total: number
   /** Resolved target number for attack rolls, saving throws and fixed-DC checks. */
   dc?: number
-  success: boolean
+  success?: boolean
   /** Explains a deterministic outcome whose d20 was not used for adjudication. */
   automaticOutcome?: 'condition-immunity-success' | 'communication-immunity-success' | 'environmental-immunity-success' | 'weapon-counterattack-success' | 'source-charm-failure' | 'allied-unresisted-failure'
   criticalSuccess: boolean
@@ -350,6 +391,8 @@ export type Dnd5eResolvedEffectDuration =
     }
 
 export type Dnd5eActivityCapabilityProposal = (
+  |{kind:'record-activity-round-use';operationId:string;targetId:string}
+  | { kind: 'weapon-hit-banishment'; operationId: string; targetId: string; maximumHitPoints: 50 }
   | { kind: 'select-secondary-weapon-damage'; operationId: string; damageOperationId: string; rangeFeet: number; requiresLineOfSight: boolean }
   | {kind:'select-reaction-follow';operationId:string;pushOperationId:string;movementBudget:'walking-speed';targetRadiusFeet:number}
   | { kind: 'dismiss-owned-temporary-summons'; operationId: string; sourceActivityIds: readonly string[] }
@@ -390,16 +433,18 @@ export type Dnd5eActivityCapabilityProposal = (
     }
   | { kind: 'reveal-target-location'; operationId: string; targetId: string }
   | { kind: 'read-damage-traits'; operationId: string; targetId: string }
+  | { kind: 'read-sensory-deception'; operationId: string; targetId: string; rangeFeet: 30 }
   | { kind: 'detect-planar-portal'; operationId: string; targetId: string; rangeFeet: number }
   | { kind: 'grant-temporary-hit-points'; operationId: string; targetId: string; amount: number; sourceEffectId?: string; replacement?: 'replace' }
   | { kind: 'stabilize'; operationId: string; targetId: string }
   | { kind: 'instant-death'; operationId: string; targetId: string }
   | { kind: 'stand-up'; operationId: string; targetId: string; usesTargetReactionIfAvailable: true }
-  | { kind: 'apply-standard-condition'; operationId: string; targetId: string; condition: Dnd5eStandardConditionId; duration: Dnd5eResolvedEffectDuration; involuntary?: true }
+  | { kind: 'apply-standard-condition'; sleep?: 'forced'; operationId: string; targetId: string; condition: Dnd5eStandardConditionId; duration: Dnd5eResolvedEffectDuration; involuntary?: true }
   | {
       kind: 'apply-effect'
       involuntary?: true
       captureInitialSpace?: true
+      captureExecutionIdentity?: true
       captureIdentityActorId?: string
       disguiseFromGrant?: true
       disguiseGrantEffectId?: string
@@ -417,6 +462,8 @@ export type Dnd5eActivityCapabilityProposal = (
       duration: Dnd5eResolvedEffectDuration
       conditions: readonly Dnd5eStandardConditionId[]
       extensionCondition?: string
+      /** Host decides this before replacing concentration; never persists the eligibility flag. */
+      darkvisionIfAbsentAtActivationFeet?: number
       modifierGroups: readonly Dnd5eActiveEffectModifiers[]
       breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
       completionReward?: { kind: 'short-rest'; requiresCondition: Dnd5eStandardConditionId }
@@ -462,6 +509,9 @@ export type Dnd5eActivityCapabilityProposal = (
       exclusiveGroupScope?: 'source' | 'bearer'
     }
   | { kind: 'remove-standard-condition'; operationId: string; targetId: string; condition: Dnd5eStandardConditionId; sourceCreatureTypes?: readonly string[] }
+  | { kind: 'transfer-effect'; operationId: string; targetId: string; sourceSpellId: string; tags: readonly string[]; timing: 'later-source-turn-after-bearer-zero' }
+  | {kind:'transfer-owned-curse-on-bearer-death';operationId:string;targetId:string;destinationId:string;sourceActivityId:string}
+  | {kind:'heal-owned-curse-on-bearer-death';operationId:string;targetId:string;sourceActivityId:string}
   | { kind: 'remove-effect'; operationId: string; targetId: string; effectId: string; source: 'self' | 'any' }
   | { kind: 'remove-effects-by-tag'; operationId: string; targetId: string; tags: readonly string[]; match: 'any' | 'all'; source: 'self' | 'any'; sourceCreatureTypes?: readonly string[]; maximumCount?: number }
   | { kind: 'adjust-exhaustion'; operationId: string; targetId: string; amount: number }
@@ -471,7 +521,7 @@ export type Dnd5eActivityCapabilityProposal = (
   | { kind: 'reduce-hit-point-maximum'; operationId: string; targetId: string; amount: number; owningEffectId: string; minimumMaximum: number }
   | { kind: 'transfer-hit-point-maximum'; operationId: string; targetId: string; amount: number; owningEffectId: string; beneficiaryEffectId: string; minimumMaximum: number; increaseCurrentHp: boolean; linkLifetimes?: boolean; protectLinkedLifetime?: true }
   | { kind: 'spend-resource' | 'restore-resource'; operationId: string; subjectId: string; resourceId: string; amount: number }
-  | { kind: 'move'; requiresWithinCarryingCapacity?: true; operationId: string; targetId: string; harmful?: true; mode: 'push' | 'pull' | 'forced' | 'voluntary' | 'teleport' | 'swap' | 'ascend' | 'descend'; directionOrigin?: 'actor' | 'area-center'; cardinalDirection?: 'north' | 'east' | 'south' | 'west'; requiresDifferentDestination?: true; destinationPolicy?: 'adjacent-space'; distanceFeet: number; maximumDistanceFromActorFeet?: number; continuationTargetRadiusFeet?: number; continuationTargetIds?: readonly string[]; verticalDestination?: 'area-top' | 'ground'; stopAtMappedObstacle?: true; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; requiresVisibleDestination?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
+  | { kind: 'move'; requiresWithinCarryingCapacity?: true; operationId: string; targetId: string; harmful?: true; mode: 'push' | 'pull' | 'forced' | 'voluntary' | 'teleport' | 'swap' | 'ascend' | 'descend'; directionOrigin?: 'actor' | 'area-center'; cardinalDirection?: 'north' | 'east' | 'south' | 'west'; requiresDifferentDestination?: true; destinationPolicy?: 'adjacent-space'; distanceFeet: number; maximumDistanceFromActorFeet?: number; selectedTargetRadiusFeet?: number; selectedTargetIds?: readonly string[]; continuationTargetRadiusFeet?: number; continuationTargetIds?: readonly string[]; verticalDestination?: 'area-top' | 'ground' | 'space'; stopAtMappedObstacle?: true; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; requiresVisibleDestination?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
   | { kind: 'set-directional-command'; operationId: string; actorId: string; commandKey: string; angleDegrees: number }
   | {
       kind: 'relocate-granting-area'
@@ -681,6 +731,8 @@ export type Dnd5eActivityCapabilityProposal = (
       requiresVisiblePlacement?: boolean
       objectTokenId?: string
       animatedObjectSize?: 'tiny' | 'small' | 'medium' | 'large' | 'huge'
+      killedCreatureOriginId?: string
+      illOmenTarget?: import('../illOmenHound').Dnd5eIllOmenHoundTarget
       corpseTokenId?: string
       afterDamageKillOperationId?: string
       /** Explicit campaign-clock delay used only when cast outside combat. */
@@ -694,6 +746,7 @@ export type Dnd5eActivityCapabilityProposal = (
       bondActivityIds?:readonly string[]
       understoodLanguage?:string
       bondEffectId?:string
+      endsOnSourceLongRest?:true
       telepathyRangeFeet?:number
       controlSave?: { ability: AbilityKey; dc: number; disadvantage?: boolean; lingerDieSides?: number }
       uncontrolledLinger?: import('../summonedControl').Dnd5eSummonLingerPolicy
@@ -882,6 +935,8 @@ export type Dnd5eActivityCapabilityProposal = (
   | { kind: 'command-owned-companion'; task?: import('../companionTask').Dnd5eCompanionTask; ready?: import('../companionReady').Dnd5eCompanionReady; objectInteraction?: import('../companionObjectInteraction').Dnd5eCompanionObjectInteraction; attackKind?: import('../companionAttackKind').Dnd5eCompanionAttackKind; guardArea?: import('../companionGuardArea').Dnd5eCompanionGuardArea; movementDestination?: Dnd5eCompanionMovementDestination; attackTargetId?: string; helpTargetId?: string; helpKind?: 'attack' | 'ability-check'; requiresSpeech?:boolean;voluntaryAfterControlEnds?:true;controlSaveDisadvantage?:boolean; sourceActivityId?: string; operationId: string; targetId: string; command: 'attack' | 'dash' | 'disengage' | 'dodge' | 'help' | 'hide' | 'use-object' | 'ready' | 'task' }
   | {
       kind: 'grant-weapon-attack'
+      additionalSneakAttackDifferentTarget?: true
+      allowUnarmedStrikes?: true
       inheritedAttackOrigin?: 'attack-action' | 'bonus-action' | 'reaction' | 'other'
       available?: 'immediate' | 'next-own-turn'
       activatedGrantId?: string
@@ -916,7 +971,7 @@ export type Dnd5eActivityCapabilityProposal = (
       shovePushDistanceBonusFeet?: number
     }
   | { kind: 'invoke-activity'; operationId: string; activityId: string; actorId: string; targetId?: string; repeat: number }
-  | { kind: 'request-dm-adjudication'; operationId: string; prompt: string; reason: string }
+  | { kind: 'request-dm-adjudication'; operationId: string; prompt: string; reason: string; purpose?: 'magical-truth-detection'; targetId?: string }
   | { kind: 'narrative-prompt'; operationId: string; prompt: string }
 
 ) & { logTrigger?: { activityName: string; outcomeId: string; operationId: string; conditions: readonly string[] } }
@@ -940,7 +995,7 @@ export type Dnd5eActivityExecutionResult =
       details: readonly string[]
     }
 
-function operationDamageType(operation:Extract<Dnd5eActivityOperationV1,{kind:'damage'}>,input:Dnd5eActivityExecutionInput):Dnd5eDamageType {
+export function dnd5eActivityOperationDamageTypeV1(operation:Extract<Dnd5eActivityOperationV1,{kind:'damage'}>,input:Pick<Dnd5eActivityExecutionInput,'parentDamageType'|'choices'|'rolls'>):Dnd5eDamageType {
  let damageType=operation.damageType==='inherit-primary'?input.parentDamageType:operation.damageType
  if(operation.damageTypeChoiceId!=null){
   const selected=input.choices?.[operation.damageTypeChoiceId]
@@ -956,6 +1011,8 @@ function operationDamageType(operation:Extract<Dnd5eActivityOperationV1,{kind:'d
  if(!damageType)throw new Dnd5eFormulaEvaluationError('parent damage type is unavailable')
  return damageType
 }
+
+const operationDamageType=dnd5eActivityOperationDamageTypeV1
 
 function relation(actor: Dnd5eActivityActorSnapshot, target: Dnd5eActivityActorSnapshot): 'self' | 'ally' | 'enemy' {
   if (actor.id === target.id) return 'self'
@@ -990,6 +1047,7 @@ function formulaContext(
   return {
     actor: input.actor,
     target,
+    diceScopeId: target?.id,
     castLevel: input.castLevel,
     rolls,
     diceMultiplierByRollId,
@@ -1012,10 +1070,14 @@ function predicateSatisfied(
   input: Dnd5eActivityExecutionInput,
   target?: Dnd5eActivityActorSnapshot,
 ): boolean {
+  if (predicate.kind === 'action-economy-available' && input.actionEconomyAvailable != null) return input.actionEconomyAvailable[predicate.economy] === true
   const contextual = dnd5eContextPredicateSatisfiedV1(predicate, input.triggerContext)
   if (contextual != null) return contextual
   const subject = 'subject' in predicate && predicate.subject === 'target' ? target : input.actor
+  if (predicate.kind === 'attack-action-used') return input.combatActive === true && input.currentTurnActorId === input.actor.id && input.attackActionUsed === true
   if (predicate.kind === 'combat-active') return input.combatActive === true
+  if (predicate.kind === 'combat-round') return input.combatActive === true &&
+    Number.isSafeInteger(input.combatRound) && input.combatRound === predicate.round
   if (predicate.kind === 'ethereal-access') {
     const access = input.actor.etherealAccess ?? 'unknown'
     return predicate.state === 'known' ? access !== 'unknown' : access === predicate.state
@@ -1240,6 +1302,15 @@ function selectedD20(values: readonly number[], mode: Dnd5eActivityRollMode): nu
   return values[0]!
 }
 
+/** Apply Host-owned floors after choosing the original die; keep source dice unchanged for interrupts. */
+function abilityCheckD20(actor: Dnd5eActivityActorSnapshot, ability: AbilityKey, skill: string | undefined, rawD20: number) {
+  const reliableTalent = (actor.classLevels?.rogue ?? 0) >= 11 && (skill ? actor.skillProficiencyRanks?.[skill] ?? 0 : 0) > 0
+  return {
+    d20: Math.max(rawD20, reliableTalent ? 10 : 1, actor.minimumAbilityCheckD20ByAbility?.[ability] ?? 1),
+    reliableTalentApplied: reliableTalent && rawD20 < 10,
+  }
+}
+
 function checkKey(check: Dnd5eActivityCheckV1, target?: Dnd5eActivityActorSnapshot): string {
   return check.scope === 'per-target' && target ? `${check.id}${'perProjectile' in check && check.perProjectile && target.projectileOccurrenceIndex != null ? `:projectile:${target.projectileOccurrenceIndex}` : ''}:${target.id}` : check.id
 }
@@ -1320,7 +1391,7 @@ export function previewDnd5eActivityAttackV1(
   }
 }
 
-function resolveCheck(
+export function resolveCheck(
   check: Dnd5eActivityCheckV1,
   input: Dnd5eActivityExecutionInput,
   target?: Dnd5eActivityActorSnapshot,
@@ -1376,15 +1447,15 @@ function resolveCheck(
       (sourceModes.includes('advantage') && sourceModes.includes('disadvantage') ? 'normal' : sourceModes[0] ?? 'normal')
     const sourceRoll = input.rolls[checkRollKey(check, target)]
     const opposedRoll = input.rolls[opposedCheckRollKey(check, target)]
-    if (!sourceRoll || !opposedRoll) {
+    if ((!sourceRoll || !opposedRoll)&&!activityAbilityOriginalMissingActive()) {
       throw new Dnd5eFormulaEvaluationError(`missing opposed d20 result: ${key}`)
     }
     const sourceMode = activityD20Mode(input, { rollId: checkRollKey(check, target), rollerId: input.actor.id,
       kind: 'ability-check', mode: sourceBaseMode })
     const targetMode = activityD20Mode(input, { rollId: opposedCheckRollKey(check, target), rollerId: target.id,
       kind: 'ability-check', mode: input.checkRollModes?.[`${key}:target-final`] ?? targetBase })
-    const d20 = selectedD20(sourceRoll.values, sourceMode)
-    const opposedD20 = selectedD20(opposedRoll.values, targetMode)
+    if(!sourceRoll){visitActivityAbilityOriginalMissing({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,skill:dnd5eOpposedSourceSkill(check),mode:sourceMode});throw new Dnd5eFormulaEvaluationError(`missing opposed d20 result: ${key}`)}
+    const rawD20 = selectedD20(settleActivityAbilityOriginalDice({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,skill:dnd5eOpposedSourceSkill(check),mode:sourceMode,values:sourceRoll.values}), sourceMode)
     const sourceModifier = evaluateDnd5eFormulaV1(check.sourceModifier, formulaContext(input, target)) +
       consumeDnd5eRollDiceModifier(input.actor.id, input.actor.rollDiceEffects, 'ability-check', dnd5eRollDiceCheckSlot(input.activity.id, key, 'source'))
     const targetOption = check.targetOptions.reduce((best, candidate) => {
@@ -1402,6 +1473,11 @@ function resolveCheck(
           Math.floor((target.abilities[best.ability] - 10) / 2)
       return modifier > bestModifier ? candidate : best
     }, check.targetOptions[0]!)
+    if(!opposedRoll){visitActivityAbilityOriginalMissing({activityId:input.activity.id,checkId:key,rollId:opposedCheckRollKey(check,target),actorId:target.id,skill:targetOption.skill,mode:targetMode});throw new Dnd5eFormulaEvaluationError(`missing opposed d20 result: ${key}`)}
+    const rawOpposedD20 = selectedD20(settleActivityAbilityOriginalDice({activityId:input.activity.id,checkId:key,rollId:opposedCheckRollKey(check,target),actorId:target.id,skill:targetOption.skill,mode:targetMode,values:opposedRoll.values}),targetMode)
+    const sourceD20 = abilityCheckD20(input.actor, dnd5eOpposedCheckSourceAbility(check.sourceAbility, input.actor), dnd5eOpposedSourceSkill(check), rawD20)
+    const targetD20 = abilityCheckD20(target, targetOption.ability, targetOption.skill, rawOpposedD20)
+    const d20 = sourceD20.d20, opposedD20 = targetD20.d20
     const opposedModifier = (targetOption.skill
       ? target.skillCheckModifiers?.[targetOption.skill] ??
         target.abilityCheckModifiers?.[targetOption.ability] ??
@@ -1415,7 +1491,8 @@ function resolveCheck(
       key, kind: check.kind, checkId: check.id, targetId: target.id, ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, input.actor),
       skill: dnd5eOpposedSourceSkill(check),
       rollMode: sourceMode,
-      d20, modifier: sourceModifier, total, success: total > opposedTotal || (total === opposedTotal && check.tiesFavor === 'source'),
+      d20, rawD20, reliableTalentApplied: sourceD20.reliableTalentApplied,
+      rawOpposedD20, opposedReliableTalentApplied: targetD20.reliableTalentApplied, modifier: sourceModifier, total, success: total > opposedTotal || (total === opposedTotal && check.tiesFavor === 'source'),
       criticalSuccess: false, criticalFailure: false,
       opposedD20, opposedModifier, opposedTotal,
       opposedAbility: targetOption.ability, opposedSkill: targetOption.skill,
@@ -1464,17 +1541,27 @@ function resolveCheck(
     ? 'normal'
     : modes[0] ?? 'normal')
   const roll = input.rolls[checkRollKey(check, target)]
-  if (!roll && !immuneSuccess && !declaredFailure) throw new Dnd5eFormulaEvaluationError(`missing d20 result: ${key}`)
-  const mode = immuneSuccess || declaredFailure ? originalMode : activityD20Mode(input, {
+  if (!roll && !immuneSuccess && !declaredFailure){
+    if(check.kind==='attack-roll'&&target)visitActivityAttackOriginalMissing({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,targetId:target.id,mode:activityD20Mode(input,{rollId:checkRollKey(check,target),rollerId:input.actor.id,kind:'attack',mode:originalMode})})
+    if(check.kind==='saving-throw'&&target)visitActivitySavingOriginalMissing({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),sourceActorId:input.actor.id,actorId:target.id,ability:selectedSavingThrowAbility(target,check.ability,check.abilityOptions),mode:activityD20Mode(input,{rollId:checkRollKey(check,target),rollerId:target.id,kind:'saving-throw',mode:originalMode})})
+    if(check.kind==='ability-check'||check.kind==='skill-check')visitActivityAbilityOriginalMissing({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,skill:check.kind==='skill-check'?check.skill:undefined,mode:activityD20Mode(input,{rollId:checkRollKey(check,target),rollerId:input.actor.id,kind:'ability-check',mode:originalMode})})
+    throw new Dnd5eFormulaEvaluationError(`missing d20 result: ${key}`)
+  }
+  const failedOverride=check.kind==='attack-roll'?failedD20ActivityAdjustment(key):undefined
+  const masterOverride=masterDuelistActivityOverride(key)
+  const mode = masterOverride?.mode ?? (immuneSuccess || declaredFailure ? originalMode : activityD20Mode(input, {
     rollId: checkRollKey(check, target), rollerId: check.kind === 'saving-throw' ? target!.id : input.actor.id,
     kind: check.kind === 'attack-roll' ? 'attack' : check.kind === 'saving-throw' || check.kind === 'concentration-check' ? 'saving-throw' : 'ability-check',
     mode: originalMode,
-  })
+  }))
   // Automatic saves have no die; the automatic outcome carries the result.
-  const d20 = immuneSuccess || declaredFailure ? 0 : selectedD20(roll!.values, mode)
+  const rawD20 = immuneSuccess || declaredFailure ? 0 : selectedD20(check.kind==='ability-check'||check.kind==='skill-check'?settleActivityAbilityOriginalDice({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,skill:check.kind==='skill-check'?check.skill:undefined,mode,values:roll!.values}):check.kind==='saving-throw'&&target?settleActivitySavingOriginalDice({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),sourceActorId:input.actor.id,actorId:target.id,ability:selectedSavingThrowAbility(target,check.ability,check.abilityOptions),mode,values:roll!.values}):check.kind==='attack-roll'&&target?settleActivityAttackOriginalDice({activityId:input.activity.id,checkId:key,rollId:checkRollKey(check,target),actorId:input.actor.id,targetId:target.id,mode,values:roll!.values}):roll!.values, mode)
+  const abilityD20 = check.kind === 'ability-check' || check.kind === 'skill-check'
+    ? abilityCheckD20(input.actor, check.ability, check.kind === 'skill-check' ? check.skill : undefined, rawD20) : undefined
+  const d20 = abilityD20?.d20 ?? rawD20
   let modifier: number
-  let dc: number
-  let success: boolean
+  let dc: number | undefined
+  let success: boolean | undefined
   let automaticSuccess = false
   let automaticFailure = false
   let attackCritical = false
@@ -1482,14 +1569,15 @@ function resolveCheck(
   if (check.kind === 'attack-roll') {
     if (!target) throw new Dnd5eFormulaEvaluationError(`attack target is unavailable: ${key}`)
     modifier = evaluateDnd5eFormulaV1(check.attackBonus, formulaContext(input, target)) +
-      (input.actor.d20RollModifier ?? 0) + consumeDnd5eRollDiceModifier(input.actor.id, input.actor.rollDiceEffects, 'attack', dnd5eRollDiceCheckSlot(input.activity.id, key, 'source'))
+      (input.actor.d20RollModifier ?? 0) + consumeDnd5eRollDiceModifier(input.actor.id, input.actor.rollDiceEffects, 'attack', dnd5eRollDiceCheckSlot(input.activity.id, key, 'source')) + (failedOverride?.amount??0)
     const attackMode = (check.attackType === 'spell' || (check.attackType == null && input.activity.legacySource?.kind === 'spell')) ? 'spell' : check.delivery ?? 'default'
-    dc = target.attackArmorClasses?.[attackMode] ?? target.armorClass
+    dc = failedOverride?.armorClass ?? target.attackArmorClasses?.[attackMode] ?? target.armorClass
     const outcome = resolveDnd5eAttackRollOutcome({ roll: { d20, total: d20 + modifier, naturalOne: d20 === 1, naturalTwenty: d20 === 20 },
       targetArmorClass: dc, criticalThreshold: Math.min(check.criticalThreshold ?? 20, target.criticalThresholdAgainstSource ?? 20) })
     success = outcome.hit
     attackCritical = outcome.critical && !input.cancelledCriticalCheckKeys?.has(key)
-    if (input.forcedAttackMissCheckKeys?.has(key)) success = false
+    if (input.forcedAttackMissCheckKeys?.has(key)||masterDuelistActivityForcedMiss(key)||failedOverride?.hit===false) success = false
+    if(failedOverride?.hit===false)attackCritical=false
   } else if (check.kind === 'saving-throw') {
     if (!target) throw new Dnd5eFormulaEvaluationError(`saving throw target is unavailable: ${key}`)
     resolvedAbility = selectedSavingThrowAbility(target, check.ability, check.abilityOptions)
@@ -1516,12 +1604,13 @@ function resolveCheck(
       : input.actor.abilityCheckModifiers?.[check.ability]) ??
       Math.floor((input.actor.abilities[check.ability] - 10) / 2)) +
       (input.actor.d20RollModifier ?? 0)
-    dc = evaluateDnd5eFormulaV1(check.dc, formulaContext(input, target))
+    dc = check.kind === 'skill-check' && check.reportTotalOnly ? undefined
+      : evaluateDnd5eFormulaV1(check.dc!, formulaContext(input, target))
     modifier += consumeDnd5eRollDiceModifier(input.actor.id, input.actor.rollDiceEffects,
       check.kind === 'concentration-check' ? 'concentration-save' : 'ability-check', dnd5eRollDiceCheckSlot(input.activity.id, key, 'source'))
-    success = d20 + modifier >= dc
+    success = dc == null ? undefined : d20 + modifier >= dc
   }
-  return {
+  const result: Dnd5eActivityCheckResult = {
     key, kind: check.kind,
     attackDelivery: check.kind === 'attack-roll' ? check.delivery : undefined,
     attackType: check.kind === 'attack-roll' ? check.attackType ?? 'spell' : undefined,
@@ -1531,6 +1620,8 @@ function resolveCheck(
     skill: check.kind === 'skill-check' ? check.skill : undefined,
     rollMode: mode,
     d20,
+    rawD20,
+    reliableTalentApplied: abilityD20?.reliableTalentApplied,
     modifier,
     total: d20 + modifier,
     dc,
@@ -1541,11 +1632,13 @@ function resolveCheck(
       : automaticFailure
         ? sourceCharmFailure ? 'source-charm-failure' : 'allied-unresisted-failure'
         : undefined,
-    criticalSuccess: !automaticSuccess && !automaticFailure &&
+    criticalSuccess: success != null && !automaticSuccess && !automaticFailure &&
       !(check.kind === 'attack-roll' && input.forcedAttackMissCheckKeys?.has(key)) &&
       (check.kind === 'attack-roll' ? attackCritical : d20 >= 20),
-    criticalFailure: !automaticSuccess && !automaticFailure && d20 === 1,
+    criticalFailure: success != null && !automaticSuccess && !automaticFailure && d20 === 1,
   }
+  if(check.kind==='attack-roll')recordMasterDuelistActivityMode(result,masterOverride??masterDuelistNativeModeAfterOverride(masterResolveRollMode({advantage:modes.filter(m=>m==='advantage').map((_,i)=>({active:true,reason:'activity-advantage:'+i})),disadvantage:modes.filter(m=>m==='disadvantage').map((_,i)=>({active:true,reason:'activity-disadvantage:'+i}))}),mode))
+  return result
 }
 
 function operationTargets(
@@ -1581,6 +1674,9 @@ function evaluateAmount(
   diceAudit?: Dnd5eFormulaDiceEvidenceV1[],
   damageRollBonus?: (rollId: string) => number,
   sharedCriticalDice?: Readonly<Record<string, number>>,
+  spellDamageType?: import('../damageTypes').Dnd5eDamageType,
+  spellDamageAttribution?:'actor'|'grant-source',
+  masterDuelistDamage=false,
 ): number {
   const multipliers = critical && doubleDice
     ? Object.fromEntries(formulaDiceRollIds(formula).map((rollId) => [rollId, 2]))
@@ -1600,7 +1696,7 @@ function evaluateAmount(
       minimums,
       maximizeDice ? formulaDiceRollIds(formula) : undefined,
       { ...maximumMultipliers, ...sharedCriticalDice },
-    ), damageRollBonus, onDiceEvaluated: diceAudit ? evidence => diceAudit.push(evidence) : undefined },
+    ), ...(masterDuelistDamage&&target?{masterDuelistDamageTargetId:target.id,failedD20DamageTargetId:target.id}:{}), ...(spellDamageType&&input.activity.legacySource?.kind==='spell'?{transformSpellDamageDice:(group:{id:string;sides:number;rolls:readonly number[]},uses:readonly import('../spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[])=>applyDnd5eSpellDamageDieRerolls({pluginFeatureIds:[...(input.resolveSpellDamageFeatureIds?.(target?.id??input.actor.id,spellDamageAttribution)??input.actor.pluginFeatureIds??[])]},[{...group,damageType:spellDamageType}],uses).get(group.id)!}:{}), damageRollBonus, onDiceEvaluated: diceAudit ? evidence => diceAudit.push(evidence) : undefined },
   )))
 }
 
@@ -1690,8 +1786,8 @@ function outcomeConditionApplies(
       (condition.maximum == null || check.total <= condition.maximum)
   }
   return !!check && (
-    (condition.result === 'success' && check.success) ||
-    (condition.result === 'failure' && !check.success) ||
+    (condition.result === 'success' && check.success === true) ||
+    (condition.result === 'failure' && check.success === false) ||
     (condition.result === 'critical-success' && check.criticalSuccess) ||
     (condition.result === 'critical-failure' && check.criticalFailure)
   )
@@ -1814,6 +1910,8 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
       base.speedAfterOwnTurnWeaponAttackActionOnly = modifier.attackActionOnly
     } else if (modifier.kind === 'prevent-movement-opportunity-attacks') {
       base.preventMovementOpportunityAttacks = true
+    } else if (modifier.kind === 'notify-source-on-bearer-death') {
+      base.notifySourceOnBearerDeath = true
     } else if (modifier.kind === 'damage-rolls-by-source-bonus') {
       base.damageRollsBySourceBonus = Math.min(1000, Math.max(-1000, Math.floor(evaluateDnd5eFormulaV1(modifier.value, evaluationContext))))
     } else if (modifier.kind === 'attacks-by-source-critical-threshold') {
@@ -1831,6 +1929,7 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
     } else if (modifier.kind === 'mandatory-opportunity-attacks') {
       base.mandatoryOpportunityAttacks = true
     } else if (modifier.kind === 'attack-target-lock') {
+      base.opportunityAttacksOnlyAgainstSource = modifier.opportunityAttacksOnlyAgainstSource
       base.attackDisadvantageAgainstOthersThanSource = true
       base.attackDisadvantageAgainstOthersThanSourceRangeFeet = modifier.sourceRangeFeet
       base.notifySourceOnBearerDamage = modifier.notifySourceOnDamage
@@ -1917,6 +2016,22 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
           leavesTracks: modifier.leavesTracks,
         },
       ]
+    } else if (modifier.kind === 'sneak-attack-target') {
+      if (input.selectedCreatureIds?.length !== 1 || !input.selectedCreatureIds[0]) {
+        throw new Dnd5eFormulaEvaluationError('sneak-attack-target requires exactly one selected creature')
+      }
+      base.sneakAttackTarget = {
+        targetId: input.selectedCreatureIds[0],
+        ...(modifier.bonusDice ? { bonusDice: { ...modifier.bonusDice } } : {}),
+      }
+    } else if (modifier.kind === 'minimum-skill-check-d20') {
+      base.minimumSkillCheckD20 = [...(base.minimumSkillCheckD20 ?? []), {
+        ability: modifier.ability, skill: modifier.skill, purpose: modifier.purpose, minimum: modifier.minimum,
+      }]
+    } else if (modifier.kind === 'half-speed-skill-check-advantage') {
+      base.skillCheckAdvantagesWithinHalfSpeed = [...(base.skillCheckAdvantagesWithinHalfSpeed ?? []), {
+        ability: modifier.ability, skill: modifier.skill,
+      }]
     } else if (modifier.kind === 'minimum-ability-check-d20') {
       base.minimumAbilityCheckD20ByAbility = {
         ...base.minimumAbilityCheckD20ByAbility,
@@ -2005,6 +2120,8 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
       base.climbSpeedEqualsWalking = modifier.mode === 'walking-speed'
     } else if (modifier.kind === 'sight-range-limit') {
       base.sightRangeLimitFeet = Math.min(base.sightRangeLimitFeet ?? Infinity, modifier.rangeFeet)
+    } else if (modifier.kind === 'through-solid-objects-sight') {
+      base.throughSolidObjectsRangeFeet = Math.max(base.throughSolidObjectsRangeFeet ?? 0, modifier.rangeFeet)
     } else if (modifier.kind === 'truesight') {
       base.truesightRangeFeet = Math.max(base.truesightRangeFeet ?? 0, modifier.rangeFeet)
       base.seeInvisible = true
@@ -2146,6 +2263,8 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
         suppressCrossPlaneEffects: true,
         unrestrictedVerticalMovement: modifier.unrestrictedVerticalMovement,
       }
+    } else if (modifier.kind === 'object-creature-traversal') {
+      base.objectCreatureTraversal = { difficultTerrain: true, endOwnTurnInsideObjectDamage: { amount: 5, type: 'force' } }
     } else if (modifier.kind === 'solid-material-traversal') {
       base.solidMaterialTraversal = { materials: [...modifier.materials], endInside: modifier.endInside }
     } else if (modifier.kind === 'source-location-awareness') {
@@ -2211,6 +2330,10 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
           damageTypeOverride: modifier.damageTypeOverride,
         },
       ]
+    } else if (modifier.kind === 'bound-weapon-ability') {
+      const selected=input.selectedInventoryItem
+      if(!selected || selected.kind!=='weapon' || selected.ownerActorId!==target.id || target.id!==input.actor.id || selected.proficient!==true || selected.weaponProperties?.includes('two-handed')) throw new Dnd5eFormulaEvaluationError('bound weapon ability requires own proficient non-two-handed inventory weapon')
+      base.boundWeaponAbility={weaponId:selected.weaponId??selected.itemId,inventoryInstanceId:selected.inventoryInstanceId,ability:modifier.ability}
     } else if (modifier.kind === 'weapon-enchantment') {
       const selected = input.selectedInventoryItem
       if (modifier.weaponSlot === 'inventory-item' && (!selected || selected.kind !== 'weapon' || selected.ownerActorId !== target.id)) throw new Dnd5eFormulaEvaluationError('weapon-enchantment requires an authorized inventory weapon')
@@ -2248,6 +2371,7 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
         weaponIds: ammunitionContainer?.weaponIds,
         remainingAttacks,
         attackAndDamageBonus,
+        attackBonusOnly:modifier.attackBonusOnly,
         spellcastingFocusClassIds: modifier.spellcastingFocusClassIds ? [...modifier.spellcastingFocusClassIds] : undefined,
         bonusDamage: modifier.bonusDamage ? { ...modifier.bonusDamage } : undefined,
       }
@@ -2290,6 +2414,7 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
       ), ...resistanceGroups]
   return {
     effectId: effect.id,
+    darkvisionIfAbsentAtActivationFeet: Math.max(0, ...(effect.modifiers ?? []).flatMap(modifier => modifier.kind === 'through-solid-objects-sight' && modifier.grantDarkvisionIfAbsentAtActivation ? [modifier.rangeFeet] : [])) || undefined,
     name: effect.name,
     disposition: effect.disposition,
     tags: effect.tags ? [...effect.tags] : undefined,
@@ -2297,6 +2422,7 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
     grantedActivitiesSingleUse: effect.grantsSingleUse,
     grantedActivityCharges,
     captureInitialSpace: effect.captureInitialSpace,
+    captureExecutionIdentity: effect.captureExecutionIdentity,
     completionGrant: effect.completionGrant ? { ...effect.completionGrant, activityIds: [...effect.completionGrant.activityIds] } : undefined,
     duration: effect.duration.kind === 'save-ends'
       ? {
@@ -2357,6 +2483,7 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
           ))),
           onDamage: {
             mode: effect.repeatSaveOnDamage.mode,
+            ...(effect.repeatSaveOnDamage.optional === true ? { optional: true as const } : {}),
             ...(effect.repeatSaveOnDamage.sourceFilter
               ? { sourceFilter: effect.repeatSaveOnDamage.sourceFilter }
               : {}),
@@ -2500,6 +2627,7 @@ function operationProposals(
   if (operation.kind === 'secondary-weapon-damage') return [{kind:'select-secondary-weapon-damage',operationId:operation.id,
     damageOperationId:operation.damageOperationId,rangeFeet:operation.rangeFeet,requiresLineOfSight:operation.requiresLineOfSight}]
   if (operation.kind === 'manual-adjudication') {
+    if(operation.purpose==='magical-truth-detection')return operationTargets('target',input,currentTarget).map(target=>({kind:'request-dm-adjudication' as const,operationId:operation.id,prompt:operation.prompt,reason:operation.reason,purpose:operation.purpose,targetId:target.id}))
     return [{ kind: 'request-dm-adjudication', operationId: operation.id, prompt: operation.prompt, reason: operation.reason }]
   }
   if (operation.kind === 'narrative-prompt') return [{ kind: 'narrative-prompt', operationId: operation.id, prompt: operation.prompt }]
@@ -2521,6 +2649,9 @@ function operationProposals(
   if(operation.kind==='dismiss-owned-temporary-summons')return [{kind:operation.kind,operationId:operation.id,sourceActivityIds:[...operation.sourceActivityIds]}]
   if(operation.kind==='dismiss-owned-summon')return [{kind:'dismiss-owned-summon',operationId:operation.id,bondKey:operation.bondKey,releaseBond:operation.releaseBond}]
   if (operation.kind === 'summon') {
+    const illOmenLevel=operation.illOmenHound ? input.actor.classLevels?.sorcerer : undefined
+    if(operation.illOmenHound && (!currentTarget || !Number.isInteger(illOmenLevel) || illOmenLevel!<6 || illOmenLevel!>20))throw new Dnd5eFormulaEvaluationError('Actual chosen creature and Sorcerer6 source required')
+    if(operation.placementOrigin==='killed-target'&&(!currentTarget||currentTarget.currentHp!==0||input.triggerContext?.event!=='creature-killed'||!input.triggerContext.eligibleActorIds.includes(input.actor.id)||!input.triggerContext.eligibleTargetIds.includes(currentTarget.id)))throw new Dnd5eFormulaEvaluationError('A Host-bound creature killed by this actor is required')
     let understoodLanguage = operation.understandsCasterLanguage ? input.actor.languages?.[0] : undefined
     if (operation.languageChoiceId) {
       const choice = input.activity.choices?.find(choice => choice.id === operation.languageChoiceId && choice.optionsFrom === 'actor-languages')
@@ -2548,7 +2679,7 @@ function operationProposals(
       spellEffectSourceId: operation.spellEffectSourceId,
       placementRangeFeet: operation.placementRangeFeet,
       requiresVisiblePlacement: operation.requiresVisiblePlacement,
-      bondKey:operation.bondKey,bondDismissActivityId:operation.bondDismissActivityId,
+      bondKey:operation.bondKey,endsOnSourceLongRest:operation.endsOnSourceLongRest,bondDismissActivityId:operation.bondDismissActivityId,
       existingBondPolicy: operation.existingBondPolicy,
       exclusiveBondKeys: operation.exclusiveBondKeys,
       bondActivityIds:operation.bondActivityIds,
@@ -2563,6 +2694,8 @@ function operationProposals(
       requiredMonsterMaterialTagPrefix:operation.requiredMonsterMaterialTagPrefix,
       objectTokenId:operation.animatedObjectSize ? currentTarget!.id : undefined,
       animatedObjectSize:operation.animatedObjectSize,
+      killedCreatureOriginId:operation.placementOrigin==='killed-target'?currentTarget!.id:undefined,
+      illOmenTarget:operation.illOmenHound ? {targetTokenId:currentTarget!.id,...(currentTarget!.characterId?{targetCharacterId:currentTarget!.characterId}:{})} : undefined,
       corpseTokenId:operation.corpseFormChoiceId || operation.afterDamageKillOperationId ? currentTarget!.id : undefined,
       afterDamageKillOperationId: operation.afterDamageKillOperationId,
       explorationDelaySeconds: operation.explorationDelaySeconds,
@@ -2577,6 +2710,8 @@ function operationProposals(
       concentration: operation.concentration, side: operation.side, persistent: operation.persistent,
       persistAfterConcentrationCompletes: operation.persistAfterConcentrationCompletes,
       becomesHostileAfterConcentrationEnds: operation.becomesHostileAfterConcentrationEnds,
+      temporaryHitPoints: operation.illOmenHound ? Math.floor(illOmenLevel!/2) : operation.temporaryHitPoints == null ? undefined
+        : evaluateAmount(operation.temporaryHitPoints, input, input.actor, false, false),
       minimumMaximumHitPoints: operation.minimumMaximumHitPoints == null ? undefined
         : Math.max(1, evaluateAmount(operation.minimumMaximumHitPoints, input, input.actor, false, false)),
       armorClassBonus: operation.armorClassBonus == null ? undefined
@@ -3232,6 +3367,8 @@ function operationProposals(
     available: operation.available,
     requiredTargetId: operation.bindTriggerTarget ? boundTargetIds![0] : undefined,
     attackAdvantage: operation.attackAdvantage,
+    additionalSneakAttackDifferentTarget: operation.additionalSneakAttackDifferentTarget,
+    allowUnarmedStrikes: operation.allowUnarmedStrikes,
     attackResourceCost: operation.attackResourceCost ? { ...operation.attackResourceCost } : undefined,
     operationId: operation.id,
     grantId: operation.separateByTarget && operation.available === 'next-own-turn' ? `${targetGrantId}:pending` : targetGrantId,
@@ -3267,6 +3404,9 @@ function operationProposals(
   }
   return operationTargets(operation.target, input, currentTarget).map((target):
     Dnd5eActivityCapabilityProposal | Dnd5eActivityCapabilityProposal[] => {
+    if (operation.kind === 'weapon-hit-banishment') {
+      return {kind:'weapon-hit-banishment',operationId:operation.id,targetId:target.id,maximumHitPoints:50}
+    }
     if (operation.kind === 'damage') {
       const critical = criticalForTarget(target)
       const damageType = operationDamageType(operation,input)
@@ -3290,6 +3430,7 @@ function operationProposals(
           input.consumedDamageRollBonusKeys?.add(key)
           return input.resolveDamageRollBonus?.(target.id, operation.damageSource) ?? 0
         },
+        undefined,damageType,operation.damageSource,true,
       )
       const damageEvidence = diceAudit.length ? { diceAudit, formulaAdjustment: baseAmount - diceAudit.reduce((sum, die) => sum + die.values.reduce((a, b) => a + b, 0), 0) } : {}
       if (
@@ -3353,8 +3494,9 @@ function operationProposals(
       const maximizeDice = recipient.maximizeHealingDice === true ||
         (input.actor.maximizeSpellHealingDiceAtZeroHp === true &&
           input.activity.legacySource?.kind === 'spell' && recipient.currentHp === 0)
-      const amount = evaluateAmount(operation.amount, input, target, false, false, 1, maximizeDice)
-      const diceAudit = formulaDiceAudit(operation.amount, input, maximizeDice)
+      const healingInput = (input.activity.legacySource?.kind === 'spell' || input.activity.spellInvocation?.operationIds.includes(operation.id)) && input.healingRolls ? {...input,rolls:{...input.rolls,...input.healingRolls}} : input
+      const amount = evaluateAmount(operation.amount, healingInput, target, false, false, 1, maximizeDice)
+      const diceAudit = formulaDiceAudit(operation.amount, healingInput, maximizeDice)
       const displayedDiceTotal = diceAudit.reduce((total, die) =>
         total + die.values.reduce((sum, value) => sum + value, 0), 0)
       return {
@@ -3386,6 +3528,7 @@ function operationProposals(
     }
     if (operation.kind === 'reveal-target-location') return { kind: 'reveal-target-location', operationId: operation.id, targetId: target.id }
     if (operation.kind === 'read-damage-traits') return { kind: 'read-damage-traits', operationId: operation.id, targetId: target.id }
+    if (operation.kind === 'read-sensory-deception') return { kind: 'read-sensory-deception', operationId: operation.id, targetId: input.actor.id, rangeFeet: 30 }
     if (operation.kind === 'detect-planar-portal') return { kind: 'detect-planar-portal', operationId: operation.id, targetId: input.actor.id, rangeFeet: operation.rangeFeet }
     if (operation.kind === 'temporary-hit-points') return {
       kind: 'grant-temporary-hit-points', operationId: operation.id, targetId: target.id,
@@ -3398,7 +3541,7 @@ function operationProposals(
     }
     if (operation.kind === 'apply-standard-condition') return {
       kind: 'apply-standard-condition', operationId: operation.id, targetId: target.id,
-      condition: operation.condition, duration: resolveEffectDuration(operation.duration, input, target),
+      condition: operation.condition, sleep: operation.sleep, duration: resolveEffectDuration(operation.duration, input, target),
     }
     if (operation.kind === 'apply-effect') {
       if (operation.captureTargetIdentity && (operation.target !== 'actor' || input.targets.length !== 1)) {
@@ -3467,6 +3610,8 @@ function operationProposals(
       maximumDistanceFromActorFeet: operation.maximumDistanceFromActorFeet,
       requiresDifferentDestination: operation.requiresDifferentDestination,
       destinationPolicy: operation.destinationPolicy,
+      selectedTargetRadiusFeet: operation.selectedTargetRadiusFeet,
+      selectedTargetIds: operation.selectedTargetRadiusFeet == null ? undefined : [...input.movementAnchorTargetIds ?? input.targets.map(selected => selected.id)],
       continuationTargetRadiusFeet: operation.continuationTargetRadiusFeet,
       continuationTargetIds: operation.continuationTargetRadiusFeet == null ? undefined : [...input.continuationTargetIds ?? []],
       verticalDestination: operation.verticalDestination,
@@ -3515,6 +3660,15 @@ function operationProposals(
     if (operation.kind === 'detonate-granting-area' || operation.kind === 'dismiss-granting-area') return {
       kind: operation.kind, operationId: operation.id, actorId: input.actor.id,
     }
+    if (operation.kind === 'transfer-effect') return {
+      kind: 'transfer-effect', operationId: operation.id, targetId: target.id,
+      sourceSpellId: operation.sourceSpellId, tags: [...operation.tags], timing: operation.timing,
+    }
+    if(operation.kind==='transfer-owned-curse-on-bearer-death')return{
+      kind:operation.kind,operationId:operation.id,targetId:target.id,sourceActivityId:operation.sourceActivityId,
+      destinationId:input.choices?.[operation.destinationChoiceId]??'',
+    }
+    if(operation.kind==='heal-owned-curse-on-bearer-death')return{kind:operation.kind,operationId:operation.id,targetId:target.id,sourceActivityId:operation.sourceActivityId}
     if (operation.kind === 'remove-effect') return {
       kind: 'remove-effect', operationId: operation.id, targetId: target.id,
       effectId: operation.effectId, source: operation.source,
@@ -3568,12 +3722,15 @@ function operationProposals(
 }
 
 export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eActivityExecutionResult {
-  const definitionErrors = validateDnd5eActivityDefinitionV1(input.activity)
+  const interruptedOriginal=dnd5eInterruptedFeatureSpellOriginal(input.activity)
+  input={...input,activity:dnd5eActivityWithSoulThoughtPolicy(input.activity,input.targets)}
+  const definitionErrors = validateDnd5eActivityDefinitionV1(interruptedOriginal??input.activity)
   if (definitionErrors.length) return { ok: false, reason: 'invalid-definition', details: definitionErrors }
   if (input.featureSpellInvocationInterrupted) input = { ...input, activity: dnd5eInterruptedFeatureSpellActivity(input.activity) }
   try {
     input = { ...input, activity: materializeDnd5eEventWeaponDice(input.activity, input.triggerContext) }
   } catch (error) {
+    rethrowIncomingAttackRerollInterruption()
     return { ok: false, reason: 'trigger-mismatch', details: [error instanceof Error ? error.message : 'activity-trigger-weapon-dice-unavailable'] }
   }
   if (input.activity.scaling?.some(rule => rule.basis === 'ability-modifier' && !Number.isFinite(input.actor.abilities?.[rule.ability!]))) {
@@ -3584,6 +3741,7 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
   try {
     scaled.activity = materializeDnd5eEquipmentWeaponDamage(scaled.activity, input.equipmentWeaponDamage)
   } catch (error) {
+    rethrowIncomingAttackRerollInterruption()
     return { ok: false, reason: 'trigger-mismatch', details: [error instanceof Error ? error.message : 'activity-equipment-weapon-unavailable'] }
   }
   const baseActivity = dnd5eActivityLanguageChoicesV1(scaled.activity, input.actor.languages, input.actor.hitPointDice, input.combatants)
@@ -3611,6 +3769,7 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
   const executionInput: Dnd5eActivityExecutionInput = {
     ...input, activity,
     consumedDamageRollBonusKeys: new Set<string>(),
+    movementAnchorTargetIds: input.targets.map(target => target.id),
     choices: Object.keys(resolvedChoices).length > 0 ? resolvedChoices : input.choices,
   }
   if (!input.actor.id || input.actor.level < 1 || input.actor.armorClass < 0) {
@@ -3647,7 +3806,8 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
   if (animatesSelectedObjects && input.targets.some(target => target.objectDamageThreshold == null)) {
     return { ok: false, reason: 'invalid-target', details: ['Object animation requires object targets'] }
   }
-  if (input.targets.some(target => target.objectDamageThreshold != null) && !animatesSelectedObjects &&
+  const objectSpellRider=activity.target.kind==='creature'&&activity.target.allowObjectSpellDamage===true&&activity.target.count===1&&activity.target.relation==='any'&&!activity.checks?.length&&input.triggerContext?.event==='damage-dealt'&&input.triggerContext.source.kind==='spell'&&input.triggerContext.source.castingClassId!=null&&(input.triggerContext.source.damage?.amount??0)>0&&input.targets.every(t=>input.triggerContext!.eligibleTargetIds.includes(t.id))&&activity.outcomes.length>0&&activity.outcomes.every(o=>o.operations.length>0&&o.operations.every(op=>op.kind==='damage'&&op.target==='target'))
+  if (input.targets.some(target => target.objectDamageThreshold != null) && !animatesSelectedObjects && !objectSpellRider &&
       !(activity.target.kind === 'creature' && activity.target.allowObjectAttack === true && activity.target.count === 1 &&
         activity.target.relation === 'any' && activity.checks?.length === 1 && activity.checks[0].kind === 'attack-roll' &&
         activity.outcomes.every(outcome => outcome.operations.every(operation => operation.kind === 'damage' && operation.target === 'target')))) {
@@ -3687,7 +3847,7 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
         }
       }
     }
-    if (input.targets.length < (activity.target.minimumCount ?? 1) || input.targets.length > activity.target.count) {
+    if (input.targets.length < (activity.target.minimumCount ?? 1) || input.targets.length > dnd5eAbilityTargetMaximum(activity.target.count,activity.target.maximumCountAbilityModifier,input.actor.abilities)) {
       return { ok: false, reason: 'invalid-target', details: ['target count is invalid'] }
     }
     for (const target of input.targets) {
@@ -3833,6 +3993,7 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
       }
     }
   } catch (error) {
+    rethrowIncomingAttackRerollInterruption()
     return { ok: false, reason: 'requirement-failed', details: [error instanceof Error ? error.message : String(error)] }
   }
   const automation = dnd5eActivityAutomationAnalysisV1(activity).capability
@@ -3869,7 +4030,12 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
           (!divineWordActivity || target.canHearActivitySource !== false) &&
           (!fleshToStoneActivity || dnd5eFleshToStoneTargetHasFlesh(target)) &&
           (!fireStormSparesPlants || !isPlantCreature(target)))
-      : applicableTargets
+      : activity.legacySource?.magical === true
+        // Explicitly magical features are suppressed by antimagic, while
+        // spell-level wards only affect actual spells. Keep original targets
+        // above for ownership, selection, range, and cost validation.
+        ? applicableTargets.filter(target => target.magicSuppressed !== true)
+        : applicableTargets
     const resolutionInput = resolutionTargets === input.targets
       ? executionInput
       : { ...executionInput, targets: resolutionTargets }
@@ -4148,6 +4314,7 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
       areaInstance,
     }
   } catch (error) {
+    rethrowIncomingAttackRerollInterruption()
     return {
       ok: false,
       reason: 'invalid-rolls',
@@ -4155,4 +4322,3 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
     }
   }
 }
-

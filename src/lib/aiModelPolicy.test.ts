@@ -8,16 +8,22 @@ import {
 } from '../../shared/ai-model-policy.mjs'
 
 describe('统一 AI 模型与积分策略', () => {
-  it('仅 PDF 综合使用 Sol，其他文本任务统一使用 Luna', () => {
-    expect(fixedBridgeModelIdForTask('pdf-extraction')).toBe('external:extraction:gpt-5.6-luna')
+  it('PDF 综合保留 5.6 Sol，原 Luna 文本任务使用 6.1 Sol', () => {
+    expect(fixedBridgeModelIdForTask('pdf-extraction')).toBe('external:extraction:gpt-6.1-sol')
     expect(fixedBridgeModelIdForTask('campaign-analysis', 'pdf-synthesis')).toBe('external:synthesis:gpt-5.6-sol')
-    expect(fixedBridgeModelIdForTask('resource-structuring')).toBe('external:gpt-5.6-luna')
-    expect(fixedBridgeModelIdForTask('map-analysis')).toBe('external:gpt-5.6-luna')
-    expect(bridgeModelId('general', AI_MODEL_POLICY.generalModelId)).toBe('external:gpt-5.6-luna')
+    expect(fixedBridgeModelIdForTask('resource-structuring')).toBe('external:gpt-6.1-sol')
+    expect(fixedBridgeModelIdForTask('map-analysis')).toBe('external:gpt-6.1-sol')
+    expect(bridgeModelId('general', AI_MODEL_POLICY.generalModelId)).toBe('external:gpt-6.1-sol')
   })
 
   it('按保守倍率估算，并把 1300 分预留到 1500 分', () => {
     expect(reserveCredits(1_300)).toBe(1_500)
+    expect(textCredits({
+      modelId: 'external:gpt-6.1-sol',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      conservative: false,
+    })).toBe(34_000)
     expect(textCredits({
       modelId: 'external:gpt-5.6-luna',
       inputTokens: 1_000_000,

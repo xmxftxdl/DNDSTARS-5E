@@ -1,3 +1,5 @@
+import {dnd5eInherentFeatureFlightEffects} from './inherentFeatureFlight'
+import { dnd5ePassiveSkillCheckEffects } from './passiveSkillCheckEffects'
 import { dnd5eInherentFeatureLightEffects } from './inherentFeatureLight'
 import { dnd5eExhaustionState, dnd5eSourcedExhaustionLevel } from './sourcedExhaustion'
 import type { ResourceRestRecovery } from '../../lib/resourceRestRecovery'
@@ -173,6 +175,7 @@ export interface Dnd5eCharacter {
   redirectMountedCreatureAttacksToRider?: boolean
   grantMountedCreatureDexterityEvasion?: boolean
   ignoreRangedWeaponCoverBonus?: boolean
+  isolatedTargetSneakAttack?: boolean
   preventOpportunityAttacksFromMeleeAttackTargets?: boolean
   opportunityAttacksIgnoreDisengage?: boolean
   opportunityAttackHitStopsMovement?: boolean
@@ -185,6 +188,8 @@ export interface Dnd5eCharacter {
   standFromProneMovementCostFeet?: number
   swimSpeedEqualsWalking?: boolean
   canBreatheWater?: boolean
+  doesNotRequireSleep?: boolean
+  cannotBeForcedToSleep?: boolean
   spellAttackRangeMultiplier?: number
   ignoreSpellAttackCoverBonus?: boolean
   retainHiddenOnRangedWeaponMiss?: boolean
@@ -257,13 +262,13 @@ function staticModifierEnabled(
   key: 'cannotBeSurprisedWhileConscious' | 'unseenAttackersDoNotGainAdvantage' | 'invisibleToDarkvision' |
     'ignoreLongRangeRangedWeaponDisadvantage' | 'ignoreNearbyHostileRangedAttackDisadvantage' |
     'ignoreLoadingWeaponProperty' | 'ignoreRangedWeaponCoverBonus' | 'ignoreMediumArmorStealthDisadvantage' |
-    'preventOpportunityAttacksFromMeleeAttackTargets' | 'ignoreDifficultTerrainWhileDashing' | 'grappleEscapeAdvantage' |
+    'isolatedTargetSneakAttack' | 'preventOpportunityAttacksFromMeleeAttackTargets' | 'ignoreDifficultTerrainWhileDashing' | 'grappleEscapeAdvantage' |
     'ignoreSpellAttackCoverBonus' | 'mountedMeleeAdvantageAgainstSmallerUnmounted' |
     'redirectMountedCreatureAttacksToRider' | 'grantMountedCreatureDexterityEvasion' |
     'opportunityAttacksIgnoreDisengage' | 'opportunityAttackHitStopsMovement' |
     'imposeConcentrationCheckDisadvantageOnDamage' | 'meleeWeaponDamageRerollOncePerTurn' |
     'shieldDexteritySaveBonusWhenSoleTarget' | 'shieldSuccessfulDexteritySaveNegatesDamage' |
-    'opportunityAttackSpellReplacement' | 'retainHiddenOnRangedWeaponMiss' | 'swimSpeedEqualsWalking' | 'canBreatheWater',
+    'opportunityAttackSpellReplacement' | 'retainHiddenOnRangedWeaponMiss' | 'swimSpeedEqualsWalking' | 'canBreatheWater' | 'doesNotRequireSleep' | 'cannotBeForcedToSleep',
 ): boolean {
   return modifiers.some((modifier) => modifier[key] === true)
 }
@@ -733,6 +738,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       'grantMountedCreatureDexterityEvasion',
     ),
     ignoreRangedWeaponCoverBonus: staticModifierEnabled(staticModifiers, 'ignoreRangedWeaponCoverBonus'),
+    isolatedTargetSneakAttack: staticModifierEnabled(staticModifiers,'isolatedTargetSneakAttack'),
     preventOpportunityAttacksFromMeleeAttackTargets: staticModifierEnabled(
       staticModifiers,
       'preventOpportunityAttacksFromMeleeAttackTargets',
@@ -769,6 +775,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     spellAttackRangeMultiplier: Math.max(1, staticModifierMaximum(staticModifiers, 'spellAttackRangeMultiplier')),
     swimSpeedEqualsWalking: staticModifierEnabled(staticModifiers, 'swimSpeedEqualsWalking'),
     canBreatheWater: staticModifierEnabled(staticModifiers, 'canBreatheWater'),
+    doesNotRequireSleep: staticModifierEnabled(staticModifiers, 'doesNotRequireSleep'),
+    cannotBeForcedToSleep: staticModifierEnabled(staticModifiers, 'cannotBeForcedToSleep'),
     ignoreSpellAttackCoverBonus: staticModifierEnabled(staticModifiers, 'ignoreSpellAttackCoverBonus'),
     retainHiddenOnRangedWeaponMiss: staticModifierEnabled(staticModifiers, 'retainHiddenOnRangedWeaponMiss'),
     conditionImmunities: [...new Set([
@@ -798,7 +806,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     classState: {
       ...character.dnd5eCombatState,
       exhaustionBaseMaxHp: exhaustionLevel >= 4 ? storedMaxHp : undefined,
-      activeEffects: dnd5eInherentFeatureLightEffects(character, dnd5eInventoryPassiveEffects(character)),
+      activeEffects: dnd5eInherentFeatureFlightEffects(character, dnd5ePassiveSkillCheckEffects(character, dnd5eInherentFeatureLightEffects(character, dnd5eInventoryPassiveEffects(character)))),
       wardingBondMaterialEquipped: wearingWardingBondRing,
       wardingBondParticipantCharacterId: character.id,
     },
@@ -934,6 +942,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     redirectMountedCreatureAttacksToRider: character.redirectMountedCreatureAttacksToRider,
     grantMountedCreatureDexterityEvasion: character.grantMountedCreatureDexterityEvasion,
     ignoreRangedWeaponCoverBonus: character.ignoreRangedWeaponCoverBonus,
+    isolatedTargetSneakAttack: character.isolatedTargetSneakAttack,
     preventOpportunityAttacksFromMeleeAttackTargets: character.preventOpportunityAttacksFromMeleeAttackTargets,
     opportunityAttacksIgnoreDisengage: character.opportunityAttacksIgnoreDisengage,
     opportunityAttackHitStopsMovement: character.opportunityAttackHitStopsMovement,
@@ -946,6 +955,8 @@ export function createCombatantFromDnd5eCharacter(input: {
     standFromProneMovementCostFeet: character.standFromProneMovementCostFeet,
     swimSpeedEqualsWalking: character.swimSpeedEqualsWalking,
     canBreatheWater: character.canBreatheWater,
+    doesNotRequireSleep: character.doesNotRequireSleep,
+    cannotBeForcedToSleep: character.cannotBeForcedToSleep,
     spellAttackRangeMultiplier: character.spellAttackRangeMultiplier,
     ignoreSpellAttackCoverBonus: character.ignoreSpellAttackCoverBonus,
     retainHiddenOnRangedWeaponMiss: character.retainHiddenOnRangedWeaponMiss,
@@ -978,6 +989,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     combatant.classState.concentrationTargetIds = [combatant.classState.huntersMarkTargetId]
     combatant.classState.concentrationRoundsRemaining = 600
   }
+  if(combatant.classState.sceneReactionSpent)combatant.turn.reactionAvailable=false
   hydrateDnd5eWildShapeCombatant(combatant)
   return { ...combatant, deathSaves: { ...character.deathSaves } }
 }

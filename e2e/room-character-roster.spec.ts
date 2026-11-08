@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { createCoreFighter } from './support/characterCreation'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const portBase = Math.max(1024, Number(process.env.STARS_E2E_PORT_BASE) || 6173)
+const DM = `http://127.0.0.1:${portBase}`
+const PLAYER = `http://127.0.0.1:${portBase + 1}`
 const SESSION_KEY = 'stars-room-session:v1'
 
 interface RoomMembershipResponse {

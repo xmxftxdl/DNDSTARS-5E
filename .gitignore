@@ -43,3 +43,6 @@ __pycache__/
 
 # Local automation diagnostics and temporary fixtures
 .codex-logs/
+
+# Generated test compiler cache
+.tmp-tests/

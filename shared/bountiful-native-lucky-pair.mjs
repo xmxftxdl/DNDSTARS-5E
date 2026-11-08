@@ -1,0 +1,6 @@
+const issuer=r=>!!r?.rawIssuer&&['dm','player'].includes(r.rawIssuer.mode)&&typeof r.rawIssuer.rollId==='string'&&r.rawIssuer.rollId.length>0&&Number.isSafeInteger(r.rawIssuer.cursor)&&r.rawIssuer.cursor>=1
+const pair=(a,b)=>issuer(a)&&issuer(b)&&a?.request?.nativeLucky===true&&b?.request?.nativeLucky===true&&a.request.originalRolls?.length===2&&b.request.originalRolls?.length===2&&a.request.actorId===b.request.actorId&&a.request.kind===b.request.kind&&a.request.skill===b.request.skill&&JSON.stringify(a.request.originalRolls)===JSON.stringify(b.request.originalRolls)&&['roomId','hostMemberId','mapId','combatId','parentId','effectTimestamp'].every(k=>a.identity?.[k]===b.identity?.[k])&&a.originalAdapterId===b.originalAdapterId&&a.rawIssuer?.mode===b.rawIssuer?.mode&&a.rawIssuer?.rollId===b.rawIssuer?.rollId&&a.rawIssuer?.cursor===b.rawIssuer?.cursor
+/** A denial-only check over authenticated current rows. It grants no source,
+ * actor control, receipt, dice, or world authority. Different actors/pools and
+ * Bountiful or other features never share this Halfling Lucky allowance. */
+export function earlierNativeLuckyUseInSamePair(rows,next){return Object.values(rows??{}).some(row=>row?.identity?.occurrence<next?.identity?.occurrence&&pair(row,next)&&(row.nativeLuckyDecision?.decision==='use'||row.rawReroll!=null||row.hostReroll!=null))}

@@ -1,6 +1,8 @@
+import {expireDnd5eRelentlessThrownObjects} from '../rulesets/dnd5e/relentlessThrownMapInventory'
 import { createCampaignTimeReconciliationRetry } from '../lib/campaignTimeReconciliationRetry'
 import { commitCampaignTimeCreatureProjection } from '../lib/campaignTimeCreatureCommit'
 import { commitCampaignEtherealReturns } from '../lib/campaignEtherealReturnCommit'
+import {commitCampaignBanishmentReturns,dnd5eBanishmentReturnRoomKey} from '../lib/campaignBanishmentReturnCommit'
 import { settleBrowserEtherealExpiry } from '../composition/browserEtherealExpiry'
 import { dnd5eActivePlanarPhase } from '../rulesets/dnd5e/activeEffects'
 import { commitDnd5eExplorationSummons } from '../rulesets/dnd5e/activities/dnd5eExplorationSummonCommit'
@@ -317,7 +319,8 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
     // Both stores are persisted locally. On a document reload they initially
     // contain old browser snapshots, so reconciling either one before both room
     // resources hydrate can overwrite newer authoritative character state.
-    const reconciliationKey = `${campaignTimeCharacterReconciliationKey(currentRoomId, clock)}:${dnd5eDreamContactRosterKey(characters)}`
+    const nativeReturnKey=dnd5eBanishmentReturnRoomKey(characters,maps)
+    const reconciliationKey = `${campaignTimeCharacterReconciliationKey(currentRoomId, clock)}:${dnd5eDreamContactRosterKey(characters)}:${nativeReturnKey}`
     const creatureTokenKey = `${currentRoomId}:${clock.worldMinute}:${maps
       .flatMap((map) => map.tokens)
       .filter((token) => !token.characterId && token.type !== 'obstacle')
@@ -343,6 +346,15 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
       creatureTokenReconciliationKeyRef.current = creatureTokenKey
       const scope = reconciliationScope.current
       void (async () => {
+        if(nativeReturnKey){
+          const changed=await commitCampaignBanishmentReturns({
+            loadResource:browserSharedRoomService.loadSharedResource,
+            saveResourcesAtomically:browserSharedRoomService.saveSharedResourcesAtomically,
+          },settleBrowserEtherealExpiry,()=>scope===reconciliationScope.current&&
+            (getRoomSession()?.roomId??'__local__')===currentRoomId)
+          if(scope!==reconciliationScope.current)return
+          if(changed)await Promise.all([useMapStore.getState().loadShared({force:true}),useCharacterStore.getState().loadShared({force:true})])
+        }
         if (useCharacterStore.getState().characters.some(character =>
           dnd5eActivePlanarPhase(character.dnd5eCombatState?.activeEffects).plane === 'ethereal')) {
           const changed = await commitCampaignEtherealReturns({
@@ -492,7 +504,7 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
         const groundMapStore = useMapStore.getState()
         let groundChanged = false
         for (const currentMap of groundMapStore.maps) {
-          const restored = expireDnd5eGroundInventoryAlterations(currentMap, useCharacterStore.getState().characters)
+          const restored = expireDnd5eRelentlessThrownObjects(expireDnd5eGroundInventoryAlterations(currentMap, useCharacterStore.getState().characters),useCharacterStore.getState().characters)
           if (restored === currentMap) continue
           groundMapStore.applyAuthorityMapUpdate(restored.id, { tokens: restored.tokens })
           groundChanged = true

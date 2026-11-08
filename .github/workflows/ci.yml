@@ -129,3 +129,33 @@ jobs:
 
       - name: PostgreSQL migration, campaign index and finance invariants
         run: npm run test:postgres
+
+  campaign-release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Campaign multiplayer regression
+        run: >-
+          npx playwright test
+          e2e/combat-authoritative-recovery.spec.ts
+          e2e/player-turn-handoff.spec.ts
+          e2e/map-character-hp-sync.spec.ts
+          e2e/room-character-roster.spec.ts
+          --reporter=line
+      - name: Upload campaign diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: campaign-e2e-diagnostics
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

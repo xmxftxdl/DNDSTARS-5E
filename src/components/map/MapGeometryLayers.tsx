@@ -1,3 +1,4 @@
+import {WALL_MATERIAL_STYLE, geometryWallMaterial} from './geometryWallPresentation'
 import { Circle, Group, Line, Rect, Text } from 'react-konva'
 import { projectControlledFlameLight } from '../../../shared/controlled-flame-state.mjs'
 import { geometryEntityDestroyed } from '../../../shared/map-geometry-durability.mjs'
@@ -13,35 +14,10 @@ import {
   type MapGeometryPoint,
   type MapGeometryState,
   type MapGeometryTool,
-  type MapGeometryWallMaterial,
 } from '../../lib/mapGeometry'
 import type { MapGeometryDiagnostics } from '../../lib/mapGeometryDiagnostics'
 import type { WallDetectionCandidate } from '../../lib/mapImageGeometryDetection'
 import { geometryEntityPoints } from './mapCanvasGeometryUtils'
-
-
-
-const WALL_MATERIAL_STYLE: Record<MapGeometryWallMaterial, { color: string; dash?: number[] }> = {
-  stone: { color: '#94a3b8' },
-  earth: { color: '#8b6f47' },
-  brick: { color: '#c2410c', dash: [12, 2] },
-  wood: { color: '#a16207', dash: [18, 4] },
-  metal: { color: '#cbd5e1', dash: [4, 2] },
-  natural: { color: '#22c55e', dash: [9, 5] },
-}
-
-
-
-function geometryWallMaterial(
-  geometry: MapGeometryState | undefined,
-  entity: MapGeometryEntity,
-): MapGeometryWallMaterial {
-  if (entity.kind === 'wall') return entity.material ?? 'stone'
-  if (entity.kind === 'door' || entity.kind === 'window') {
-    return geometry?.walls.find((wall) => wall.id === entity.parentWallId)?.material ?? 'stone'
-  }
-  return 'stone'
-}
 
 
 
@@ -125,6 +101,7 @@ export function MapGeometryLayer({
   selectedEntityId,
   inv,
   worldMinute = 0,
+  personalSolidSightPolygon = [],
   onSelect,
   onDelete,
   onPointsChange,
@@ -138,6 +115,7 @@ export function MapGeometryLayer({
   selectedEntityId: string | null
   inv: number
   worldMinute?: number
+  personalSolidSightPolygon?: readonly MapGeometryPoint[]
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
   onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -158,7 +136,7 @@ export function MapGeometryLayer({
     : allEntities
   const entityEditListening = editMode && (tool === 'select' || tool === 'delete')
   const matchingToolEditListening = editMode && tool !== 'delete'
-  return (
+  const contents = (
     <Group listening={entityEditListening || matchingToolEditListening || doorInteractionMode}>
       {entities.map((entity) => {
         if (!editMode && entity.kind !== 'light' && geometryEntityDestroyed(entity)) return null
@@ -231,7 +209,7 @@ export function MapGeometryLayer({
           return (
             <Group
               key={entity.id}
-              listening={(entityEditListening || (editMode && tool === 'wall')) && !isDraft}
+              listening={entityEditListening && !isDraft}
               onMouseDown={selectEntity}
             >
               {segments.map((segment, index) => (
@@ -254,7 +232,7 @@ export function MapGeometryLayer({
                   />
                 </Group>
               ))}
-              {selected && editMode && (tool === 'select' || tool === 'wall') && !isDraft && (
+              {selected && editMode && tool === 'select' && !isDraft && (
                 <GeometryEditHandles entity={entity} inv={inv} onPointsChange={onPointsChange} />
               )}
             </Group>
@@ -402,6 +380,19 @@ export function MapGeometryLayer({
       })}
     </Group>
   )
+  if (editMode || personalSolidSightPolygon.length < 3) return contents
+  const clip = (outside: boolean) => (context: Konva.Context) => {
+    context.beginPath()
+    if (outside) context.rect(0, 0, map.width, map.height)
+    context.moveTo(personalSolidSightPolygon[0].x, personalSolidSightPolygon[0].y)
+    for (const point of personalSolidSightPolygon.slice(1)) context.lineTo(point.x, point.y)
+    context.closePath()
+    return ['evenodd'] as [CanvasFillRule]
+  }
+  return <Group name="personal-solid-sight-presentation">
+    <Group name="ordinary-solid-presentation" clipFunc={clip(true)}>{contents}</Group>
+    <Group name="ghostly-solid-presentation" clipFunc={clip(false)} opacity={0.24}>{contents}</Group>
+  </Group>
 }
 
 

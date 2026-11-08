@@ -1,3 +1,6 @@
+import {dnd5ePersistentAreaOccupantModifiersAt} from '../persistentAreaGeometry'
+import {prepareDnd5eAttackTeleportDestination} from '../attackTeleportDestination'
+import {dnd5eKilledTargetSummonPlacementCells} from './dnd5eKilledTargetSummonPlacement'
 import {captureDnd5eAreaObjects} from '../persistentAreaObjectCapture'
 import {dnd5eAnimatedObjectSnapshot} from '../animatedObjectSnapshot'
 import { rectangularPrism, rectangularPrismCells } from '../../../../shared/rectangular-prism.mjs'
@@ -323,6 +326,8 @@ export function dnd5eActivityAreaRangeOriginCellV1(input: {
 }
 
 export function resolveDnd5eActivityAreaMapSelectionV1(input: {
+  /** Host-only original event identity, never a placement payload field. */
+  eventTargetTokenId?: string
   worldMinute?: number
   activity: Dnd5eActivityDefinitionV1
   map: BattleMap
@@ -342,6 +347,12 @@ export function resolveDnd5eActivityAreaMapSelectionV1(input: {
   const declaredTemplate = dnd5eActivityMapTemplateV1(input.activity)
   const template = declaredTemplate ? resolveAoeDimensions(declaredTemplate, input.dimensions) : undefined
   if (target.kind !== 'area' || !template) return undefined
+  const eventOriginToken = input.eventTargetTokenId == null ? undefined
+    : target.origin === 'event-target' ? input.map.tokens.find(token => token.id === input.eventTargetTokenId) : undefined
+  if (input.eventTargetTokenId != null && !eventOriginToken) return undefined
+  const eventOriginCell = eventOriginToken ? tokenAnchorCellFromPixel(
+    eventOriginToken.x, eventOriginToken.y, eventOriginToken, input.map) : undefined
+  if (eventOriginCell && (eventOriginCell.col !== input.anchorCell?.col || eventOriginCell.row !== input.anchorCell?.row)) return undefined
   const hasTilt = input.rectPitchDegrees != null || input.rectRollDegrees != null
   if (hasTilt && (!target.tiltable || template.shape !== 'rect' || template.gridAligned ||
     [input.rectPitchDegrees ?? 0,input.rectRollDegrees ?? 0].some(angle=>!Number.isFinite(angle)||angle < -180||angle > 180))) return undefined
@@ -397,7 +408,7 @@ export function resolveDnd5eActivityAreaMapSelectionV1(input: {
       (target.shape === 'circle' || target.shape === 'sphere')
     ? actorCell
     : input.anchorCell
-  const rangeOrigin = dnd5eActivityAreaRangeOriginCellV1(input)
+  const rangeOrigin = eventOriginCell ?? dnd5eActivityAreaRangeOriginCellV1(input)
   if (![actorCell.col, actorCell.row, anchorCell?.col, anchorCell?.row,
     rangeOrigin?.col, rangeOrigin?.row, input.rectRotation ?? 0].every(Number.isFinite)) return undefined
   if (!rangeOrigin || !canPlaceAoe(template, rangeOrigin, anchorCell, input.map.feetPerCell)) return undefined
@@ -410,11 +421,13 @@ export function resolveDnd5eActivityAreaMapSelectionV1(input: {
   })
   let rawCells = cellsForAoe(template, orientFrom, anchorCell, input.map.feetPerCell)
   const geometry = mapGeometryRuntimeForMap(input.map.id)
-  let aim = cellToPixel(anchorCell, input.map)
+  let aim = eventOriginToken ? { x: eventOriginToken.x, y: eventOriginToken.y } : cellToPixel(anchorCell, input.map)
   if (input.targetElevationFeet != null && (!Number.isFinite(input.targetElevationFeet) ||
     input.targetElevationFeet < -1_000 || input.targetElevationFeet > 10_000)) return undefined
-  let elevation = target.origin === 'self' ? mapGeometryTokenElevation(geometry, input.actorToken)
-    : input.targetElevationFeet ?? spellAreaPointElevation(geometry, aim)
+  const eventElevation = eventOriginToken ? mapGeometryTokenElevation(geometry, eventOriginToken) : undefined
+  if (eventElevation != null && input.targetElevationFeet != null && Math.abs(eventElevation - input.targetElevationFeet) > 1e-4) return undefined
+  let elevation = eventElevation ?? (target.origin === 'self' ? mapGeometryTokenElevation(geometry, input.actorToken)
+    : input.targetElevationFeet ?? spellAreaPointElevation(geometry, aim))
   if(target.maximumBottomHeightAboveGroundFeet!==undefined){
     const grounded=resolveGroundedSphereElevation(target,mapGeometryTerrainElevationAtPoint(geometry,aim),input.targetElevationFeet)
     if(grounded===undefined)return undefined
@@ -438,7 +451,7 @@ export function resolveDnd5eActivityAreaMapSelectionV1(input: {
       row: (aim.y - input.map.gridOffsetY) / input.map.gridSize - 0.5,
     }, input.map.feetPerCell)
   }
-  if (!target.projectileImpact && target.origin !== 'self' && target.requiresLineOfEffect !== false && mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from: input.actorToken, to: aim, fromElevationFeet: mapGeometryTokenElevation(geometry, input.actorToken), toElevationFeet: elevation })) return undefined
+  if (!target.projectileImpact && target.origin !== 'self' && target.requiresLineOfEffect !== false && mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from: eventOriginToken ?? input.actorToken, to: aim, fromElevationFeet: mapGeometryTokenElevation(geometry, eventOriginToken ?? input.actorToken), toElevationFeet: elevation })) return undefined
   if (target.requiresLineOfSight && !dnd5eActivityPointVisible({ map: input.map, viewer: input.actorToken,
     worldMinute: input.worldMinute,
     characters: input.characters, point: { ...aim, elevationFeet: elevation } })) return undefined
@@ -589,8 +602,10 @@ export function validMovementDestination(input: {
   mode: 'push' | 'pull' | 'forced' | 'voluntary' | 'teleport'
   distanceFeet: number
   maximumMovementCostFeet?: number
-  verticalDestination?: 'area-top' | 'ground'
+  verticalDestination?: 'area-top' | 'ground' | 'space'
   maximumDistanceFromActorFeet?: number
+  selectedTargetRadiusFeet?: number
+  selectedTargetIds?: readonly string[]
   continuationTargetRadiusFeet?: number
   continuationTargetIds?: readonly string[]
   originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]
@@ -629,8 +644,19 @@ export function validMovementDestination(input: {
         Math.abs(elevation-(anchor.elevationFeet??mapGeometryTerrainElevationAtPoint(geometry,anchor)))) <= input.continuationTargetRadiusFeet!)
     if (!adjacent) return undefined
   }
-  if (movementFeet === 0 && input.requiresDifferentDestination) return undefined
-  if (movementFeet === 0 && input.verticalDestination !== 'ground') {
+  if (input.mode === 'teleport' && input.verticalDestination === 'space' && !prepareDnd5eAttackTeleportDestination({map:input.map,actorTokenId:input.targetToken.id,characters:input.characters??[],targetCell:input.destination,targetElevationFeet:input.destination.elevationFeet,rangeFeet:input.distanceFeet,worldMinute:input.worldMinute}).ok) return undefined
+  if (movementFeet === 0 && input.requiresDifferentDestination) {
+    // Another space may be directly above/below the original cell. This only
+    // refines identity; the ordinary 3D range, visibility and occupancy guards
+    // still validate the complete original teleport destination.
+    const geometry = mapGeometryRuntimeForMap(input.map.id)
+    const originElevation = input.targetToken.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry,input.targetToken)
+    const destinationElevation = input.verticalDestination === 'ground' || input.verticalDestination === 'space'
+      ? input.destination.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry,tokenCenterForAnchorCell(input.destination,input.targetToken,input.map))
+      : originElevation
+    if (!Number.isFinite(destinationElevation) || Math.abs(destinationElevation-originElevation)<=1e-4) return undefined
+  }
+  if (movementFeet === 0 && input.verticalDestination !== 'ground' && input.verticalDestination !== 'space' && input.selectedTargetRadiusFeet == null) {
     return {
       position: { x: input.targetToken.x, y: input.targetToken.y },
       path: [{ x: input.targetToken.x, y: input.targetToken.y }],
@@ -645,16 +671,19 @@ export function validMovementDestination(input: {
   const destinationPoint = tokenCenterForAnchorCell(input.destination, input.targetToken, input.map)
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const terrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, destinationPoint)
-  const selectedLanding = input.mode === 'teleport' && input.verticalDestination === 'ground'
+  const selectedLanding = input.mode === 'teleport' && (input.verticalDestination === 'ground' || input.verticalDestination === 'space')
     ? input.destination.elevationFeet ?? terrainElevationFeet : undefined
-  if (selectedLanding != null && (!Number.isFinite(selectedLanding) || Math.abs(dnd5eEntitySupportElevation({
+  if (selectedLanding != null && (!Number.isFinite(selectedLanding) || (input.verticalDestination === 'ground' && Math.abs(dnd5eEntitySupportElevation({
     map: input.map, geometry, token: { ...input.targetToken, ...destinationPoint },
     terrainElevationFeet, elevationFeet: selectedLanding,
-  }) - selectedLanding) > 1e-4)) return undefined
-  const to = input.mode === 'teleport' && input.verticalDestination === 'ground'
+  }) - selectedLanding) > 1e-4))) return undefined
+  const to = input.mode === 'teleport' && (input.verticalDestination === 'ground' || input.verticalDestination === 'space')
     ? { ...destinationPoint, elevationFeet: selectedLanding }
     : { ...destinationPoint, elevationFeet: input.targetToken.elevationFeet }
   const destinationToken = { ...input.targetToken, ...to }
+  if (input.mode === 'teleport' && input.verticalDestination === 'space' && (
+    dnd5ePersistentAreaOccupantModifiersAt({map:input.map,token:input.targetToken,position:input.targetToken,elevationFeet:input.targetToken.elevationFeet}).suppressesMagic ||
+    dnd5ePersistentAreaOccupantModifiersAt({map:input.map,token:destinationToken,position:to,elevationFeet:to.elevationFeet}).suppressesMagic)) return undefined
   const footprint = tokenOccupiedCellsAt(input.targetToken, input.map, to)
   const occupied = new Set(input.map.tokens
     .filter((token) => token.id !== input.targetToken.id && (token.type !== 'obstacle' || token.obstacleKind !== 'marker'))
@@ -672,6 +701,9 @@ export function validMovementDestination(input: {
     cellDistance(actorCell, input.destination) * Math.max(1, input.map.feetPerCell ?? 5),
     Math.abs(targetElevation - actorElevation),
   ) > input.maximumDistanceFromActorFeet) return undefined
+  if (input.selectedTargetRadiusFeet != null && (!Number.isFinite(input.selectedTargetRadiusFeet) ||
+      input.selectedTargetRadiusFeet < 0 || !input.map.tokens.some(anchor => input.selectedTargetIds?.includes(anchor.id) &&
+        dnd5eMapTokenDistanceFeet({map:input.map,geometry,left:destinationToken,right:anchor}) <= input.selectedTargetRadiusFeet!))) return undefined
   const originIllumination = mapGeometryIlluminationAtPoint({
     geometry, map: input.map, tokens: input.map.tokens,
     point: input.targetToken, elevationFeet: input.targetToken.elevationFeet,
@@ -956,7 +988,7 @@ function persistentRectGeometryForSelection(
 }
 
 /** Applies map-owned handoffs only after every requested placement is present and valid. */
-export function applyDnd5eActivityMapHandoffsV1(input: {
+function applyDnd5eActivityMapHandoffsCoreV1(input: {
   map: BattleMap
   /** Untrusted placement selections, with separately collected Host classifications. */
   groveSelection?: unknown
@@ -1009,8 +1041,12 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
   /** Cast level that created the mapped Activity entity. Granted actions inherit it. */
   castLevel?: number
   handoffs: Dnd5eActivityAuthorityHandoffs
+  /** Original Host event target; automatic areas do not depend on a UI ref. */
+  eventTargetTokenId?: string
   areaSelection?: Dnd5eActivityAreaMapSelectionV1
   selection: Dnd5eActivityMapHandoffSelectionV1
+  /** Host-only observability for a deferred atomic parent; never an Activity field. */
+  captureMaterialization?:boolean
   /** Area-granted Activities measure push/pull direction from this anchor. */
   movementOriginCell?: GridCell
   /** Host entitlement proving which persistent entity granted this Activity. */
@@ -2711,9 +2747,16 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       }
       if (corpse && dnd5eUndeadCreationIsProtected(corpse.dnd5eCombatState?.activeEffects)) return {ok:false,reason:'invalid-summon-placement'}
       if(corpse){map.tokens=map.tokens.filter(token=>token.id!==corpse.id);removedTokenIds.push(corpse.id);changedTokenIds.push(corpse.id)}
+      const illOmenTarget=proposal.illOmenTarget ? map.tokens.find(token=>token.id===proposal.illOmenTarget!.targetTokenId &&
+        (!proposal.illOmenTarget!.targetCharacterId || token.characterId===proposal.illOmenTarget!.targetCharacterId)) : undefined
+      if(proposal.illOmenTarget && (!illOmenTarget || proposal.count!==1 || proposal.monsterId!=='srd-5.1:dire-wolf' ||
+        !input.activity.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='summon'&&operation.id===proposal.operationId&&operation.illOmenHound===true))))return {ok:false,reason:'invalid-summon-placement'}
+      const killedOrigin=proposal.killedCreatureOriginId?map.tokens.find(token=>token.id===proposal.killedCreatureOriginId):undefined
+      if(proposal.killedCreatureOriginId&&(!killedOrigin||input.eventTargetTokenId!==killedOrigin.id||proposal.count!==1||!input.activity.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='summon'&&operation.id===proposal.operationId&&operation.placementOrigin==='killed-target'))))return {ok:false,reason:'invalid-summon-placement'}
       const targetCell = animatedObject ? tokenAnchorCellFromPixel(animatedObject.x,animatedObject.y,animatedObject,map) : corpse ? tokenAnchorCellFromPixel(corpse.x,corpse.y,corpse,map) : truePolymorphOriginalObject
         ? input.areaSelection?.anchorCell
         : input.selection.summonCells?.[summonIndex]
+      if(killedOrigin&&(!targetCell||!dnd5eKilledTargetSummonPlacementCells({map,actorToken,proposal,packageId:input.packageId,activityId:input.activity.id}).some(cell=>cell.col===targetCell.col&&cell.row===targetCell.row)))return {ok:false,reason:'invalid-summon-placement'}
       const initiativeD20 = input.selection.summonInitiativeD20s?.[proposal.groupInitiative?0:summonIndex]
       if (!targetCell || !Number.isSafeInteger(targetCell.col) || !Number.isSafeInteger(targetCell.row) || initiativeD20 == null) return { ok: false, reason: 'invalid-summon-placement' }
       if (proposal.persistent && !proposal.independentPersistent) {
@@ -2740,7 +2783,11 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       // caster's subsequent movement must not rerun the original cast range or
       // line-of-effect checks, and must not relocate the creature vertically.
       const corpseTransformation = corpse && proposal.afterDamageKillOperationId
-      const placementActorToken = corpseTransformation
+      const placementActorToken = illOmenTarget
+        ? {...actorToken,x:illOmenTarget.x,y:illOmenTarget.y}
+        : killedOrigin
+        ? {...actorToken,x:killedOrigin.x,y:killedOrigin.y,elevationFeet:killedOrigin.elevationFeet}
+        : corpseTransformation
         ? { ...actorToken, x: corpse.x, y: corpse.y, elevationFeet: corpse.elevationFeet }
         : actorToken
       const planned = planDnd5eSummonedCreature({
@@ -2763,6 +2810,7 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
         initiativeD20,
         summon: {
           monsterId: proposal.monsterId,
+          illOmenTarget: proposal.illOmenTarget,
           bondKey:proposal.bondKey,bondEffectId:proposal.bondEffectId,understoodLanguage:proposal.understoodLanguage,telepathyRangeFeet:proposal.telepathyRangeFeet,
           controlSave:proposal.controlSave,
           uncontrolledLinger: proposal.uncontrolledLinger,
@@ -2800,11 +2848,12 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       })
       if (!planned.ok) return { ok: false, reason: 'invalid-summon-placement' }
       const placementRange = summonPlacementRange(input.activity, proposal)
+      if(illOmenTarget && dnd5eMapTokenDistanceFeet({map,geometry:mapGeometryRuntimeForMap(map.id),left:illOmenTarget,right:planned.plan.token})>30)return {ok:false,reason:'invalid-summon-placement'}
       if (!Number.isInteger(placementRange) || placementRange < 0 || placementRange > 100000 ||
         (animatedObject && dnd5eMapTokenDistanceFeet({ map, geometry: mapGeometryRuntimeForMap(map.id), left: actorToken, right: animatedObject }) > placementRange) ||
-        (!corpseTransformation && tokenFootprintDistanceCells(actorToken, planned.plan.token, map) * Math.max(1, map.feetPerCell ?? 5) > placementRange) ||
+        (!corpseTransformation && !killedOrigin && !illOmenTarget && tokenFootprintDistanceCells(actorToken, planned.plan.token, map) * Math.max(1, map.feetPerCell ?? 5) > placementRange) ||
         (proposal.requiresVisiblePlacement != null && typeof proposal.requiresVisiblePlacement !== 'boolean') ||
-        (!corpseTransformation && proposal.requiresVisiblePlacement === true && !dnd5eActivityPointVisible({
+        (!corpseTransformation && !killedOrigin && !illOmenTarget && proposal.requiresVisiblePlacement === true && !dnd5eActivityPointVisible({
           map, viewer: actorToken, characters: input.characters, worldMinute: input.worldMinute,
           point: { x: planned.plan.token.x, y: planned.plan.token.y, elevationFeet: actorToken.elevationFeet },
         }))) return { ok: false, reason: 'invalid-summon-placement' }
@@ -2821,6 +2870,7 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
         : planned.plan.token
       if (animatedObject) plannedToken.elevationFeet=animatedObject.elevationFeet
       if (corpseTransformation) plannedToken.elevationFeet = corpse.elevationFeet
+      if (killedOrigin) plannedToken.elevationFeet = killedOrigin.elevationFeet
       if(corpse) {const {dnd5eSummon:_previous,...original}=corpse;plannedToken.dnd5eSummon={...plannedToken.dnd5eSummon!,animatedCorpse:structuredClone(original)}}
       if(proposal.groupInitiative && initiativeEntries[0]) {
         planned.plan.initiativeEntry.roll=initiativeEntries[0].roll
@@ -2959,6 +3009,8 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       maximumDistanceFromActorFeet: proposal.maximumDistanceFromActorFeet,
       requiresDifferentDestination: proposal.requiresDifferentDestination,
       destinationPolicy: proposal.destinationPolicy,
+      selectedTargetRadiusFeet: proposal.selectedTargetRadiusFeet,
+      selectedTargetIds: proposal.selectedTargetIds,
       continuationTargetRadiusFeet: proposal.continuationTargetRadiusFeet,
       continuationTargetIds: proposal.continuationTargetIds,
       originIllumination: proposal.originIllumination,
@@ -3332,12 +3384,24 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
   // empty cells that produce no creature damage event.
   let exposedMap = igniteDnd5eWebAreasFromFire({ map, round: input.round, turnTokenId: input.turnTokenId ?? '' })
   if(input.handoffs.areaSpellDamageTypes?.includes('cold')){
-    const requested=input.areaSelection,target=input.activity.target,declared=dnd5eActivityMapTemplateV1(input.activity)
-    if(!requested||target.kind!=='area'||!declared||input.activity.legacySource?.kind!=='spell')return {ok:false,reason:'activity-area-required'}
+    const target=input.activity.target,declared=dnd5eActivityMapTemplateV1(input.activity)
+    if(target.kind!=='area'||!declared||input.activity.legacySource?.kind!=='spell')return {ok:false,reason:'activity-area-required'}
+    const eventOriginToken = target.origin === 'event-target' && input.eventTargetTokenId
+      ? input.map.tokens.find(token => token.id === input.eventTargetTokenId) : undefined
+    if(target.origin === 'event-target' && !eventOriginToken)return {ok:false,reason:'activity-area-required'}
+    const eventOriginCell = eventOriginToken ? tokenAnchorCellFromPixel(
+      eventOriginToken.x,eventOriginToken.y,eventOriginToken,input.map) : undefined
+    const requested=input.areaSelection ?? (eventOriginCell ? resolveDnd5eActivityAreaMapSelectionV1({
+      activity:input.activity,map:input.map,actorToken,eventTargetTokenId:input.eventTargetTokenId,
+      characters:input.characters,worldMinute:input.worldMinute,anchorCell:eventOriginCell,
+    }) : undefined)
+    if(!requested)return {ok:false,reason:'activity-area-required'}
     const placement=requested.areaPlacement
+    if(eventOriginToken && (Math.abs(placement.x-eventOriginToken.x)>1e-4 || Math.abs(placement.y-eventOriginToken.y)>1e-4))return {ok:false,reason:'activity-area-required'}
     const dimensions={radiusFeet:placement.radiusFeet,widthFeet:placement.widthFeet,heightFeet:placement.lengthFeet,
       lengthFeet:placement.lengthFeet,volumeHeightFeet:placement.heightFeet}
     const selected=resolveDnd5eActivityAreaMapSelectionV1({activity:input.activity,map:input.map,actorToken,
+      eventTargetTokenId:input.eventTargetTokenId,
       characters:input.characters,worldMinute:input.worldMinute,grantingPersistentAreaId:input.grantingPersistentAreaId,
       anchorCell:requested.anchorCell,targetElevationFeet:placement.elevationFeet,rectAngleDegrees:placement.angleDegrees,dimensions})
     const area=resolveAoeDimensions(declared,dimensions)
@@ -3398,21 +3462,33 @@ export function dnd5eActivityMapCellForPlacementV1(
 export function dnd5eActivityGroundTeleportLevels(input: {
   map: BattleMap; actorToken: Token; movement: Extract<Dnd5eActivityCapabilityProposal,{kind:'move'}>;
   destination: GridCell; characters?: readonly import('../../../types/character').Character[]; worldMinute?: number;
-}): number[] {
+}, existenceOnly = false): number[] {
   const target = input.map.tokens.find(token => token.id === input.movement.targetId)
-  if (!target || input.movement.mode !== 'teleport' || input.movement.verticalDestination !== 'ground') return []
+  if (!target || input.movement.mode !== 'teleport' || !['ground','space'].includes(input.movement.verticalDestination ?? '')) return []
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const point = tokenCenterForAnchorCell(input.destination, target, input.map)
-  const heights = new Set([mapGeometryTerrainElevationAtPoint(geometry, point),
+  const originHeight = target.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, target)
+  const step = Math.max(1,input.map.feetPerCell ?? 5)
+  const spaceLevels = input.movement.verticalDestination === 'space' ? Array.from({length:Math.floor(input.movement.distanceFeet*2/step)+1},(_,i)=>originHeight-input.movement.distanceFeet+i*step).filter(height=>height>=mapGeometryTerrainElevationAtPoint(geometry,point)) : []
+  const selectedHeights = input.movement.verticalDestination === 'space' ? input.map.tokens.filter(token=>input.movement.selectedTargetIds?.includes(token.id)).flatMap(token=>{const h=token.elevationFeet??mapGeometryTerrainElevationAtPoint(geometry,token),radius=input.movement.selectedTargetRadiusFeet??0;return [h-radius,h,h+radius]}) : []
+  const heights = new Set([...spaceLevels,...selectedHeights,originHeight,mapGeometryTerrainElevationAtPoint(geometry, point),
     ...(geometry?.obstacles ?? []).map(obstacle => obstacle.baseHeightFeet + obstacle.heightFeet),
     ...(input.map.dnd5ePluginAreas ?? []).flatMap(area => area.vertical?.mode === 'volume'
       ? [area.vertical.baseElevationFeet + area.vertical.heightFeet] : []),
   ])
-  return [...heights].filter(elevationFeet => Number.isFinite(elevationFeet) && validMovementDestination({
-    map: input.map, actorToken: input.actorToken, targetToken: target,
-    characters: input.characters, worldMinute: input.worldMinute,
-    ...input.movement, mode: 'teleport', destination: { ...input.destination, elevationFeet },
-  }) != null).sort((a,b) => a-b)
+  const allowed: number[] = []
+  for (const elevationFeet of heights) {
+    if (!Number.isFinite(elevationFeet) || validMovementDestination({
+      map: input.map, actorToken: input.actorToken, targetToken: target,
+      characters: input.characters, worldMinute: input.worldMinute,
+      ...input.movement, mode: 'teleport', destination: { ...input.destination, elevationFeet },
+    }) == null) continue
+    allowed.push(elevationFeet)
+    // Grid preview asks only whether any legal height exists. The final
+    // owner height chooser still receives this complete list by default.
+    if (existenceOnly) break
+  }
+  return allowed.sort((a,b) => a-b)
 }
 
 export function dnd5eActivityContinuationTeleportCells(input: {
@@ -3424,20 +3500,20 @@ export function dnd5eActivityContinuationTeleportCells(input: {
   movement: Extract<Dnd5eActivityCapabilityProposal,{kind:'move'}>
 }): GridCell[] {
   const {map,actorToken,movement}=input
-  if(!['teleport','forced','voluntary'].includes(movement.mode)||(movement.continuationTargetRadiusFeet==null && !movement.requiresVisibleDestination && !movement.requiresDifferentDestination))return []
+  if(!['teleport','forced','voluntary'].includes(movement.mode)||(movement.continuationTargetRadiusFeet==null && movement.selectedTargetRadiusFeet==null && !movement.requiresVisibleDestination && !movement.requiresDifferentDestination))return []
   const moving=map.tokens.find(token=>token.id===movement.targetId)
   if(!moving)return []
   const extent=mapCellExtent(map)
   const padding=Math.ceil((movement.continuationTargetRadiusFeet??movement.distanceFeet)/Math.max(1,map.feetPerCell??5))+Math.ceil(moving.size)+1
   const candidates=new Map<string,GridCell>()
-  const anchors=movement.continuationTargetRadiusFeet==null ? [moving] : map.tokens.filter(token=>movement.continuationTargetIds?.includes(token.id))
+  const anchors=movement.selectedTargetRadiusFeet!=null ? map.tokens.filter(token=>movement.selectedTargetIds?.includes(token.id)) : movement.continuationTargetRadiusFeet==null ? [moving] : map.tokens.filter(token=>movement.continuationTargetIds?.includes(token.id))
   for(const anchor of anchors){
     for(const cell of tokenOccupiedCellsAt(anchor,map,anchor)){
       for(let row=Math.max(0,cell.row-padding);row<Math.min(extent.rows,cell.row+padding+1);row++)for(let col=Math.max(0,cell.col-padding);col<Math.min(extent.cols,cell.col+padding+1);col++)candidates.set(`${col},${row}`,{col,row})
     }
   }
-  return [...candidates.values()].filter(destination=>movement.mode === 'teleport' && movement.verticalDestination === 'ground'
-    ? dnd5eActivityGroundTeleportLevels({...input,destination}).length > 0
+  return [...candidates.values()].filter(destination=>movement.mode === 'teleport' && (movement.verticalDestination === 'ground' || movement.verticalDestination === 'space')
+    ? dnd5eActivityGroundTeleportLevels({...input,destination}, true).length > 0
     : validMovementDestination({map,actorToken,targetToken:moving,destination,
     characters:input.characters,worldMinute:input.worldMinute,requiresVisibleDestination:movement.requiresVisibleDestination,
     requiresDifferentDestination:movement.requiresDifferentDestination,
@@ -3447,11 +3523,12 @@ export function dnd5eActivityContinuationTeleportCells(input: {
     mode:movement.mode as 'teleport' | 'forced' | 'voluntary',distanceFeet:movement.distanceFeet,requiresLineOfSight:movement.requiresLineOfSight,
     maximumMovementCostFeet:movement.usesActorMovement && movement.mode==='voluntary' && input.actorMovementRemainingFeet!=null
       ? input.actorMovementRemainingFeet+movement.distanceFeet : undefined,
+    selectedTargetRadiusFeet:movement.selectedTargetRadiusFeet,selectedTargetIds:movement.selectedTargetIds,
     continuationTargetRadiusFeet:movement.continuationTargetRadiusFeet,continuationTargetIds:movement.continuationTargetIds})!=null)
 }
 
 function summonPlacementRange(activity: Dnd5eActivityDefinitionV1, summon: Dnd5eActivityAuthorityHandoffs['summons'][number]): number {
-  return summon.placementRangeFeet ?? (activity.target.kind === 'area'
+  return summon.illOmenTarget ? 30 : summon.placementRangeFeet ?? (activity.target.kind === 'area'
     ? activity.target.placeRangeFeet ?? 30 : activity.target.kind === 'creature' ? activity.target.rangeFeet ?? 30 : 30)
 }
 
@@ -3474,13 +3551,17 @@ export function dnd5eActivitySummonPlacementCells(input: {
   const actor = input.map.tokens.find(token => token.id === input.actorId)
   if (input.selectedCells.length >= expanded.length || !actor) return []
   const next = expanded[input.selectedCells.length]
+  if(next.killedCreatureOriginId)return dnd5eKilledTargetSummonPlacementCells({map:input.map,actorToken:actor,proposal:next,packageId:input.packageId,activityId:input.activity.id})
   const monster = getDnd5eSrdMonster(next.monsterId)
   const range = summonPlacementRange(input.activity, next)
   if (!monster || !Number.isInteger(range) || range < 0 || range > 100000) return []
   const prefix = expanded.slice(0, input.selectedCells.length + 1)
   const { cols, rows } = mapCellExtent(input.map)
-  const actorCells = tokenOccupiedCellsAt(actor, input.map, actor)
-  const footprint = creatureSizeToFootprintCells(monster.size)
+  const origin=next.illOmenTarget ? input.map.tokens.find(token=>token.id===next.illOmenTarget!.targetTokenId &&
+    (!next.illOmenTarget!.targetCharacterId || token.characterId===next.illOmenTarget!.targetCharacterId)) : actor
+  if(!origin)return []
+  const actorCells = tokenOccupiedCellsAt(origin, input.map, origin)
+  const footprint = next.illOmenTarget ? 1 : creatureSizeToFootprintCells(monster.size)
   const padding = Math.ceil(range / Math.max(1, input.map.feetPerCell ?? 5))
   // The anchor is the upper-left cell: a large creature can reach the range
   // boundary even when its anchor lies farther left/above than that boundary.
@@ -3507,3 +3588,31 @@ export function dnd5eActivitySummonPlacementCells(input: {
 
 import { dnd5eLastLongRestDestination } from '../restTeleportationDestination'
 import { createTeleportationCircle } from '../teleportationCircle'
+
+export interface Dnd5eActivityMapMaterializationV1 {
+ actionId:string;packageId:string;activityId:string;actorId:string;eventTargetTokenId?:string
+ beforeMap:BattleMap
+ result:Dnd5eActivityMapHandoffResultV1
+}
+const activityMapMaterializations=new WeakMap<object,Dnd5eActivityMapMaterializationV1>()
+export function applyDnd5eActivityMapHandoffsV1(input:Parameters<typeof applyDnd5eActivityMapHandoffsCoreV1>[0]):ReturnType<typeof applyDnd5eActivityMapHandoffsCoreV1>{
+ const beforeMap=input.captureMaterialization?structuredClone(input.map):undefined
+ const result=applyDnd5eActivityMapHandoffsCoreV1(input)
+ if(result.ok&&beforeMap&&input.actionId!=='summon-placement-preview')activityMapMaterializations.set(result,structuredClone({actionId:input.actionId,packageId:input.packageId,activityId:input.activity.id,actorId:input.actorId,eventTargetTokenId:input.eventTargetTokenId,beforeMap,result}))
+ return result
+}
+/** Only an output of the real mapper may supply initiative and entity facts. */
+export function readDnd5eActivityMapMaterializationV1(result:Dnd5eActivityMapHandoffResultV1):Dnd5eActivityMapMaterializationV1 {
+ const saved=activityMapMaterializations.get(result)
+ if(!saved||JSON.stringify(saved.result)!==JSON.stringify(result))throw Error('activity-map:unissued-or-changed-materialization')
+ return structuredClone(saved)
+}
+/** Data recovery only. Callers must bind this data to their protected Host
+ * journal and original source/receipt before invoking it. Never an author or
+ * player payload decoder, and never an independent feature entitlement. */
+export function restoreDnd5eActivityMapMaterializationFromHostV1(saved:Dnd5eActivityMapMaterializationV1):Dnd5eActivityMapHandoffResultV1{
+ if(!saved||!saved.result?.ok||!saved.actionId||!saved.packageId||!saved.activityId||!saved.actorId||saved.beforeMap?.id!==saved.result.map?.id)throw Error('activity-map:invalid-host-materialization')
+ const result=structuredClone(saved.result)
+ activityMapMaterializations.set(result,structuredClone(saved))
+ return result
+}

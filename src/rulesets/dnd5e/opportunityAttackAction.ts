@@ -1,3 +1,4 @@
+import type{MapGeometryState}from'../../lib/mapGeometry'
 import { planDnd5eDisadvantageNegation } from './disadvantageNegation'
 import { dnd5eCharacterRageDeathDeferralActive } from './pluginApi'
 import {dnd5eWithinReachMovementDistance} from './withinReachMovementProgress'
@@ -7,7 +8,7 @@ import { migrateCharacterToDnd5e } from './character'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { mapGeometryRuntimeForMap, mapGeometryTokenElevation } from '../../lib/mapGeometry'
-import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -18,6 +19,8 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eWeaponAttackProfile, dnd5eWeaponPropertyIds, dnd5eWearingUnproficientArmor } from './equipment'
 import {
   dnd5eAreaAttackAdvantageCandidates,
+  dnd5eCoverAttackRedirectEligible,
+  type Dnd5eCoverAttackRedirectUse,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackDisadvantageReasons,
   dnd5eAttackerIsUnseenForAttack,
@@ -53,7 +56,7 @@ import {
 } from './airborneFallActionResolution'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eReactionsPrevented, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eIsIncapacitated, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eReactionsPrevented, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
 import {
   dnd5eCharacterHasPluginFeature,
   dnd5ePluginFeatureDefinition,
@@ -61,7 +64,7 @@ import {
 } from './pluginApi'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
-import { dnd5eMonsterFlybyPreventsOpportunityAttacks } from './monsterGenericAbilities'
+import { dnd5eMonsterPackTacticsApplies, dnd5eMonsterFlybyPreventsOpportunityAttacks } from './monsterGenericAbilities'
 import type { Dnd5eTraversalMode } from './traversal'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
@@ -333,6 +336,9 @@ export type Dnd5eOpportunityAttackRejectReason =
   | 'combatant-missing'
 
 export interface PreparedDnd5eOpportunityAttack {
+  /** Mechanical pre-dice preview; Room owner authority is issued separately. */
+  coverAttackRedirectPreview?: Dnd5eCoverAttackRedirectUse
+  originalTargetTokenId?: string
   /** Host-paid receipt, never accepted from the player action payload. */
   disadvantageNegation?: { rollId: string; transactionId: string }
   /** Derived from the live Host effect after attack legality checks. */
@@ -367,12 +373,24 @@ export interface PreparedDnd5eOpportunityAttack {
 function perceivesOpportunityTargetAsHostile(actor: Token, target: Token, characters: readonly Character[]): boolean {
   if (actor.id === target.id) return false
   const character = actor.characterId ? characters.find(candidate => candidate.id === actor.characterId) : undefined
+  const summon=actor.dnd5eSummon,chosen=summon?.illOmenTarget
+  if(chosen)return actor.id!==target.id && !!summon?.sourceTokenId && !!summon.sourceCharacterId &&
+    chosen.targetTokenId===target.id && (chosen.targetCharacterId==null || chosen.targetCharacterId===target.characterId)
   return areOpposedCombatTokens(actor, target) || dnd5eActivePerceivesVisibleCreaturesAsHostile(
     (character?.dnd5eCombatState ?? actor.dnd5eCombatState)?.activeEffects,
   )
 }
 
+type ActualOpportunityInput=Parameters<typeof prepareDnd5eOpportunityAttack>[0]
+const actualOpportunityPreparations=new WeakMap<object,{signature:string;sourceSignature:string;source:ActualOpportunityInput}>()
+function rememberOpportunityPreparation(source:ActualOpportunityInput,value:{ok:true;prepared:PreparedDnd5eOpportunityAttack}){actualOpportunityPreparations.set(value.prepared,{signature:JSON.stringify(value.prepared),sourceSignature:JSON.stringify(source),source});return value}
+/** Mechanical provenance only. The existing actual-preparer WeakMap is never public. */
+export function dnd5eActualOpportunityAttackPreparationCurrent(prepared:object):boolean{const row=actualOpportunityPreparations.get(prepared);return !!row&&row.signature===JSON.stringify(prepared)&&row.sourceSignature===JSON.stringify(row.source)}
+/** Re-run only a genuine, unchanged native preparer. This is mechanical provenance, never Room authorization. */
+export function prepareDnd5eOpportunityRedirectFromPrepared(prepared:PreparedDnd5eOpportunityAttack,use:Dnd5eCoverAttackRedirectUse){const actual=actualOpportunityPreparations.get(prepared);if(!actual||actual.signature!==JSON.stringify(prepared)||actual.sourceSignature!==JSON.stringify(actual.source))throw Error('opportunity-redirect:actual-unchanged-preparation-required');return prepareDnd5eOpportunityAttack({...actual.source,coverAttackRedirectPreview:use})}
 export function prepareDnd5eOpportunityAttack(input: {
+  geometry?: MapGeometryState|null
+  coverAttackRedirectPreview?: Dnd5eCoverAttackRedirectUse
   combatId: string
   round?: number
   map: BattleMap
@@ -387,14 +405,17 @@ export function prepareDnd5eOpportunityAttack(input: {
   reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer' | 'declarative-reaction-weapon-attack'
   reactionFeatureId?: string
 }): { ok: true; prepared: PreparedDnd5eOpportunityAttack } | { ok: false; reason: Dnd5eOpportunityAttackRejectReason } {
+  const geometry=input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry
+  if(geometry&&geometry.mapId!==input.map.id)return{ok:false,reason:'invalid-target'}
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId)
-  const targetToken = input.map.tokens.find((token) => token.id === input.targetTokenId)
-  if (!actorToken || !targetToken || !perceivesOpportunityTargetAsHostile(actorToken, targetToken, input.characters)) return { ok: false, reason: 'invalid-actor' }
+  const originalTargetToken = input.map.tokens.find((token) => token.id === input.targetTokenId)
+  if (!actorToken || !originalTargetToken || !perceivesOpportunityTargetAsHostile(actorToken, originalTargetToken, input.characters)) return { ok: false, reason: 'invalid-actor' }
+  let targetToken:Token=originalTargetToken
 
   const actor = actorToken.characterId
     ? input.characters.find((character) => character.id === actorToken.characterId)
     : undefined
-  const target = targetToken.characterId
+  let target = targetToken.characterId
     ? input.characters.find((character) => character.id === targetToken.characterId)
     : undefined
   if (actor ? (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor)) : (actorToken.hp ?? 1) <= 0) return { ok: false, reason: 'invalid-actor' }
@@ -441,7 +462,13 @@ export function prepareDnd5eOpportunityAttack(input: {
 
   const playerProfile = actor?.rulesetId === 'dnd5e-2014-srd-5.1' ? dnd5eWeaponAttackProfile(actor) : undefined
   const monster = actorToken.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
+  const parts=actorToken.dnd5eCombatState?.monsterMultipart
+  const units=input.map.gridSize/(input.map.feetPerCell??5)
+  const closestHead=parts?.heads.filter(h=>h.alive).sort((a,b)=>
+    Math.hypot(a.position.x-targetToken.x/units,a.position.y-targetToken.y/units,a.position.z-(targetToken.elevationFeet??0))-
+    Math.hypot(b.position.x-targetToken.x/units,b.position.y-targetToken.y/units,b.position.z-(targetToken.elevationFeet??0)))[0]
   const monsterAction = monster?.actions.find((action) =>
+    (!parts || action.multipartHeadId===closestHead?.id) &&
     dnd5eMonsterActionAutomation(action) === 'headless' && action.kind === 'weapon-attack' && action.attack && (action.attack.mode === 'melee' || action.attack.mode === 'melee-or-ranged'),
   )
   const monsterDamage = monsterAction?.attack?.damage[0]
@@ -456,13 +483,14 @@ export function prepareDnd5eOpportunityAttack(input: {
     : isPlayerMelee ? (playerProfile.reachFeet ?? 5) : (monsterAction!.attack!.reachFeet ?? 5)
   const distanceFeet = dnd5eMapTokenDistanceFeet({
     map: input.map,
-    geometry: mapGeometryRuntimeForMap(input.map.id),
+    geometry:geometry??undefined,
     left: actorToken,
     right: targetToken,
   })
   if (distanceFeet > reachFeet) return { ok: false, reason: 'target-out-of-range' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
+    geometry,
     combatId: input.combatId,
     round: input.round,
     map: input.map,
@@ -470,7 +498,7 @@ export function prepareDnd5eOpportunityAttack(input: {
     initiativeOrder: input.initiativeOrder,
   })
   const actorCombatant = snapshot.state.combatants[actorToken.id]
-  const targetCombatant = snapshot.state.combatants[targetToken.id]
+  let targetCombatant = snapshot.state.combatants[targetToken.id]
   if (!actorCombatant || !targetCombatant) return { ok: false, reason: 'combatant-missing' }
   if (actorCombatant.classState.specialOpportunityReactionUsed) return {ok:false,reason:'reaction-unavailable'}
   if (!input.reactionFeature && dnd5eActiveEffectsPreventMovementOpportunityAttacks(targetCombatant.classState.activeEffects)) {
@@ -508,6 +536,13 @@ export function prepareDnd5eOpportunityAttack(input: {
       movementRemaining: input.targetTurnEconomy.movement.current,
     }
   }
+  const redirect=input.coverAttackRedirectPreview
+  if(redirect){
+    if(Object.keys(redirect).length!==3||Object.keys(redirect).some(key=>!['featureId','originalTargetId','replacementTargetId'].includes(key))||redirect.originalTargetId!==input.targetTokenId||!dnd5eCoverAttackRedirectEligible(snapshot.state,actorToken.id,redirect.originalTargetId,redirect.replacementTargetId,redirect.featureId))return{ok:false,reason:'invalid-target'}
+    const replacement=input.map.tokens.find(token=>token.id===redirect.replacementTargetId),replacementCombatant=snapshot.state.combatants[redirect.replacementTargetId]
+    if(!replacement||!replacementCombatant||dnd5eCannotAttackSource(actorCombatant,replacement.id))return{ok:false,reason:'invalid-target'}
+    targetToken=replacement;targetCombatant=replacementCombatant;target=replacement.characterId?input.characters.find(character=>character.id===replacement.characterId):undefined
+  }
   const classDamageContext: Dnd5eWeaponClassDamageContext | undefined = isPlayerMelee
     ? {
         weaponId: playerProfile.weaponId,
@@ -530,11 +565,14 @@ export function prepareDnd5eOpportunityAttack(input: {
         }),
       }
     : undefined
+  const packTactics=!!monster && dnd5eMonsterPackTacticsApplies({monster,actorId:actorToken.id,targetId:targetToken.id,
+    candidates:input.map.tokens.flatMap(candidate=>{const ally=snapshot.state.combatants[candidate.id];return !ally?[]:[{id:candidate.id,alliedWithActor:dnd5eCombatTokenSide(actorToken)!=null&&dnd5eCombatTokenSide(candidate)===dnd5eCombatTokenSide(actorToken),currentHp:ally.currentHp,incapacitated:ally.deathSaves.dead||dnd5eIsIncapacitated(ally),distanceFeetToTarget:dnd5eMapTokenDistanceFeet({map:input.map,geometry:geometry??undefined,left:candidate,right:targetToken})}]})})
   const advantageAllowed = !dnd5ePreventsAttackAdvantage(targetCombatant)
   const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const attackModeResolution = resolveDnd5eRollMode({
     advantage: [
+      { active: advantageAllowed && packTactics, reason: '集群战术' },
       ...dnd5eTargetAttackAdvantageReasons(targetCombatant)
         .map((reason) => ({ active: advantageAllowed, reason })),
       { active: advantageAllowed && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant), reason: '协助动作' },
@@ -562,9 +600,10 @@ export function prepareDnd5eOpportunityAttack(input: {
     ],
   })
   const attackMode = attackModeResolution.mode
-  return {
+  return rememberOpportunityPreparation(input,{
     ok: true,
     prepared: {
+      ...(redirect?{coverAttackRedirectPreview:{...redirect},originalTargetTokenId:input.targetTokenId}:{}),
       mandatory: !input.reactionFeature && dnd5eActiveRequiresOpportunityAttacks(actorCombatant.classState.activeEffects),
       map: input.map,
       characters: input.characters,
@@ -590,7 +629,7 @@ export function prepareDnd5eOpportunityAttack(input: {
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
     },
-  }
+  })
 }
 
 export function dnd5eOpportunityAttackModeResolution(prepared: PreparedDnd5eOpportunityAttack): Dnd5eRollModeResolution {
@@ -672,6 +711,10 @@ export function stageDnd5eOpportunityNegation(prepared: PreparedDnd5eOpportunity
 }
 
 export function resolvePreparedDnd5eOpportunityAttack(input: {
+  coverAttackRedirect?: Dnd5eCoverAttackRedirectUse
+  /** Optional owning transaction metadata; ordinary standalone OA calls retain their existing defaults. */
+  transactionId?: string
+  transactionNow?: number
   disadvantageNegationChoice?: Dnd5eOpportunityNegationChoice
   shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
   prepared: PreparedDnd5eOpportunityAttack
@@ -704,6 +747,8 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   application?: Dnd5eMapResultPlan
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 } {
+  const redirect=input.coverAttackRedirect,preview=input.prepared.coverAttackRedirectPreview
+  if(!!redirect!==!!preview||(redirect&&preview&&(redirect.featureId!==preview.featureId||redirect.originalTargetId!==preview.originalTargetId||redirect.replacementTargetId!==preview.replacementTargetId||input.prepared.originalTargetTokenId!==redirect.originalTargetId||input.prepared.targetToken.id!==redirect.replacementTargetId)))return{result:{ok:false,state:input.prepared.state,events:[],reason:'invalid-class-feature'}}
   let prepared = input.areaAttackAdvantageReaction
     ? { ...input.prepared, areaAttackAdvantageReaction: input.areaAttackAdvantageReaction } : input.prepared
   if (input.disadvantageNegationChoice) {
@@ -712,6 +757,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   }
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'opportunity-attack',
+    coverAttackRedirect:input.coverAttackRedirect,
     disadvantageNegation: prepared.disadvantageNegation,
     areaAttackAdvantageReaction: input.areaAttackAdvantageReaction ?? prepared.areaAttackAdvantageReaction,
     attackDecoyRolls: input.attackDecoyRolls,
@@ -745,7 +791,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
     inventoryEffectRolls: input.inventoryEffectRolls,
-  }, input.airborneFallDamageRollsByCombatantId)
+  }, input.airborneFallDamageRollsByCombatantId, input.transactionId===undefined&&input.transactionNow===undefined?undefined:{transactionId:input.transactionId,now:input.transactionNow})
   if (!result.ok) return { result, airborneFalls }
   return {
     result,
@@ -759,4 +805,3 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     }),
   }
 }
-

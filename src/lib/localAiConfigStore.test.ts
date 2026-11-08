@@ -33,8 +33,8 @@ describe('Local AI 持久化配置', () => {
     expect(loaded.config?.apiKey).toBe('text-secret-value')
     const options = localAiBridgeOptionsFromConfig(loaded.config, {})
     expect(options).toMatchObject({
-      externalModelId: 'gpt-5.6-luna',
-      externalExtractionModelId: 'gpt-5.6-luna',
+      externalModelId: 'gpt-6.1-sol',
+      externalExtractionModelId: 'gpt-6.1-sol',
       externalSynthesisModelId: 'gpt-5.6-sol',
       externalImageModelId: 'gpt-image-2',
       externalImageDefaultQuality: 'low',

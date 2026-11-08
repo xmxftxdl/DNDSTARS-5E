@@ -99,6 +99,7 @@ export interface Dnd5ePluginDiceRollDeclaration {
 export type Dnd5ePluginPerTargetDiceRollDeclaration = Dnd5ePluginDiceRollDeclaration
 
 export interface Dnd5ePluginDiceRollResult {
+  spellDamageDieRerolls?: readonly import('../spellDamageDieRerolls').Dnd5eSpellDamageDieRerollUse[]
   values: number[]
   modifier: number
   total: number

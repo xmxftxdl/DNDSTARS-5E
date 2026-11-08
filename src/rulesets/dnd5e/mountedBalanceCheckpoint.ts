@@ -1,3 +1,4 @@
+import {resolveDnd5ePreparedWithDamageReactions,type Dnd5eDamageReactionFlowOptions} from './damageReactionFlow'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint } from '../../lib/mapGeometry'
@@ -18,6 +19,7 @@ export function dnd5eBasicActionAreaMovementTargets(events: readonly Dnd5eCombat
 
 /** Collects Host-owned decisions without publishing the provisional attack or any resource changes. */
 export async function settleDnd5eMountedBalanceCheckpoint(input: {
+  damageReactions?:Dnd5eDamageReactionFlowOptions
   before: Dnd5eHeadlessCombatState
   result: Dnd5eActionResult
   map: BattleMap
@@ -63,6 +65,8 @@ export async function settleDnd5eMountedBalanceCheckpoint(input: {
     projected = { ...projected, tokens: projected.tokens.map(token => token.id === request.riderId ? { ...token, ...to, elevationFeet: groundElevationFeet } : token) }
   }
   if (input.isCurrent?.() === false) return fail()
-  const result = resolveDnd5eMountedBalanceAfterAction(input.before, input.result, choices, fallingRolls)
+  const result = input.damageReactions&&input.result.ok
+    ? await resolveDnd5ePreparedWithDamageReactions(input.damageReactions,{prepared:{state:input.result.state}},value=>resolveDnd5eMountedBalanceAfterAction(input.before,{...input.result,ok:true,state:value.prepared.state},choices,fallingRolls))
+    : resolveDnd5eMountedBalanceAfterAction(input.before,input.result,choices,fallingRolls)
   return { result, application: result.ok ? planDnd5eMapResultApplication({ ...projection, state: result.state, events: [...result.events] }) : undefined }
 }

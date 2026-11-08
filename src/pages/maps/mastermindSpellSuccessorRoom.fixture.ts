@@ -1,0 +1,8 @@
+import{expect}from'vitest';import{genuineSpellRedirectChainWorld}from'./mastermindSpellRedirectChain.fixture';import{createNativeEnvelopeApi}from'./mastermindMagicFamilies.fixture';
+import{beginMastermindSpellWindowOriginal,type MastermindSpellWindowGateway}from'./mastermindSpellWindowParent';
+export async function genuineSpellSuccessorRoom(nativeOrigin:boolean){
+ const f=genuineSpellRedirectChainWorld(),characters=f.characters.map(c=>nativeOrigin&&c.id===f.mage.id?{...c,roomMemberId:'dm'}:c),api=await createNativeEnvelopeApi({characters:{characters},maps:{maps:[f.map]},combat:{active:true,mapId:f.map.id,combatId:'combat',round:1,initiativeIndex:0,initiativeOrder:f.order,dnd5eTurnEconomyByToken:f.economies},'player-action-requests':{requests:[]}});
+ if(!nativeOrigin)expect((await api.post('player-action-requests/append',{action:f.action},'reader')).status).toBe(200);
+ const g:MastermindSpellWindowGateway={session:()=>({roomId:'room',memberId:'dm',role:'dm'}),loadResource:api.read,source:async<T>(operation:Parameters<MastermindSpellWindowGateway['source']>[0],input:unknown)=>{const r=await api.post('mastermind-spell-window/'+operation,input,'dm');if(r.status!==200)throw Error(JSON.stringify(r.payload));return r.payload as T},owner:async<T>(operation:Parameters<MastermindSpellWindowGateway['owner']>[0],input:unknown)=>{const r=await api.post('mastermind-misdirection/'+operation,input,'dm');if(r.status!==200)throw Error(JSON.stringify(r.payload));return r.payload as T}};
+ const parentId=await beginMastermindSpellWindowOriginal(nativeOrigin?{parentTransactionId:f.action.id,mapId:f.map.id,actorTokenId:'mage-token',spellCast:f.action.dnd5eSpellCast}:{actionId:f.action.id},g);return{...f,characters,api,g,parentId,nativeOrigin}
+}

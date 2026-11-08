@@ -1,0 +1,127 @@
+import {captureBountifulOriginalRawIssuer} from './bountifulOriginalRawIssuer'
+import {durableD20RollId} from '../../lib/rollConfirmation'
+import {resolveDnd5eAbilityCheckInterrupts} from '../../pages/maps/dnd5eRollInterruptPipeline'
+import {buildPlayerActionAck} from '../../lib/playerActionAck'
+import {bountifulLuckTestContent} from './bountifulLuckTestContent'
+import {it,expect,vi} from 'vitest'
+import {prepareDnd5eLocalContentJson} from './localContentCollection'
+import {dnd5eRulesPluginFromContentPackageV2} from './contentPackageV2'
+import {registerDnd5eRulesPlugin} from './pluginApi'
+import {normalizeCharacter} from '../../store/characters'
+import {prepareDnd5eAbilityCheck,resolvePreparedDnd5eAbilityCheck,previewPreparedDnd5eAbilityCheck} from './abilityCheckAction'
+import type {BattleMap} from '../../store/maps'
+import type {SharedPlayerActionState} from '../../lib/sharedCombatTypes'
+import type {SharedRoomGatewayPort} from '../../ports/sharedRoomGateway'
+import {persistBountifulOriginalParent} from './bountifulLuckPersistentHost'
+import {driveBountifulOriginalParent,BountifulOriginalParentPending,readBountifulOriginalAbilityInput} from './bountifulLuckPersistentRoomDriver'
+import {bountifulOriginalDieRollId,nextBountifulOriginalDieOwner,type BountifulOriginalDieReceipt} from './bountifulLuckReceipt'
+import {recordBountifulOriginalAfterDice,resolveBountifulOriginalForNormalAck,publishBountifulOriginalThroughNormalAck} from './bountifulLuckNormalAck'
+import {createDnd5eTurnEconomyCounts,spendDnd5eTurnResource} from './turnEconomy'
+import type {PublishPlayerActionAckInput} from '../../lib/playerActionAckPublish'
+vi.mock('../../lib/roomSession',()=>({getRoomSession:()=>({roomId:'room',memberId:'host',role:'dm'})}))
+
+it('restores the real saved skill bonus and current cursor without repeating any roll or choice before ordinary ACK',async()=>{
+ const {package:pkg}=await prepareDnd5eLocalContentJson(bountifulLuckTestContent)
+ const dispose=registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(pkg))
+ try{
+  const make=(id:string,feat:boolean)=>normalizeCharacter({id,name:id,roomMemberId:id+'-member',race:'半身人',dnd5eRaceId:'halfling',charClass:'战士',level:4,abilities:{str:10,dex:14,con:14,int:10,wis:10,cha:10},currentHp:30,maxHp:30,dnd5eFeatIds:feat?[pkg.manifest.id+':bountiful-luck']:[]})
+  const ally=make('ally',false);ally.equipment={};ally.dnd5eCombatState={bardicInspirationDie:6,bardicInspirationSourceId:'first-token',bardicInspirationRoundsRemaining:10};
+  const characters=[ally,make('first',true),make('second',true)]
+  const map:BattleMap={id:'map',name:'Map',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:characters.map((c,index)=>({id:c.id+'-token',characterId:c.id,type:'player',label:c.name,x:25+50*index,y:25,size:1,color:'',emoji:''}))}
+  const action:SharedPlayerActionState={id:'parent',mapId:'map',combatId:'combat',sourceMode:'player',status:'pending',roomMemberId:'ally-member',type:'dnd5e-ability-check',actorTokenId:'ally-token',characterId:'ally',dnd5eAbilityCheck:{ability:'dex',skill:'stealth',dc:12,spendAction:true},round:1,initiativeIndex:0,seq:1,updatedAt:1}
+  const prepared=prepareDnd5eAbilityCheck({action,map,characters,initiativeOrder:map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,emoji:'',color:'',roll:20-index}))})
+  if(!prepared.ok)throw Error(prepared.reason)
+  type Resource={_sync:{revision:number};[key:string]:unknown}
+  let data:Record<string,Resource>={combat:{_sync:{revision:1},active:true,mapId:'map',combatId:'combat',round:1,initiativeIndex:0},characters:{_sync:{revision:2},characters},maps:{_sync:{revision:3},maps:[map]},'player-action-requests':{_sync:{revision:4},requests:[action]}}
+  data['player-action-ack']={_sync:{revision:0},id:''}
+  data['player-action-processed']={_sync:{revision:0},actionIds:[]}
+  const writes:string[][]=[]
+  const gateway:Pick<SharedRoomGatewayPort,'loadResource'|'saveResourcesAtomically'>={loadResource:async<T>(name:string)=>structuredClone(data[name]??null)as T,saveResourcesAtomically:async(batch,options)=>{for(const write of batch)expect(write.expectedRevision).toBe(data[write.name]._sync.revision);for(const [name,value]of Object.entries(options?.readRevisions??{}))expect(data[name]?._sync.revision??0).toBe(value);const next=structuredClone(data);for(const write of batch)next[write.name]={...write.data as object,_sync:{revision:data[write.name]._sync.revision+1}};data=next;writes.push(batch.map(row=>row.name));return{status:'committed',transactionId:options?.transactionId??'',revisions:{}}}}
+  const source={prepared:prepared.prepared,d20:1,...captureBountifulOriginalRawIssuer({mapId:map.id,parentId:action.id,mode:'dm',rollId:durableD20RollId({mapId:map.id,sourceMode:'dm',transactionId:action.id,occurrenceIndex:2}),cursor:3,raw:[1]})}
+  await persistBountifulOriginalParent({parentId:'parent',source,resolve:resolvePreparedDnd5eAbilityCheck,actorId:'ally-token',kind:'ability-check'},gateway)
+  const untouched=structuredClone(data.characters),sequence:string[]=[],rolls:string[]=[]
+  const append=(receipt:BountifulOriginalDieReceipt,actorTokenId:string,characterId:string,memberId:string,command:object)=>{
+   const rows=data['player-action-requests'].requests as object[]
+   data['player-action-requests'].requests=[...rows,{id:'response-'+rows.length,roomMemberId:memberId,type:'dnd5e-bountiful-luck',status:'pending',sourceMode:'player',mapId:'map',combatId:'combat',actorTokenId,characterId,bountifulLuck:{parentId:'parent',occurrence:receipt.identity.occurrence,command}}]
+  }
+  // A closed or unanswered UI does not manufacture a decline or any cost.
+  await expect(driveBountifulOriginalParent({mapId:'map',parentId:'parent'},gateway,{showChoice:async()=>{},requestRoll:async()=>{}})).rejects.toBeInstanceOf(BountifulOriginalParentPending)
+  expect(data.characters).toEqual(untouched)
+  const stage=await driveBountifulOriginalParent({mapId:'map',parentId:'parent'},gateway,{
+   showChoice:async receipt=>{const next=nextBountifulOriginalDieOwner(receipt);if(!next)throw Error('No real owner');sequence.push(next.ownerId+':'+receipt.request.dieIndex);const control=receipt.controllers[next.ownerId];append(receipt,next.ownerId,control.characterId,control.memberId,{phase:'reaction',...next,decision:next.ownerId==='second-token'?'use':'decline'})},
+   requestRoll:async(receipt,refresh)=>{rolls.push(receipt.identity.roller.tokenId+':'+receipt.request.dieIndex);const roller=receipt.identity.roller,id=bountifulOriginalDieRollId(receipt),value=5;append(receipt,roller.tokenId,requireCharacterRoller(roller),roller.memberId,{phase:'roll',rollRequestId:id,value});const fresh=await refresh();expect(fresh.rawReroll?.memberId).toBe('ally-member');append(fresh,roller.tokenId,requireCharacterRoller(roller),'host',{phase:'confirm',rollRequestId:id,rawValue:value,value})}
+  })
+  expect(sequence).toEqual(['first-token:0','second-token:0'])
+  expect(rolls).toEqual(['ally-token:0'])
+  expect(stage.request).toMatchObject({originalRolls:[1],values:[5]})
+  expect(stage.receipts).toHaveLength(1)
+  expect(data.characters).toEqual(untouched)
+  expect(writes.every(names=>names.length<3)).toBe(true)
+
+  const finalSource={...source,bardicInspirationRoll:6}
+  const late={action,source:finalSource,resolve:resolvePreparedDnd5eAbilityCheck,authorityUnchanged:()=>true,rollCursor:9}
+  const beforeOptional=writes.length
+  await expect(recordBountifulOriginalAfterDice({...late,source:{...source,strokeOfLuck:true}},gateway)).rejects.toThrow('real-continuation-rejected')
+  expect(writes).toHaveLength(beforeOptional)
+  await recordBountifulOriginalAfterDice(late,gateway)
+  const restored=await readBountifulOriginalAbilityInput({mapId:'map',parentId:'parent'},gateway)
+  if(!restored)throw Error('Private saved ability missing')
+  expect(restored.hostOriginalDiceCursor).toBe(3);expect(restored.hostBountifulRollCursor).toBe(9)
+  expect(restored.hostBountifulPostDiceComplete).toBe(true)
+  expect(restored.bardicInspirationRoll).toBe(6);expect(restored.d20).toBe(1)
+  let repeatedPrompts=0
+  const noPrompt=async()=>{repeatedPrompts++;throw Error('A completed private choice must not be requested again')}
+  const interrupted=await resolveDnd5eAbilityCheckInterrupts({
+   combatant:restored.prepared.state.combatants['ally-token'],target:ally,targetName:ally.name,dc:12,mode:'normal',label:'Stealth',
+   confirmedChoices:{bardicInspirationRoll:restored.bardicInspirationRoll,optionalBonusDieUse:restored.optionalBonusDice?.[0],additionalBonusDieRoll:restored.peerlessSkillRoll,darkOnesOwnLuckRoll:restored.darkOnesOwnLuckRoll},
+   resolveOriginalDice:async()=>{const saved=await driveBountifulOriginalParent({mapId:'map',parentId:'parent'},gateway,{showChoice:noPrompt,requestRoll:noPrompt});return saved.request.values},
+   previewTotal:(a,b)=>previewPreparedDnd5eAbilityCheck(restored.prepared,a,b)?.total,
+   rollD20Pair:async()=>[restored.d20,restored.d20Second],rollD20:noPrompt,
+   requestBardicInspiration:noPrompt,requestOptionalBonusDie:noPrompt,requestAdditionalBonusDie:noPrompt,requestDarkOnesOwnLuck:noPrompt,
+  })
+  expect(interrupted).toMatchObject({d20:1,effectiveD20:5,bardicInspirationRoll:6,baseTotal:7,total:13})
+  expect(repeatedPrompts).toBe(0)
+  await expect(recordBountifulOriginalAfterDice({...late,source:{...finalSource,bardicInspirationRoll:5}},gateway)).rejects.toThrow('already-confirmed')
+  const resolved=await resolveBountifulOriginalForNormalAck({action,source:finalSource,resolve:resolvePreparedDnd5eAbilityCheck,options:{combatRevision:1,authorityUnchanged:()=>true,confirm:async()=>({accepted:false}),roll:async()=>[]}},gateway)
+  expect(resolved.result.ok).toBe(true)
+  if(!resolved.application)throw Error('Real application missing')
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  const normalActorEconomy=spendDnd5eTurnResource(createDnd5eTurnEconomyCounts('combat:1:ally-token',30),'action').economy
+  const notifications:string[]=[]
+  const ackInput:PublishPlayerActionAckInput={
+   ack:{id:'ack:parent',actionId:'parent',mapId:'map',combatId:'combat',recipientMemberId:'ally-member',status:'accepted',round:1,initiativeIndex:0,updatedAt:2},
+   snapshots:{characters:resolved.application.characters,maps:[resolved.application.map],updatedAt:2,combat:{mapId:'map',combatId:'combat',active:true,round:1,initiativeIndex:0,initiativeOrder:map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,emoji:'',color:'',roll:20-index})),updatedAt:2,dnd5eTurnEconomyByToken:{'ally-token':normalActorEconomy}}},
+   processed:{mapId:'map',combatId:'combat',actionIds:['parent'],updatedAt:2},expectedRevisions:{'player-action-ack':0,'player-action-processed':0},
+   saveSharedResource:async()=>{throw Error('No independent resource write permitted')},
+   commitSharedResources:async(batch,options)=>{await gateway.saveResourcesAtomically(batch,options);return{}},
+   loadSharedResource:gateway.loadResource,publishAck:async ack=>{notifications.push(ack.id)},
+  }
+  // Equal IDs and generic success cannot manufacture the live private brand.
+  await expect(publishBountifulOriginalThroughNormalAck(structuredClone(action),ackInput,gateway)).rejects.toThrow('issued-result-required')
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  data['map-geometry']={_sync:{revision:1}}
+  await expect(publishBountifulOriginalThroughNormalAck(action,ackInput,gateway)).rejects.toThrow('stale-original-resources')
+  delete data['map-geometry']
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(0)
+  await publishBountifulOriginalThroughNormalAck(action,ackInput,gateway)
+  const finalWrites=writes.filter(names=>names.includes('characters'))
+  expect(finalWrites).toEqual([['characters','maps','combat','player-action-processed','player-action-ack']])
+  const economies=data.combat.dnd5eTurnEconomyByToken as Record<string,{action:{current:number};reaction:{current:number}}>
+  expect(economies['ally-token'].action.current).toBe(0) // normal Maps postprocessing retained
+  expect(economies['second-token'].reaction.current).toBe(0)
+  const parents=Object.values(data.combat.bountifulOriginalParents as Record<string,BountifulOriginalDieReceipt>)
+  expect(parents).toHaveLength(1);expect(parents.every(row=>row.consumed?.transactionId==='parent')).toBe(true)
+  expect((data['player-action-processed'].actionIds as string[])).toEqual(['parent'])
+  expect(data['player-action-ack'].actionId).toBe('parent')
+  expect(resolved.result.events).toContainEqual(expect.objectContaining({type:'ability-check-resolved',actorId:'ally-token',d20:5,total:13,success:true}))
+  expect((data.characters.characters as typeof characters).find(c=>c.id==='ally')?.dnd5eCombatState?.bardicInspirationDie).toBeUndefined()
+  // A repeated/reloaded ACK observes the durable consumed parent; no extra CAS.
+  const rebuilt=buildPlayerActionAck({action,status:'accepted',mapId:action.mapId,combatId:action.combatId,round:1,initiativeIndex:0,appliedAt:3})
+  expect(rebuilt.id).not.toBe(ackInput.ack.id)
+  await publishBountifulOriginalThroughNormalAck(structuredClone(action),{...ackInput,ack:rebuilt},gateway)
+  expect(writes.filter(names=>names.includes('characters'))).toHaveLength(1)
+  expect(notifications).toEqual(['ack:parent','ack:parent'])
+ }finally{dispose()}
+})
+
+function requireCharacterRoller(roller:{characterId?:string}){if(!roller.characterId)throw Error("This Character-only fixture requires its actual Character roller");return roller.characterId}

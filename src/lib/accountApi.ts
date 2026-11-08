@@ -370,11 +370,19 @@ export async function loadAccountAuthConfig(): Promise<AccountAuthConfig> {
 export async function requestAccountVerification(
   channel: AccountVerificationChannel,
   destination: string,
+  purpose: 'register' | 'reset-password' = 'register',
 ): Promise<AccountVerificationChallenge> {
-  return accountRequest<AccountVerificationChallenge>('/accounts/auth/verification', {
-    method: 'POST',
-    body: JSON.stringify({ channel, destination }),
-  }, null)
+  const signal = AbortSignal.timeout(15_000)
+  try {
+    return await accountRequest<AccountVerificationChallenge>('/accounts/auth/verification', {
+      method: 'POST',
+      body: JSON.stringify({ channel, destination, purpose }),
+      signal,
+    }, null)
+  } catch (error) {
+    if (signal.aborted) throw new AccountApiError('verification-request-timeout', 408)
+    throw error
+  }
 }
 
 export async function registerAccount(input: {
@@ -401,6 +409,16 @@ export async function loginAccount(
     body: JSON.stringify({ identifier, password, clientId }),
   }, null)
   return response.session
+}
+
+export async function resetAccountPassword(input: {
+  challengeId: string
+  verificationCode: string
+  newPassword: string
+}): Promise<void> {
+  await accountRequest<{ ok: true }>('/accounts/auth/reset-password', {
+    method: 'POST', body: JSON.stringify(input),
+  }, null)
 }
 
 export async function logoutAccount(): Promise<void> {
@@ -666,10 +684,12 @@ export function accountApiErrorMessage(error: unknown): string {
     'invalid-account-credentials': '用户名、邮箱、手机号或密码不正确。',
     'invalid-verification-destination': '请输入有效的邮箱地址或带国家区号的手机号。',
     'invalid-verification-code': '验证码不正确。',
+    'invalid-verification-purpose': '验证码用途无效，请重新发送。',
     'verification-code-expired': '验证码已经过期，请重新发送。',
     'verification-attempt-limit': '验证码错误次数过多，请重新发送。',
     'verification-provider-unavailable': '当前服务器尚未配置该验证码发送渠道。',
     'verification-delivery-failed': '验证码发送失败，请稍后重试。',
+    'verification-request-timeout': '验证码发送请求超时，无法确认是否发送成功。请稍后检查邮箱或重试。',
     'account-auth-rate-limit': '请求过于频繁，请稍后再试。',
     'account-contact-exists': '该邮箱或手机号已经注册。',
     'account-username-exists': '该用户名已经被使用。',

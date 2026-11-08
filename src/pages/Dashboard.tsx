@@ -1,3 +1,6 @@
+import CampaignReadinessPanel from '../components/CampaignReadinessPanel'
+import { useMapStore } from '../store/maps'
+import { useCharacterStore } from '../store/characters'
 import {
   ArrowRight,
   FlaskConical,
@@ -19,15 +22,16 @@ interface DashboardProps {
   creatingCampaign?: boolean
 }
 
-const stats = [
-  { label: '已上传地图', value: '0', icon: MapIcon, color: 'text-sky-300' },
-  { label: '角色卡', value: '0', icon: Users, color: 'text-emerald-300' },
-  { label: '敌人模板', value: '0', icon: Bot, color: 'text-rose-300' },
-  { label: '进行中战斗', value: '0', icon: Swords, color: 'text-amber-300' },
-]
-
 export default function Dashboard({ onCreateCampaign, creatingCampaign = false }: DashboardProps) {
   const { campaignId } = useParams()
+  const maps = useMapStore(state => state.maps)
+  const characters = useCharacterStore(state => state.characters)
+  const stats = [
+    { label: '已加载地图', value: maps.length, icon: MapIcon, color: 'text-sky-300' },
+    { label: '已加载角色卡', value: characters.length, icon: Users, color: 'text-emerald-300' },
+    { label: '待分配角色', value: characters.filter(character => !character.roomMemberId).length, icon: Bot, color: 'text-rose-300' },
+    { label: '地图棋子', value: maps.reduce((count, map) => count + map.tokens.length, 0), icon: Swords, color: 'text-amber-300' },
+  ]
   const simulationPath = campaignId
     ? `/campaign/${encodeURIComponent(campaignId)}/simulation`
     : '/simulation'
@@ -51,6 +55,7 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
         }
       />
 
+      <CampaignReadinessPanel />
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, color }) => (

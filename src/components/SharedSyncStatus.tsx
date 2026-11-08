@@ -15,7 +15,7 @@ export function SharedSyncRecoveryBanner() {
       <div className="flex items-start gap-3">
         {conflict ? <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" /> : <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />}
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">{conflict ? '已阻止旧版本覆盖' : '正在补拉权威状态'}</p>
+          <p className="text-sm font-semibold" role="status">{conflict ? '已阻止旧版本覆盖' : '战役数据正在重新同步'}</p>
           <p className="mt-1 text-xs opacity-80">{health.lastMessage}</p>
         </div>
         {conflict && (

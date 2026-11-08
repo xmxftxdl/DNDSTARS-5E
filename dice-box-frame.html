@@ -146,11 +146,17 @@
           boxPromise = (async () => {
           const container = document.getElementById('dice')
           if (!(container.clientWidth > 0 && container.clientHeight > 0)) {
-            await new Promise(resolve => {
+            await new Promise(resolve => {
+              let pendingVisibilityFrame = false
               const observer = new ResizeObserver(() => {
-                if (!(container.clientWidth > 0 && container.clientHeight > 0)) return
-                observer.disconnect()
-                resolve()
+                if (!(container.clientWidth > 0 && container.clientHeight > 0) || pendingVisibilityFrame) return
+                pendingVisibilityFrame = true
+                requestAnimationFrame(() => {
+                  pendingVisibilityFrame = false
+                  if (!(container.clientWidth > 0 && container.clientHeight > 0)) return
+                  observer.disconnect()
+                  resolve()
+                })
               })
               observer.observe(container)
             })

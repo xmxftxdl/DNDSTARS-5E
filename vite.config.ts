@@ -19,6 +19,8 @@ function lightweightPublicAssetsPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
+  // The four application workers are native ES modules and may split imports.
+  worker: { format: 'es' },
   publicDir: command === 'serve' ? 'public' : false,
   plugins: [
     react(),

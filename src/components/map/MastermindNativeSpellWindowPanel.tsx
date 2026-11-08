@@ -1,0 +1,26 @@
+import{useState}from'react'
+import type{Character}from'../../types/character'
+import type{BattleMap}from'../../store/maps'
+import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
+import{secondChanceCanonicalControllerMemberId}from'../../../shared/second-chance-controller.mjs'
+import{dnd5eEffectiveSpellcastingSources}from'../../rulesets/dnd5e/subclassSpellcasting'
+import{dnd5eSelectedSpellIdsForClass,getDnd5eSrdCombatSpell,dnd5eSpellMaximumTargets}from'../../rulesets/dnd5e/spells'
+import{dnd5ePactSlotLevel}from'../../rulesets/dnd5e/classes'
+import{dnd5eRuntimePluginFeaturesAvailableForCharacter}from'../../rulesets/dnd5e/pluginApi'
+import DiceOverlayPortal from'../DiceOverlayPortal'
+type Payload=NonNullable<SharedPlayerActionState['dnd5eSpellCast']>
+/** Presentation lists real learned/prepared spell sources. Only the native
+ * private issuer, never this selection, authorizes the actual cast. */
+export default function MastermindNativeSpellWindowPanel({isDM,map,characters,session,currentTokenId,paused,pending,pendingParents,onCast,onResume}:{isDM:boolean;map:BattleMap;characters:Character[];session:{roomId:string;memberId:string}|null;currentTokenId?:string;paused:boolean;pending:boolean;pendingParents:readonly string[];onCast:(actorTokenId:string,payload:Payload)=>void;onResume:(parentId:string)=>void}){
+ const[selection,setSelection]=useState(''),[slot,setSlot]=useState(0),[selectedTargets,setSelectedTargets]=useState<string[]>([])
+ if(!isDM||!session)return null
+ const casterToken=map.tokens.find(token=>token.id===currentTokenId),caster=characters.find(character=>character.id===casterToken?.characterId)
+ if(!casterToken||!caster||secondChanceCanonicalControllerMemberId(caster,{roomId:session.roomId,hostMemberId:session.memberId})!==session.memberId)return null
+ const owners=map.tokens.filter(token=>{const character=characters.find(character=>character.id===token.characterId);return character&&dnd5eRuntimePluginFeaturesAvailableForCharacter(character).some(feature=>feature.declarativeAbility?.mechanic?.kind==='cover-attack-redirection')})
+ if(!owners.length&&!pendingParents.length)return null
+ const spells=dnd5eEffectiveSpellcastingSources(caster).flatMap(source=>dnd5eSelectedSpellIdsForClass(caster,source.classId).flatMap(id=>{const spell=getDnd5eSrdCombatSpell(id);if(!spell||spell.effect!=='spell-attack'||spell.area)return[];const pact=source.definition.spellcasting?.kind==='pact'?dnd5ePactSlotLevel(source.classLevel):undefined,slots=spell.level===0?[0]:pact!=null?((caster.classResources?.['dnd5e-pact-slot']?.current??0)>0&&pact>=spell.level?[pact]:[]):Array.from({length:10-spell.level},(_,i)=>i+spell.level).filter(level=>(caster.classResources?.['dnd5e-spell-slot-'+level]?.current??0)>0);return slots.length?[{key:source.classId+':'+id,classId:source.classId,spell,slots}]:[]}))
+ const chosen=spells.find(spell=>spell.key===selection)??spells[0],level=chosen?.slots.includes(slot)?slot:chosen?.slots[0]??0,count=chosen?dnd5eSpellMaximumTargets(chosen.spell,level,caster.level):0
+ const targets=Array.from({length:count},(_,index)=>map.tokens.find(token=>token.id===selectedTargets[index])?.id??owners[0]?.id??'')
+ const hasOwner=targets.some(id=>owners.some(owner=>owner.id===id)),disabled=pending||paused||!chosen||!hasOwner||targets.some(id=>!id)
+ return <DiceOverlayPortal layer="confirmation"><details className="pointer-events-auto fixed left-3 top-52 max-h-[60dvh] max-w-xs overflow-y-auto rounded-xl border border-white/15 bg-void-950/95 p-3 text-sm text-slate-200"><summary>主持人攻击法术 · 祸水东引</summary><div className="mt-2 flex flex-col gap-2">{pendingParents.map(parent=><button key={parent} type="button" data-action-id="mastermind-native-spell-window-resume" data-parent-id={parent} disabled={pending||paused} onClick={()=>onResume(parent)}>继续已发行的法术攻击</button>)}<p>{caster.name} · 当前回合</p><label>已准备的攻击法术<select aria-label="主持人攻击法术" value={chosen?.key??''} disabled={pending||paused} onChange={event=>{setSelection(event.target.value);setSlot(0);setSelectedTargets([])}}>{spells.map(entry=><option key={entry.key} value={entry.key}>{entry.spell.name}（{entry.classId}）</option>)}</select></label><label>法术环级<select aria-label="主持人攻击法术环级" value={level} disabled={pending||paused} onChange={event=>setSlot(Number(event.target.value))}>{chosen?.slots.map(value=><option key={value} value={value}>{value===0?'戏法':value+'环'}</option>)}</select></label>{targets.map((target,index)=><label key={index}>第{index+1}次攻击的原目标<select aria-label={'主持人法术目标 '+(index+1)} value={target} disabled={pending||paused} onChange={event=>setSelectedTargets(old=>targets.map((value,i)=>i===index?event.target.value:old[i]??value))}>{map.tokens.filter(token=>token.type!=='obstacle').map(token=><option key={token.id} value={token.id}>{token.label}</option>)}</select></label>)}<button type="button" data-action-id="mastermind-native-spell-window-cast" disabled={disabled} onClick={()=>chosen&&onCast(casterToken.id,{spellId:chosen.spell.id,castingClassId:chosen.classId,slotLevel:level,targetTokenId:targets[0],targetTokenIds:[...new Set(targets)],projectileTargetIds:targets})}>施放已选择的攻击法术</button><p className="text-xs text-slate-400">目标本人决定是否转移攻击。掷骰和费用沿同一次原施法结算。</p></div></details></DiceOverlayPortal>
+}

@@ -256,6 +256,24 @@ function findAnswerableInterrupt<K extends CombatInterruptKind>(
   return { interrupt, character: candidate.character }
 }
 
+/** Routing only: this identifies the existing scoped protocol. Actual answer
+ * and deadline authority stays with the authenticated server witness. */
+export function opportunitySequenceDecisionScope(interrupt:SharedCombatInterrupt):{parentId:string;actorId:string;windowIndex:number}|undefined{
+ if(!isCombatInterruptKind(interrupt,'opportunity-attack'))return undefined
+ const scope=interrupt.payload.opportunitySequenceDecision
+ if(!scope||typeof scope!=='object'||Array.isArray(scope))return undefined
+ const value=scope as Record<string,unknown>
+ if(typeof value.parentId!=='string'||!value.parentId||value.parentId!==interrupt.transactionId||typeof value.actorId!=='string'||!value.actorId||value.actorId!==interrupt.payload.attackerTokenId||typeof value.windowIndex!=='number'||!Number.isSafeInteger(value.windowIndex)||value.windowIndex<0)return undefined
+ return{parentId:value.parentId,actorId:value.actorId,windowIndex:value.windowIndex}
+}
+function markedSequenceOpportunity(interrupt:SharedCombatInterrupt){return isCombatInterruptKind(interrupt,'opportunity-attack')&&interrupt.payload.opportunitySequenceDecision!==undefined}
+function scopedSequenceControllerCanSee(interrupt:SharedCombatInterrupt,context:CombatInterruptAnswerContext){
+ if(!markedSequenceOpportunity(interrupt))return true
+ const scope=opportunitySequenceDecisionScope(interrupt),character=resolveCombatInterruptCharacter(interrupt,context.characters),token=scope&&context.tokens?.find(row=>row.id===scope.actorId&&row.characterId===character?.id)
+ if(!scope||!character||!token||!context.roomMemberId)return false
+ return context.authority==='dm'?(character.roomMemberId??context.roomMemberId)===context.roomMemberId:character.roomMemberId===context.roomMemberId
+}
+
 export function resolveCombatInterruptPromptSelection(input: {
   queue: SharedCombatInterruptQueueState | null | undefined
   mapId: string
@@ -269,7 +287,8 @@ export function resolveCombatInterruptPromptSelection(input: {
     (interrupt) =>
       interrupt.mapId === input.mapId &&
       interrupt.status === 'pending' &&
-      !isCombatInterruptExpired(interrupt, input.now),
+      !isCombatInterruptExpired(interrupt, input.now) &&
+      scopedSequenceControllerCanSee(interrupt,input.answerContext),
   )
 
   return {
@@ -386,20 +405,26 @@ export function buildDmControlledCombatInterruptPromptViews(input: {
   characters: Character[]
   tokens: readonly Token[]
   suppressed: CombatInterruptSuppression
+  hostMemberId?:string
 }): CombatInterruptPromptViews {
   const dmControlledCharacterIds = new Set(
     input.tokens.flatMap((token) =>
       token.type === 'enemy' && token.characterId ? [token.characterId] : [],
     ),
   )
+  const scopedHostIds=new Set((input.queue?.interrupts??[]).flatMap(interrupt=>{
+    const scope=opportunitySequenceDecisionScope(interrupt),character=resolveCombatInterruptCharacter(interrupt,input.characters),token=scope&&input.tokens.find(row=>row.id===scope.actorId&&row.characterId===character?.id)
+    return input.hostMemberId&&scope&&character&&token&&(character.roomMemberId??input.hostMemberId)===input.hostMemberId?[character.id]:[]
+  }))
   const dmControlledCharacters = input.characters.filter((character) =>
-    dmControlledCharacterIds.has(character.id),
+    dmControlledCharacterIds.has(character.id)||scopedHostIds.has(character.id),
   )
   const dmQueue = input.queue
     ? {
         ...input.queue,
         interrupts: input.queue.interrupts.filter((interrupt) => {
           const character = resolveCombatInterruptCharacter(interrupt, input.characters)
+          if(markedSequenceOpportunity(interrupt))return !!character&&scopedHostIds.has(character.id)&&scopedSequenceControllerCanSee(interrupt,{characters:input.characters,visibleCharacters:dmControlledCharacters,tokens:[...input.tokens],authority:'dm',roomMemberId:input.hostMemberId})
           return !!character && dmControlledCharacterIds.has(character.id)
         }),
       }
@@ -411,6 +436,7 @@ export function buildDmControlledCombatInterruptPromptViews(input: {
     answerContext: {
       characters: input.characters,
       visibleCharacters: dmControlledCharacters,
+      roomMemberId:input.hostMemberId,
       tokens: [...input.tokens],
       authority: 'dm',
     },

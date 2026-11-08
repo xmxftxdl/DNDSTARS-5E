@@ -1,3 +1,4 @@
+import{readDnd5eStormGuideWindExpiry}from'./stormGuideWindExpiry'
 import { dnd5eExhaustionState, dnd5eSourcedExhaustionLevel, adjustDnd5eOrdinaryExhaustion } from './sourcedExhaustion'
 import {dnd5eTempleCampaignHealingBonus,type TempleCampaignHealingContext} from './templeCampaignHealing'
 import {dnd5eNativeMonsterBreathing} from './monsterBreathing'
@@ -12,7 +13,7 @@ import { campaignDawnsCrossed, canBenefitFromLongRest } from '../../lib/campaign
 import { restoreClassResources } from '../../lib/classResources'
 import type { Character } from '../../types/character'
 import { planDnd5eExpiredRestCompletions } from './restCompletion'
-import { recordDnd5eRestActivityWindow } from './restActivityWindows'
+import { recordDnd5eRestActivityWindow, openDnd5eRestActivityWindow, consumeDnd5eRestActivityWindow } from './restActivityWindows'
 import {
   applyDnd5eShortRestResourceFeatures,
   dnd5eSelfSavingThrowAuraBonus,
@@ -33,7 +34,7 @@ import {
   recoverDnd5eHitPointMaximumReductions,
   recoverDnd5eHitPointMaximumReductionsForEffect,
 } from './hitPointMaximumReductions'
-import { dnd5eStoredD20ReplacementFeaturesForCharacter } from './pluginApi'
+import { dnd5eStoredD20ReplacementFeaturesForCharacter, dnd5eRestTemporaryHitPointFeaturesForCharacter } from './pluginApi'
 import {
   dnd5eActiveHitPointMaximumBonus,
   dnd5eActiveEnvironmentalCapabilities,
@@ -160,8 +161,24 @@ export function dnd5eRestBenefitsPrevented(character: Character): boolean {
  * Call only after the granting effect's full completion has been established by Host.
  * This function neither advances the campaign clock nor spends Hit Dice automatically.
  */
+
+/** This native completed-rest helper grants no benefit from elapsed time or a client intent. */
+function applyDnd5eRestTemporaryHitPoints(character: Character, rest:'short-rest'|'long-rest', minute:number):Character {
+  let current=character
+  const window=openDnd5eRestActivityWindow(current,minute)
+  if(!window||window.event!==(rest==='short-rest'?'short-rest-complete':'long-rest-complete'))return current
+  for(const {feature,ability,classLevel,scoreAbility} of dnd5eRestTemporaryHitPointFeaturesForCharacter(current,rest)){
+    const snapshot=migrateCharacterToDnd5e(current), amount=Math.max(0,classLevel+Math.floor((snapshot.abilities[scoreAbility]-10)/2))
+    if(snapshot.classState.wildShapeRetainsHitPoints)continue
+    const consumed=consumeDnd5eRestActivityWindow(current,{worldMinute:minute,eventId:window.eventId,packageId:feature.ownerPluginId,activityId:'rest-self:'+ability.id,outcome:'used'})
+    if(consumed){const before=consumed.tempHp??0,clearSource=amount>=before&&amount>0&&!!consumed.dnd5eCombatState?.temporaryHitPointsSource;current={...consumed,tempHp:Math.max(before,amount),...(clearSource?{dnd5eCombatState:{...consumed.dnd5eCombatState,temporaryHitPointsSource:undefined}}:{})}}
+  }
+  return current
+}
+
 export function applyDnd5eGrantedShortRestBenefits(character: Character, completionWorldMinute?: number): Character {
   if (dnd5eRestBenefitsPrevented(character)) return character
+  if(character.dnd5eCombatState?.sceneReactionSpent)character={...character,dnd5eCombatState:{...character.dnd5eCombatState,sceneReactionSpent:undefined}}
   const remainingEffects = removeDnd5eActiveEffectsForEvent({
     effects: character.dnd5eCombatState?.activeEffects,
     trigger: 'short-rest-complete',
@@ -183,7 +200,7 @@ export function applyDnd5eGrantedShortRestBenefits(character: Character, complet
     }, 'short-rest')),
     'short-rest',
   )
-  return completionWorldMinute == null ? restored : recordDnd5eRestActivityWindow(restored, 'short-rest-complete', completionWorldMinute)
+  return completionWorldMinute == null ? restored : applyDnd5eRestTemporaryHitPoints(recordDnd5eRestActivityWindow(restored, 'short-rest-complete', completionWorldMinute), 'short-rest', completionWorldMinute)
 }
 
 export interface Dnd5eCampaignTimeReconcileContext {
@@ -291,9 +308,12 @@ function advanceTimedActiveEffects(
   context: Dnd5eCampaignTimeReconcileContext = {},
 ): Character {
   const elapsedRounds = Math.max(0, Math.floor(elapsedMinutes * 10))
-  const phaseDeadline = (effect: Dnd5eActiveEffectInstance) =>
-    effect.modifiers?.planarPhase?.plane === 'ethereal' && Number.isSafeInteger(effect.explorationExpiresAtWorldSecond) &&
+  const phaseDeadline = (effect: Dnd5eActiveEffectInstance) => {
+    const wind=readDnd5eStormGuideWindExpiry(effect)
+    if(typeof wind==='number'&&context.worldSecond!=null)return wind
+    return effect.modifiers?.planarPhase?.plane === 'ethereal' && Number.isSafeInteger(effect.explorationExpiresAtWorldSecond) &&
       context.worldSecond != null ? effect.explorationExpiresAtWorldSecond : undefined
+  }
   if (elapsedRounds < 1 && !(character.dnd5eCombatState?.activeEffects ?? []).some(effect => {
     const deadline = phaseDeadline(effect)
     return deadline != null && context.worldSecond! >= deadline
@@ -844,6 +864,7 @@ export function applyDnd5eLongRestBenefits(
   restFeatureD20Rolls: readonly CampaignRestFeatureD20Roll[] = [],
 ): Character {
   if (dnd5eRestBenefitsPrevented(character)) return character
+  if(character.dnd5eCombatState?.sceneReactionSpent)character={...character,dnd5eCombatState:{...character.dnd5eCombatState,sceneReactionSpent:undefined}}
   // Own-source rest expiry must precede healing: otherwise an effect-owned
   // maximum debit is restored only in the later roster pass, after HP healed.
   const effects = character.dnd5eCombatState?.activeEffects ?? []
@@ -955,7 +976,7 @@ export function applyDnd5eLongRestBenefits(
   const result = divineInterventionCooldownDays
     ? advanceDnd5eDivineInterventionCalendarDays(restored, 0)
     : restored
-  return recordDnd5eRestActivityWindow(result, 'long-rest-complete', completionWorldMinute)
+  return applyDnd5eRestTemporaryHitPoints(recordDnd5eRestActivityWindow(result, 'long-rest-complete', completionWorldMinute), 'long-rest', completionWorldMinute)
 }
 
 /**

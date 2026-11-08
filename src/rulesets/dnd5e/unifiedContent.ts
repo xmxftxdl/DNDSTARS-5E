@@ -5,7 +5,7 @@ import {
   type ContentDefinitionKind,
 } from '../../domain/content/contentDefinition'
 import type { DeclarativeClassDefinitionV1 } from './declarativeClass'
-import type { DeclarativeSubclassDefinitionV1 } from './declarativeSubclassAbility'
+import { declarativeAbilityCompatibilityV1, type DeclarativeSubclassDefinitionV1 } from './declarativeSubclassAbility'
 import {
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomRulesPluginDraft,
@@ -207,11 +207,23 @@ function legacyFeatPayload(
 ): Dnd5eAuthorableFeatDefinitionV1 {
   const payload = structuredClone(definition.payload)
   payload.action ??= inferredFeatureAction(definition)
-  if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
+  const supportedPassive = payload.declarativeAbility?.trigger.kind === 'passive' &&
+    !!payload.declarativeAbility.mechanic && declarativeAbilityCompatibilityV1(payload.declarativeAbility).effective === 'full'
+  if (!supportedPassive && (definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
   }
   return payload
+}
+
+/** A deliberately narrow live entry into the existing DM boundary, not an
+ * automation promotion. Ordinary assisted/manual recipes remain reference-only.
+ * The owner decision and real native/Base publication are still required by the
+ * declared purpose; this predicate issues no execution/owner authority. */
+function hasOwnerMagicalTruthEntry(definition:Dnd5eUnifiedContentDefinitionV1<'spell'>,activity:Dnd5eActivityDefinitionV1):boolean {
+ if(definition.automation.level!=='full'||activity.automation.level!=='full'||activity.legacySource?.kind!=='spell'||activity.legacySource.magical!==true||activity.target.kind!=='creature'||activity.target.count!==1||activity.checks?.length||activity.outcomes.length!==1||activity.outcomes[0].when.kind!=='always')return false
+ const operations=activity.outcomes[0].operations,manual=operations.filter(operation=>operation.kind==='manual-adjudication');if(manual.length!==1||manual[0].purpose!=='magical-truth-detection'||manual[0].target!=='target'||operations.some(operation=>operation.kind!=='manual-adjudication'&&operation.kind!=='narrative-prompt'))return false
+ const analysis=dnd5eActivityAutomationAnalysisV1(activity);return analysis.missingComponents.length===1&&analysis.missingComponents[0]==='operation:manual-adjudication'
 }
 
 function legacySpellPayload(
@@ -495,7 +507,7 @@ export function dnd5eRulesPluginFromUnifiedContentBundleV1(
             // silently selected or promoted to automatic spell settlement.
             const activity = candidates.length === 1 ? candidates[0] : undefined
             if (activity && !activity.authorityBinding &&
-              dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' &&
+              (dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' || hasOwnerMagicalTruthEntry(definition,activity)) &&
               dnd5eActivityHeadlessCompatibility(activity, { outerSpellTransaction: true }).supported) {
               api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }))
               compiledActivityIds.add(activity.id)

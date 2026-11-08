@@ -1,4 +1,7 @@
 import { dnd5eMonsterWithHeldWeapon } from '../../rulesets/dnd5e/companionHeldWeapon'
+import { MultipartControls } from './MultipartControls'
+import { createMultipartCreature } from '../../rulesets/dnd5e/multipartCreature'
+import type { MultipartControlCommand } from '../../rulesets/dnd5e/multipartControlAction'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ChevronDown,
@@ -170,9 +173,11 @@ function ActionList({
   activeEffectDefinitionIds,
   rechargeReadyByActionId,
   actionUsesByActionId,
+  hiddenActionIds,
   onSelectAction,
   onSelectAdjudicatedAction,
 }: {
+  hiddenActionIds?:ReadonlySet<string>
   title: string
   actions?: readonly MonsterAction[]
   tone: 'rose' | 'emerald' | 'cyan' | 'amber' | 'fuchsia'
@@ -207,7 +212,7 @@ function ActionList({
       <h4 className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{title}</h4>
       <div className="space-y-1.5">
         {actions.map((action, actionIndex) => {
-          if(action.id==='innate-spell-step')return null
+          if(action.id==='innate-spell-step'||(action.id&&hiddenActionIds?.has(action.id)))return null
           const recharge = action.usage?.kind === 'recharge'
             ? action.usage
             : undefined
@@ -376,6 +381,7 @@ export default function DmMonsterControlDock({
   onEscapeActiveEffect,
   onActivateReckless,
   onShapechange,
+  onMultipartCommand,
   onSelectMovement,
   onCancelMovement,
   endTurnPending = false,
@@ -433,6 +439,7 @@ export default function DmMonsterControlDock({
   onEscapeActiveEffect?: (token: Token, effectId: string) => void
   onActivateReckless?: (token: Token) => void
   onShapechange?: (token: Token, formId: string) => void
+  onMultipartCommand?: (command: MultipartControlCommand) => void
   onSelectMovement?: (
     token: Token,
     kind: Dnd5eManualMonsterMovementKind,
@@ -628,6 +635,14 @@ export default function DmMonsterControlDock({
               </button>
             ) : null}
           </header>
+          {battleMap && structuredMonster?.multipartRule === 'false-hydra-v1' &&
+            <MultipartControls actorId={selectedToken.id} isCurrent={isCurrent} pending={actionPending}
+              state={selectedToken.dnd5eCombatState?.monsterMultipart ?? createMultipartCreature({
+                x:selectedToken.x/battleMap.gridSize*(battleMap.feetPerCell??5),
+                y:selectedToken.y/battleMap.gridSize*(battleMap.feetPerCell??5),z:selectedToken.elevationFeet??0})}
+              corpses={battleMap.tokens.filter(t=>t.id!==selectedToken.id &&
+                (t.hp??characters.find(c=>c.id===t.characterId)?.currentHp??1)<=0 && t.dnd5eCombatState?.bodyPresent!==false).map(t=>({id:t.id,label:t.label}))}
+              onCommand={onMultipartCommand}/>}
 
           <div className="space-y-4 p-4">
             {structuredMonster?.traits.some((trait) => trait.rule?.kind === 'reckless') ? (
@@ -860,6 +875,11 @@ export default function DmMonsterControlDock({
                 <ActionList
                   title="动作"
                   actions={stats.actions}
+                  hiddenActionIds={structuredMonster?.multipartRule==='false-hydra-v1'?new Set(structuredMonster.actions.filter(a=>{
+                    if(!a.multipartHeadId)return false
+                    const head=selectedToken.dnd5eCombatState?.monsterMultipart?.heads.find(h=>h.id===a.multipartHeadId)
+                    return head?!head.alive||head.actionSpent:!/^head-[1-4]$/.test(a.multipartHeadId)
+                  }).map(a=>a.id)):undefined}
                   tone="rose"
                   canAct={canAct}
                   actionUsed={actionUsed}

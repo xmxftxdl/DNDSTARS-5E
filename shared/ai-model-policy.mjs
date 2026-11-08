@@ -2,8 +2,8 @@ export const AI_MODEL_POLICY_VERSION = 1
 
 export const AI_MODEL_POLICY = Object.freeze({
   providerId: 'external-account',
-  generalModelId: 'gpt-5.6-luna',
-  pdfExtractionModelId: 'gpt-5.6-luna',
+  generalModelId: 'gpt-6.1-sol',
+  pdfExtractionModelId: 'gpt-6.1-sol',
   pdfSynthesisModelId: 'gpt-5.6-sol',
   imageModelId: 'gpt-image-2',
   imageQuality: 'low',
@@ -16,6 +16,8 @@ export const AI_CREDIT_POLICY = Object.freeze({
   textRates: Object.freeze({
     'gpt-5.6-luna': Object.freeze({ inputPerMillion: 1_000, outputPerMillion: 8_000 }),
     'gpt-5.6-sol': Object.freeze({ inputPerMillion: 4_000, outputPerMillion: 30_000 }),
+    // Internal Sol credit tariff; not an upstream USD price.
+    'gpt-6.1-sol': Object.freeze({ inputPerMillion: 4_000, outputPerMillion: 30_000 }),
   }),
   imageRates: Object.freeze({
     'gpt-image-2:low': 250,

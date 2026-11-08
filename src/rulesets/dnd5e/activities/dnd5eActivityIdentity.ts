@@ -221,3 +221,9 @@ export function dnd5eTrackableDefinitionIdForActionV1(
   }
   return dnd5eTrackableDefinitionIdV1(identity)
 }
+
+/** Preserve legal legacy Host identities; digest arbitrary runtime provenance without case folding. */
+export function dnd5eBoundedHostEventId(value: string): string {
+  return /^[a-z0-9][a-z0-9._:-]{0,159}$/.test(value)
+    ? value : `host-event:${dnd5eExecutionEventKey(value)}`
+}

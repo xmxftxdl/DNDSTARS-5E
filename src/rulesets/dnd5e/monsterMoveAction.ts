@@ -1,3 +1,5 @@
+import {findDnd5eIllOmenHoundPath} from './illOmenHoundPath'
+import { dnd5eActiveObjectCreatureTraversal } from './activeEffects'
 import {dnd5eTempleEntryRequirements} from './templeEntry'
 import { dnd5eJumpLaunchPoint } from './jumpLaunchPoint'
 import { mapForSolidMaterialTraversal, mapGeometryForSolidMaterialTraversal } from '../../lib/mapSolidMaterialTraversal'
@@ -205,8 +207,9 @@ function planMonsterMovementPath(input: Pick<Parameters<typeof resolveDnd5eMonst
   const actorElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
   const actorGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
   const targetGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, input.to)
+  const phasesObjects=dnd5eActiveObjectCreatureTraversal(actorCombatant.classState.activeEffects)
   const targetElevationFeet = Number.isFinite(input.targetElevationFeet)
-    ? Math.max(targetGroundElevationFeet, input.targetElevationFeet!)
+    ? phasesObjects && (input.traversalMode==null || input.traversalMode==='walk') ? input.targetElevationFeet! : Math.max(targetGroundElevationFeet, input.targetElevationFeet!)
     : actorElevationFeet > actorGroundElevationFeet
       ? Math.max(targetGroundElevationFeet, actorElevationFeet)
       : targetGroundElevationFeet
@@ -222,8 +225,9 @@ function planMonsterMovementPath(input: Pick<Parameters<typeof resolveDnd5eMonst
   const environmentalCapabilities = dnd5eActiveEnvironmentalCapabilities(
     actorCombatant.classState.activeEffects, actorCombatant,
   )
-  const path = findMapGeometryPath({
+  const path = (actorCombatant.illOmenHound ? findDnd5eIllOmenHoundPath : findMapGeometryPath)({
     geometry, map: pathfindingMap, token: actorToken, to: input.to,
+    passThroughObjectsAndCreatures: dnd5eActiveObjectCreatureTraversal(actorCombatant.classState.activeEffects),
     passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects)
       .flatMap(source => source.rule.materials),
     canTraverseEdge: (from, to) => dnd5eCompanionGuardCanTraverse(input.map, actorToken, from, to),
@@ -356,6 +360,7 @@ function resolveDnd5eMonsterMapMoveInternal(input: {
         const expectedElevation = draggedElevationStart +
           (path.elevationsFeet[index] ?? sourceElevationStart) - sourceElevationStart
         const draggedSegment = findMapGeometryPath({
+          passThroughObjectsAndCreatures: dnd5eActiveObjectCreatureTraversal(snapshot.state.combatants[draggedTarget.id]?.classState.activeEffects),
           passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(snapshot.state.combatants[draggedTarget.id]?.classState.activeEffects)
             .flatMap(source => source.rule.materials),
           geometry: dragGeometry,

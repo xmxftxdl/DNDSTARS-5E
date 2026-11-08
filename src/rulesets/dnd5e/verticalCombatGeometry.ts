@@ -1,3 +1,7 @@
+import {tokenAnchorCellFromPixel as multipartAnchorCell} from '../../lib/gridCombat'
+import {mapGeometryLineOfEffectBlocked as multipartLineBlocked} from '../../lib/mapGeometry'
+import {tokensInAoe,aoeOrientFromCell} from '../../lib/skillTargeting'
+import {multipartTokenHeadProjections,multipartTokenSurfaceProjections} from './multipartMapGeometry'
 import { tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import {
   mapGeometryTerrainElevationAtPoint,
@@ -109,6 +113,17 @@ export function dnd5eMapTokenDistanceFeet(input: {
   leftSizeRank?: number
   rightSizeRank?: number
 }): number {
+  if(input.left.multipartProjection&&input.left.size===1)input={...input,leftSizeRank:2}
+  if(input.right.multipartProjection&&input.right.size===1)input={...input,rightSizeRank:2}
+  if((input.left.dnd5eCombatState?.monsterMultipart&&!input.left.multipartProjection)||
+     (input.right.dnd5eCombatState?.monsterMultipart&&!input.right.multipartProjection)) {
+    const heads=multipartTokenHeadProjections(input.left,input.map)
+    const lefts=heads.length?heads:[{...input.left,multipartProjection:true}]
+    const rights=multipartTokenSurfaceProjections(input.right,input.map)
+    return Math.min(...lefts.flatMap(left=>rights.map(right=>dnd5eMapTokenDistanceFeet({...input,left,right,
+      leftSizeRank:left.multipartProjection&&heads.length?2:input.leftSizeRank,
+      rightSizeRank:right.size===1&&right.multipartProjection?2:input.rightSizeRank}))))
+  }
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const horizontalLeft = dnd5eTokenAtEffectiveSize(input.left, input.leftSizeRank)
   const horizontalRight = dnd5eTokenAtEffectiveSize(input.right, input.rightSizeRank)
@@ -312,6 +327,17 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
   /** Absolute elevation of the selected aim point. */
   effectAimElevationFeet?: number
 }): boolean {
+  if(input.targetToken.dnd5eCombatState?.monsterMultipart&&!input.targetToken.multipartProjection) {
+    const sourceCell=multipartAnchorCell(input.effectOrigin.x,input.effectOrigin.y,{...input.sourceToken,size:1},input.map)
+    const aim=input.effectAim??input.effectOrigin
+    const aimCell=multipartAnchorCell(aim.x,aim.y,{...input.sourceToken,size:1},input.map)
+    const targetCell=input.area.shape==='circle'&&input.area.origin==='self'?sourceCell:aimCell
+    const parts=tokensInAoe(input.map,multipartTokenSurfaceProjections(input.targetToken,input.map),input.area,
+      aoeOrientFromCell(input.area,sourceCell,targetCell),targetCell)
+    return parts.some(targetToken=>dnd5eInstantAoeAffectsTokenVertically({...input,targetToken}) &&
+      !multipartLineBlocked({map:input.map,geometry:input.geometry,from:input.effectOrigin,to:targetToken,
+        fromElevationFeet:input.effectOriginElevationFeet,toElevationFeet:mapGeometryTokenElevation(input.geometry,targetToken)}))
+  }
   const targetBottom = mapGeometryTokenElevation(input.geometry, input.targetToken)
   const targetHeight = dnd5eTokenHeightFeet(input.targetToken)
 

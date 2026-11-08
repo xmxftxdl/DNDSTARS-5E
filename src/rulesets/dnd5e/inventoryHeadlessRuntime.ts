@@ -1,3 +1,4 @@
+import {isIncomingCriticalUpgrade,supplementIncomingCriticalDamage} from './incomingAttackRerollCheckpoint'
 import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
 import type { Character } from '../../types/character'
 import type {
@@ -274,7 +275,11 @@ export function resolveDnd5eOnHitBonusDamage(input: {
     return { ok: false, reason: 'invalid-inventory-effect-rolls', components: [] }
   }
   for (const requirement of requirements) {
-    const rolls = supplied[requirement.key]
+    let rolls = supplied[requirement.key]
+    if(input.critical&&rolls&&isIncomingCriticalUpgrade()){
+      const base=dnd5eOnHitBonusDamageRequirements({...input,critical:false}).find(row=>row.key===requirement.key)
+      if(base&&requirement.count===base.count*2)rolls=supplementIncomingCriticalDamage({count:base.count,sides:requirement.sides,rolls,critical:true}).rolls
+    }
     const originalCount = cancelledRequirements.find(entry => entry.key === requirement.key)?.count
     if (
       !rolls || (rolls.length !== requirement.count && rolls.length !== originalCount) ||

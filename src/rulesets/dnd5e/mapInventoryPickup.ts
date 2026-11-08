@@ -1,3 +1,4 @@
+import {expireDnd5eRelentlessThrownObjects} from './relentlessThrownMapInventory'
 import { getDnd5eSrdMonster } from './monsters'
 import {resolveDnd5eFortressServantControl} from './fortressServantControl'
 import { dnd5eCarriedLoadCapacityPounds } from './carryingCapacity'
@@ -34,7 +35,7 @@ export function prepareDnd5eMapInventoryPickup(input: {
   expectedReceiptId: string; expectedQuantity: number;
   combatActive: boolean; combat?: { currentTokenId: string; turnEconomy: Dnd5eTurnEconomyCounts };
 }): MapInventoryPickupResult {
-  input = { ...input, map: expireDnd5eGroundInventoryAlterations(input.map, input.characters) }
+  input = { ...input, map: expireDnd5eRelentlessThrownObjects(expireDnd5eGroundInventoryAlterations(input.map, input.characters),input.characters) }
   const fail = (reason: string): MapInventoryPickupResult => ({ ok: false, reason })
   const actor = input.map.tokens.find(t => t.id === input.actorTokenId)
   const character = actor && input.characters.find(c => c.id === actor.characterId)
@@ -59,7 +60,7 @@ export function prepareDnd5eMapInventoryPickup(input: {
     dnd5eDestroyedMapObject(target)) return fail('pickup-object-unsupported')
   if (item.receiptId !== input.expectedReceiptId || item.quantity !== input.expectedQuantity) return fail('pickup-object-changed')
   const template = dnd5eInventoryItemTemplate(item.templateId)
-  if (!template || !dnd5eMapPhysicalItemTemplate(template)) return fail('pickup-object-unsupported')
+  if (!template || !dnd5eMapPhysicalItemTemplate(template,item.instance)) return fail('pickup-object-unsupported')
   if (item.instance && item.quantity > 1 && !template.ammunitionKind) return fail('pickup-object-unsupported')
   const contents = item.contents ?? []
   if (contents.length && (template.category !== 'container' || contents.some(child => {

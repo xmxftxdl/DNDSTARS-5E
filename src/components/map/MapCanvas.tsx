@@ -1,4 +1,8 @@
+import { snapWallDrawingPoint } from './wallEndpointSnap'
+import type {MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay} from './mapCanvasOverlays'
+export type {MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay} from './mapCanvasOverlays'
 import { ControlledWaterSceneLayer } from './ControlledWaterSceneLayer'
+import { MultipartHeadLayer } from './MultipartHeadLayer'
 import type { MapSurfaceMaterial } from '../../lib/mapSurfaceMaterials'
 import type { MapTraversableSolidMaterial } from '../../lib/mapSolidMaterialTraversal'
 import { IceWallVisual } from './IceWallVisual'
@@ -16,7 +20,7 @@ import { measurePointsEqual, tabletopLinePoints, tabletopStrokeIntersectsBox, ty
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
 import Konva from 'konva'
-import { getImage } from '../../lib/imageStore'
+import { getMapImage } from '../../lib/imageStore'
 import {
   DEFAULT_GRID_COLOR,
   DEFAULT_GRID_OPACITY,
@@ -92,6 +96,7 @@ import {
 import { usePrefersReducedMotion, useStatusAnimation } from './mapEffectHooks'
 import { FogOfWarLayer, LightingLayer, PlayerVisibilityLayer } from './MapVisibilityLayers'
 import { PersonalPerceptionMask } from './PersonalPerceptionMask'
+import { personalSolidSightPolygon } from './personalSolidSight'
 import { originalPlaneSceneView } from './originalPlaneSceneView'
 import { MapGeometryDiagnosticsLayer, MapGeometryLayer } from './MapGeometryLayers'
 import { Dnd5ePluginAreaOverlays, DifficultTerrainCellOverlays, TerrainElevationContours } from './MapPersistentAreaLayers'
@@ -137,8 +142,8 @@ import type {
 } from '../../lib/mapTabletop'
 import {
   sceneRegionMovedWithinMap,
-  type SceneInteractionPointIcon,
   type SceneRegion,
+  type SceneInteractionPointIcon,
 } from '../../lib/sceneOrchestration'
 import { mapLightingRadiusFromDrag } from './mapLightingPresentation'
 import {
@@ -154,42 +159,6 @@ import {
   mapCanvasTokenClickAction,
   syncMapCanvasViewportDataset,
 } from './mapCanvasInteraction'
-
-export interface MoveCircle {
-  centerX: number
-  centerY: number
-  radiusPx: number
-}
-
-export interface SceneTriggerZoneOverlay {
-  sceneId: string
-  triggerId: string
-  name: string
-  enabled: boolean
-  region: SceneRegion
-}
-
-export interface SceneInteractionPointOverlay {
-  sceneId: string
-  id: string
-  name: string
-  enabled: boolean
-  visibleToPlayers: boolean
-  icon: SceneInteractionPointIcon
-  x: number
-  y: number
-  prompt: string
-}
-
-export interface SceneTeleportDestinationOverlay {
-  sceneId: string
-  triggerId: string
-  actionId: string
-  name: string
-  enabled: boolean
-  x: number
-  y: number
-}
 
 interface MapCanvasProps {
   map: BattleMap
@@ -221,6 +190,7 @@ interface MapCanvasProps {
   moveIgnoreDifficultTerrain?: boolean
   moveIgnoreDifficultTerrainMaterials?: readonly MapSurfaceMaterial[]
   movePassThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
+  movePassThroughObjectsAndCreatures?: boolean
   moveTreatsLiquidSurfacesAsSolidGround?: boolean
   difficultTerrainMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   speedCostMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
@@ -328,7 +298,7 @@ interface MapCanvasProps {
   onGeometryDetectionCandidateRemove?: (index: number) => void
   visionSourceTokenIds?: string[]
   exploredVisionPolygons?: MapGeometryPoint[][]
-  onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
+  onGeometryEntityCommit?: (entity: MapGeometryEntity) => boolean | void
   onGeometryEntitySelect?: (entityId: string | null) => void
   onGeometryEntityDelete?: (entityId: string) => void
   onGeometryEntityPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -402,6 +372,7 @@ export default function MapCanvas({
   moveIgnoreDifficultTerrain = false,
   moveIgnoreDifficultTerrainMaterials,
   movePassThroughSolidMaterials,
+  movePassThroughObjectsAndCreatures,
   moveTreatsLiquidSurfacesAsSolidGround = false,
   difficultTerrainMultiplierAtPosition,
   speedCostMultiplierAtPosition,
@@ -505,6 +476,7 @@ export default function MapCanvas({
 }: MapCanvasProps) {
   const appTheme = useSyncExternalStore(subscribeAppTheme, getAppTheme, getAppTheme)
   const canvasMatteColor = mapCanvasMatteColor(appTheme)
+  const solidSightPolygon = useMemo(() => personalSolidSightPolygon({map, geometry, viewerCharacterId, isDM, worldMinute}), [map, geometry, viewerCharacterId, isDM, worldMinute])
   const originalPlanePolygons = useMemo(() => originalPlaneSceneView({
     map, geometry, viewerCharacterId, materialSightRangeFeet: viewerMaterialSightRangeFeet, isDM, worldMinute,
   }), [map, geometry, viewerCharacterId, viewerMaterialSightRangeFeet, isDM, worldMinute])
@@ -1330,8 +1302,9 @@ export default function MapCanvas({
     return () => window.removeEventListener('keydown', onKey)
   }, [measureMode, pending])
 
-  const relativePoint = (stage: Konva.Stage | null): Point | null => {
+  const relativePoint = (stage: Konva.Stage | null, event?: MouseEvent): Point | null => {
     if (!stage) return null
+    if (event) stage.setPointersPositions(event)
     const p = stage.getRelativePointerPosition()
     return p ? { x: p.x, y: p.y } : null
   }
@@ -1392,7 +1365,7 @@ export default function MapCanvas({
       canClimb: moveTraversalMode === 'climb' || moveTraversalMode === 'fly',
       canSwim: moveTraversalMode === 'swim' || moveTreatsLiquidSurfacesAsSolidGround,
       canFly: moveTraversalMode === 'fly' || moveIgnoreMaterialCollision,
-      targetElevationFeet: moveTraversalMode === 'walk' && movePassThroughSolidMaterials?.length
+      targetElevationFeet: moveTraversalMode === 'walk' && (movePassThroughSolidMaterials?.length || movePassThroughObjectsAndCreatures)
         ? Math.min(mapGeometryTerrainElevationAtPoint(geometry, cursor), moveTargetElevationFeet ?? mapGeometryTokenElevation(geometry, movingToken))
         : moveTraversalMode === 'climb' || moveTraversalMode === 'fly' || moveIgnoreMaterialCollision
         ? moveTargetElevationFeet ?? mapGeometryTokenElevation(geometry, movingToken)
@@ -1407,6 +1380,7 @@ export default function MapCanvas({
       minimumPassageGapInches: moveMinimumPassageGapInches,
       ignoreDifficultTerrainMaterials: moveIgnoreDifficultTerrainMaterials,
       passThroughSolidMaterials: movePassThroughSolidMaterials,
+      passThroughObjectsAndCreatures: movePassThroughObjectsAndCreatures,
       ignoreDifficultTerrain: moveIgnoreMaterialCollision || moveIgnoreDifficultTerrain,
       additionalDifficultTerrainMultiplier: moveIgnoreMaterialCollision
         ? undefined
@@ -1415,7 +1389,7 @@ export default function MapCanvas({
         ? undefined
         : speedCostMultiplierAtPosition,
     })
-  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCanOccupyCreatureSpaces, moveCircle, moveIgnoreDifficultTerrain, moveIgnoreDifficultTerrainMaterials, movePassThroughSolidMaterials, moveIgnoreMaterialCollision, moveMinimumPassageGapInches, moveSelectMode, moveTargetElevationFeet, moveTraversalMode, moveTreatsLiquidSurfacesAsSolidGround, selectedTokenId, speedCostMultiplierAtPosition])
+  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCanOccupyCreatureSpaces, moveCircle, moveIgnoreDifficultTerrain, moveIgnoreDifficultTerrainMaterials, movePassThroughSolidMaterials, movePassThroughObjectsAndCreatures, moveIgnoreMaterialCollision, moveMinimumPassageGapInches, moveSelectMode, moveTargetElevationFeet, moveTraversalMode, moveTreatsLiquidSurfacesAsSolidGround, selectedTokenId, speedCostMultiplierAtPosition])
 
   const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
     if (!fogEditMode || !fogDragStartRef.current) return false
@@ -1486,7 +1460,6 @@ export default function MapCanvas({
   }, [])
 
   useEffect(() => {
-    if (geometryEditMode) return
     cancelPendingGeometryClickCommits()
     geometryDragStartRef.current = null
     geometryViewportPanStartRef.current = null
@@ -1496,9 +1469,30 @@ export default function MapCanvas({
       setGeometryViewportPanActive(false)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [cancelPendingGeometryClickCommits, geometryEditMode])
+  }, [cancelPendingGeometryClickCommits, geometryEditMode, geometryTool, map.id])
 
   useEffect(() => () => cancelPendingGeometryClickCommits(), [cancelPendingGeometryClickCommits])
+
+  useEffect(() => {
+    if (!geometryEditMode) return
+    const cancelInterruptedDraw = () => {
+      // Normal canvas mouse-up commits and clears this ref before bubbling to
+      // window. A release outside the canvas or focus loss must not leave an
+      // old start point active when the pointer returns.
+      if (!geometryDragStartRef.current) return
+      geometryDragStartRef.current = null
+      setGeometryDraft(null)
+      setGeometryDragActive(false)
+    }
+    window.addEventListener('mouseup', cancelInterruptedDraw)
+    window.addEventListener('blur', cancelInterruptedDraw)
+    window.addEventListener('pointercancel', cancelInterruptedDraw)
+    return () => {
+      window.removeEventListener('mouseup', cancelInterruptedDraw)
+      window.removeEventListener('blur', cancelInterruptedDraw)
+      window.removeEventListener('pointercancel', cancelInterruptedDraw)
+    }
+  }, [geometryEditMode])
 
   const geometryEntityFromDrag = (start: Point, current: Point): MapGeometryEntity | null => {
     const drag = geometryDragStartRef.current
@@ -1616,17 +1610,8 @@ export default function MapCanvas({
     }
   }
 
-  const snapGeometryPoint = (point: Point): Point => {
-    if (!geometrySnapToGrid) return point
-    const gridSize = Math.max(1, map.gridSize)
-    const offsetX = map.gridOffsetX ?? 0
-    const offsetY = map.gridOffsetY ?? 0
-    return {
-      x: offsetX + Math.round((point.x - offsetX) / gridSize) * gridSize,
-      y: offsetY + Math.round((point.y - offsetY) / gridSize) * gridSize,
-    }
-  }
-
+  const snapGeometryPoint = (point: Point): Point => snapWallDrawingPoint(point, geometry, geometryTool, view.scale,
+    { enabled: geometrySnapToGrid, size: map.gridSize, x: map.gridOffsetX ?? 0, y: map.gridOffsetY ?? 0 })
   const geometryGridCellAtPoint = (point: Point): MapGeometryGridCell | null => {
     if (point.x < 0 || point.y < 0 || point.x >= map.width || point.y >= map.height) return null
     const gridSize = Math.max(1, map.gridSize)
@@ -1667,13 +1652,13 @@ export default function MapCanvas({
       map.gridOffsetY ?? 0,
     )
 
-  const handleGeometryMouseDown = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseDown = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     if (!geometryEditMode) return false
     if (geometryTool === 'select' || geometryTool === 'delete') {
       if (geometryTool === 'select') onGeometryEntitySelect?.(null)
       return true
     }
-    const rawPoint = relativePoint(stage)
+    const rawPoint = relativePoint(stage, event)
     if (geometryTool === 'elevation' && geometryTerrainEditingLocked) return true
     const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
@@ -1716,10 +1701,10 @@ export default function MapCanvas({
     return true
   }
 
-  const handleGeometryMouseMove = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseMove = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
-    const rawPoint = relativePoint(stage)
+    const rawPoint = relativePoint(stage, event)
     const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
       ? geometryTool === 'door' || geometryTool === 'window' || gridPaintTool ? rawPoint : snapGeometryPoint(rawPoint)
@@ -1738,11 +1723,18 @@ export default function MapCanvas({
     return true
   }
 
-  const handleGeometryMouseUp = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseUp = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
-    const releasePoint = relativePoint(stage) ?? drag.point
-    const draft = geometryDraft ?? geometryEntityFromDrag(drag.point, drag.point)
+    const releasePoint = relativePoint(stage, event) ?? drag.point
+    const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
+    const endPoint = geometryTool === 'door' || geometryTool === 'window' || gridPaintTool
+      ? releasePoint : snapGeometryPoint(releasePoint)
+    // The preview is React state and can lag behind the latest native event.
+    // Commit this gesture's start and release coordinates, including the final
+    // painted cell, rather than reusing a preview from an earlier frame.
+    handleGeometryMouseMove(stage, event)
+    const draft = geometryEntityFromDrag(drag.point, endPoint)
     geometryDragStartRef.current = null
     setGeometryDragActive(false)
     if (geometryTool === 'door' || geometryTool === 'window') stage?.draggable(true)
@@ -1774,11 +1766,11 @@ export default function MapCanvas({
         // tabletop Ping instead of also painting a cell or placing two lights.
         const timer = window.setTimeout(() => {
           pendingGeometryClickCommitTimersRef.current.delete(timer)
-          onGeometryEntityCommit?.(draft)
+          if (onGeometryEntityCommit?.(draft) === false) setGeometryDraft(draft)
         }, 320)
         pendingGeometryClickCommitTimersRef.current.add(timer)
       } else {
-        onGeometryEntityCommit?.(draft)
+        if (onGeometryEntityCommit?.(draft) === false) setGeometryDraft(draft)
       }
     }
     return true
@@ -1846,7 +1838,7 @@ export default function MapCanvas({
     }
     const loadImage = async () => {
       try {
-        const blob = await getImage(map.id)
+        const blob = await getMapImage(map.id)
         if (cancelled) return
         if (!blob) {
           scheduleRetry('missing')
@@ -2465,6 +2457,7 @@ export default function MapCanvas({
       data-testid="map-canvas"
       data-original-plane-sight-feet={originalPlanePolygons === undefined ? undefined : viewerMaterialSightRangeFeet}
       data-vision-source-count={visionSourceTokenIds.length}
+      data-personal-solid-sight-point-count={solidSightPolygon.length || undefined}
       data-vision-enabled={geometry?.vision.enabled === true ? 'true' : 'false'}
       data-ambient-light={geometry?.vision.ambientLight ?? 'bright'}
       data-scene-light-count={(geometry?.lights ?? []).filter((light) => campaignLightIsActive(light, worldMinute)).length}
@@ -2504,7 +2497,7 @@ export default function MapCanvas({
       data-viewport-x={view.x}
       data-viewport-y={view.y}
       data-viewport-scale={view.scale}
-      data-geometry-tool={geometryEditMode ? geometryTool : 'off'}
+      data-geometry-tool={geometryEditMode ? geometryTool : 'off'} data-geometry-draft={geometryDraft ? 'true' : 'false'}
       data-geometry-overlay-visible={geometryOverlayVisible ? 'true' : 'false'}
       data-difficult-terrain-cell-count={difficultTerrainCells.length}
       data-dm-geometry-wall-count={isDM ? geometry?.walls.length ?? 0 : 0}
@@ -2665,7 +2658,7 @@ export default function MapCanvas({
           }
           if (geometryEditMode && e.evt.button === 0) {
             if (!isMapTokenNode(e.target)) {
-              const handled = handleGeometryMouseDown(stage)
+              const handled = handleGeometryMouseDown(stage, e.evt)
               if (handled) e.cancelBubble = true
             }
             return
@@ -2747,7 +2740,7 @@ export default function MapCanvas({
             })
             return
           }
-          if (geometryEditMode && handleGeometryMouseMove(e.target.getStage())) return
+          if (geometryEditMode && handleGeometryMouseMove(e.target.getStage(), e.evt)) return
           if (fogEditMode && handleFogMouseMove(e.target.getStage())) return
           if (deleteSelectMode && deleteDrag) {
             const p = relativePoint(e.target.getStage())
@@ -2811,7 +2804,7 @@ export default function MapCanvas({
             }
             return
           }
-          if (geometryEditMode && handleGeometryMouseUp(e.target.getStage())) {
+          if (geometryEditMode && handleGeometryMouseUp(e.target.getStage(), e.evt)) {
             e.cancelBubble = true
             return
           }
@@ -3046,6 +3039,7 @@ export default function MapCanvas({
           )}
         </Layer>
         <Layer name="token-body-layer">
+          <MultipartHeadLayer map={map} tokens={renderedTokens} onSelect={onSelectToken} />
           {companionGuardOverlays(map, isDM, viewerCharacterId).map(area =>
             <Group key={`guard:${area.minX}:${area.minY}:${area.maxX}:${area.maxY}`} listening={false}>
               <Rect x={area.minX} y={area.minY} width={area.maxX-area.minX} height={area.maxY-area.minY}
@@ -3455,6 +3449,7 @@ export default function MapCanvas({
             worldMinute={worldMinute}
             geometry={geometry}
             draft={geometryDraft}
+            personalSolidSightPolygon={solidSightPolygon}
             editMode={geometryEditMode}
             doorInteractionMode={!isDM && !geometrySearchMode}
             tool={geometryTool}

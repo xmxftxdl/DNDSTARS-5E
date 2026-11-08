@@ -1,3 +1,13 @@
+import{createDnd5eActivityAbilityOriginalDice,createDnd5eActivitySavingOriginalDice}from'../headlessCombatEngine'
+import {settleDnd5eSpellHealingDiceGroups} from '../headlessCombatEngine'
+import {dnd5eActivitySpellHealingGroups,dnd5eActivityHealingRollOverrides} from '../spellHealingActivityDice'
+import{withFailedD20NativeAttackScope,recordFailedD20NativeAttack,failedD20CheckpointsActive,failedD20NativeAcceptedAmount,bindFailedD20ActivityAdjustment}from'../failedD20BonusCheckpoint'
+import {masterDuelistCheckpointsActive,masterDuelistOptions,withMasterDuelistNativeAttackScope,recordMasterDuelistOriginalAttack,masterDuelistActivityModeSource,masterDuelistNativeModeAfterOverride,bindMasterDuelistActivityReplacement} from '../masterDuelistCheckpoint'
+import {dnd5eMonsterSpellAttackModeResolution} from '../headlessCombatEngine'
+import {copyDnd5eOrdinaryWeaponScene} from '../ordinaryWeaponScene'
+import {recordIncomingAttackDice,incomingCriticalFormulaRolls} from '../incomingAttackRerollCheckpoint'
+import {settleIncomingAttackRerollCheckpoint} from '../headlessCombatEngine'
+import {dnd5e2014Adapter as incomingAttackRules} from '../dnd5e2014Adapter'
 import { stageDnd5eActivityCounterattacks } from './dnd5eActivityCounterattackCheckpoint'
 import { createDnd5eActivityNegationSession } from './dnd5eActivityDisadvantageNegation'
 import { dnd5eInterruptedFeatureSpellActivity } from './dnd5eInterruptedFeatureSpell'
@@ -149,7 +159,12 @@ export function resolveAndCommitDnd5eActivityCommand(
   authority: Dnd5eActivityAuthorityInput,
   options: { distinctTargetBonusAttackFeatureId?: string; featureAttackBudget?: Parameters<typeof dnd5eAttackActionSlot>[0]; equipmentAttackBudget?: Parameters<typeof dnd5eAttackActionSlot>[0]; allowInactiveAwakeningCommit?: boolean; allowInactiveRestCommit?: boolean; allowInactiveDamageReactionCommit?: boolean; allowInactiveDeathReactionCommit?: boolean; exchangeScene?: { map: BattleMap; actorTokenId: string }; worldMinute?: number } = {},
 ): Dnd5eActivityHeadlessAuthorityBridgeResult {
+  return withActivityAttackFailureScopes(()=>{
   const activity = getRegisteredDnd5eActivity(authority.command.packageId, authority.command.activityId)
+  if (activity?.legacySource?.kind === 'feature' && activity.legacySource.magical === true &&
+    !activity.spellInvocation && source.combatants[authority.command.actorId]?.magicSuppressed) {
+    return {phase:'resolve',result:{ok:false,reason:'invalid-command',details:['magical-feature-suppressed']}}
+  }
   if (authority.sourceActionInterruptionReaction && !activity?.spellInvocation) return {phase:'resolve',result:{ok:false,reason:'invalid-command',details:['source-interruption-requires-spell-invocation']}}
   if (activity?.spellInvocation) {
     const allowed = previewDnd5eFeatureSpellInvocation(source, {
@@ -214,8 +229,11 @@ export function resolveAndCommitDnd5eActivityCommand(
   catch { return { phase: 'resolve', result: { ok: false, reason: 'invalid-command', details: ['activity-counterattack-invalid'] } } }
   if (counterCheckpoint.requestedKeys.size) executionAuthority = { ...executionAuthority,
     weaponCounterattackSuccessCheckKeys: counterCheckpoint.successKeys }
-  let resolution = resolveDnd5eActivityCommand(executionAuthority)
+  const originalAbilityState=copyDnd5eOrdinaryWeaponScene(source,structuredClone(counterCheckpoint.state)),originalAbilityEvents:Dnd5eCombatEvent[]=[],originalAbility=createDnd5eActivityAbilityOriginalDice(originalAbilityState,originalAbilityEvents),originalSaving=createDnd5eActivitySavingOriginalDice(originalAbilityState,originalAbilityEvents)
+  const runOriginals=<T>(run:()=>T)=>originalAbility.run(()=>originalSaving.run(run))
+  let resolution = runOriginals(()=>resolveDnd5eActivityCommand(executionAuthority))
   if (!resolution.ok) return { phase: 'resolve', result: resolution }
+  originalAbility.seal();originalSaving.seal()
   const resolvedSavingThrowKeys = new Set(resolution.checks.filter(check => check.kind === 'saving-throw').map(check => check.key))
   if ([...counterCheckpoint.requestedKeys].some(key => !resolvedSavingThrowKeys.has(key)))
     return { phase: 'resolve', result: { ok: false, reason: 'invalid-command', details: ['activity-counterattack-unused'] } }
@@ -253,8 +271,44 @@ export function resolveAndCommitDnd5eActivityCommand(
     })
     return { phase: 'commit', result }
   }
-  const reactionState = structuredClone(counterCheckpoint.state), reactionEvents: Dnd5eCombatEvent[] = [...counterCheckpoint.events]
+  const reactionState = copyDnd5eOrdinaryWeaponScene(source, structuredClone(originalAbilityState)), reactionEvents: Dnd5eCombatEvent[] = [...counterCheckpoint.events,...originalAbilityEvents]
   const cancelledCriticalCheckKeys = new Set<string>()
+  let incomingAttackHasCriticalDice=false
+  // Imported/unified Activities execute through their genuine command resolver.
+  // Capture actual roll IDs (which need not match check IDs) and original mode.
+  for (const originalKey of resolution.checks.map(check=>check.key)) {
+    const originalCheck:import('./dnd5eActivityExecutor').Dnd5eActivityCheckResult|undefined=resolution.checks.find(check=>check.key===originalKey)
+    if(!originalCheck||originalCheck.kind!=='attack-roll'||!originalCheck.targetId||originalCheck.dc==null)continue
+    const definition:import('./dnd5eActivityContracts').Dnd5eActivityCheckV1|undefined=activity?.checks?.find(row=>row.id===originalCheck.checkId)
+    if(!definition||definition.kind!=='attack-roll')continue
+    const rollKey=definition.rollId+originalCheck.key.slice(originalCheck.checkId.length)
+    const dice=executionAuthority.authoritativeRolls[rollKey]?.values
+    if(!dice) return {phase:'resolve',result:{ok:false,reason:'invalid-command',details:['incoming-attack-original-roll-unavailable']}}
+    const mode=originalCheck.rollMode??'normal'
+    if(masterDuelistCheckpointsActive()&&masterDuelistOptions(reactionState,authority.command.actorId).length){
+    const sourceMode=definition.rollMode==='host-derived'&&(definition.attackType??'spell')==='spell'
+      ? dnd5eMonsterSpellAttackModeResolution(source,authority.command.actorId,originalCheck.targetId,definition.delivery,undefined,activity?{activity}:undefined)
+      : masterDuelistActivityModeSource(originalCheck)
+    if(!sourceMode)throw Error('master-duelist:actual-activity-mode-source-required')
+    recordMasterDuelistOriginalAttack({state:reactionState,actorId:authority.command.actorId,targetId:originalCheck.targetId,rolls:dice,mode:masterDuelistNativeModeAfterOverride(sourceMode,mode),advantageAllowed:true,meleeAttack:definition.delivery==='melee'})
+    }
+    if(failedD20CheckpointsActive())recordFailedD20NativeAttack({state:reactionState,actorId:authority.command.actorId,targetId:originalCheck.targetId,rolls:dice,mode,meleeAttack:definition.delivery==='melee'})
+    recordIncomingAttackDice(authority.command.actorId,dice,mode)
+    const attack=incomingAttackRules.resolveAttack({rolls:dice,mode,modifier:originalCheck.modifier,targetAc:originalCheck.dc})
+    const event:Extract<Dnd5eCombatEvent,{type:'attack-resolved'}>={type:'attack-resolved',actorId:authority.command.actorId,targetId:originalCheck.targetId,d20:originalCheck.d20,total:originalCheck.total,armorClass:originalCheck.dc,hit:originalCheck.success===true,critical:originalCheck.criticalSuccess,activityId:authority.command.activityId}
+    if(!settleIncomingAttackRerollCheckpoint(reactionState,event,attack,reactionEvents,definition.criticalThreshold))return{phase:'commit',result:{ok:false,state:structuredClone(source),events:[],reason:'reaction-unavailable'}}
+    const failedBonus=failedD20NativeAcceptedAmount()
+    if(failedBonus!=null)bindFailedD20ActivityAdjustment(originalKey,failedBonus,event.hit,event.armorClass)
+    if(event.d20Rolls||failedBonus!=null){
+      bindMasterDuelistActivityReplacement(originalKey,event.hit)
+      incomingAttackHasCriticalDice ||= originalCheck.criticalSuccess || event.critical
+      if(event.d20Rolls)executionAuthority={...executionAuthority,authoritativeRolls:{...executionAuthority.authoritativeRolls,[rollKey]:{...executionAuthority.authoritativeRolls[rollKey],values:[...event.d20Rolls]}}}
+      resolution=runOriginals(()=>resolveDnd5eActivityCommand({...executionAuthority,allowCriticalDiceSuperset:incomingAttackHasCriticalDice}))
+      if(!resolution.ok)return{phase:'resolve',result:resolution}
+      const supplementedRolls=incomingCriticalFormulaRolls()
+      if(Object.keys(supplementedRolls).length)executionAuthority={...executionAuthority,authoritativeRolls:{...executionAuthority.authoritativeRolls,...Object.fromEntries(Object.entries(supplementedRolls).map(([key,values])=>[key,{values:[...values]}]))}}
+    }
+  }
   for (const check of resolution.checks) {
     if (check.kind !== 'attack-roll' || !check.success || !check.criticalSuccess || !check.targetId || check.dc == null) continue
     const event: Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }> = {
@@ -268,7 +322,7 @@ export function resolveAndCommitDnd5eActivityCommand(
     if (!event.critical) cancelledCriticalCheckKeys.add(check.key)
   }
   if (cancelledCriticalCheckKeys.size > 0) {
-    resolution = resolveDnd5eActivityCommand({ ...executionAuthority, cancelledCriticalCheckKeys, allowCriticalDiceSuperset: true })
+    resolution = runOriginals(()=>resolveDnd5eActivityCommand({ ...executionAuthority, cancelledCriticalCheckKeys, allowCriticalDiceSuperset: true }))
     if (!resolution.ok) return { phase: 'resolve', result: resolution }
   }
   const applicableItemConsumptions = resolution.consumptions.filter(
@@ -693,6 +747,16 @@ export function resolveAndCommitDnd5eActivityCommand(
     }
   }
   let committed = commitDnd5eActivityExecution(reactionState, {
+    resolveSpellHealingDice: activity?.legacySource?.kind==='spell'||activity?.spellInvocation ? (state,events,proposals)=>{
+      const spellId=activity.spellInvocation?.spellId??activity.legacySource!.id,active=activity.spellInvocation?proposals.filter(p=>activity.spellInvocation!.operationIds.includes(p.operationId)):proposals
+      const groups=dnd5eActivitySpellHealingGroups({...commitResolution,proposals:active},executionAuthority.authoritativeRolls)
+      if(!groups.length)return[]
+      const values=settleDnd5eSpellHealingDiceGroups(state,state.combatants[authority.command.actorId],spellId,groups,events),healingRolls=dnd5eActivityHealingRollOverrides(groups,values)
+      if(!Object.keys(healingRolls).length)return[]
+      const rerun=runOriginals(()=>resolveDnd5eActivityCommand({...executionAuthority,healingRolls}))
+      if(!rerun.ok)throw Error('spell-healing-reroll:actual-formula-replay-required')
+      return rerun.proposals.filter((p):p is Extract<typeof p,{kind:'heal'}>=>p.kind==='heal'&&active.some(old=>old.kind==='heal'&&old.operationId===p.operationId&&old.targetId===p.targetId))
+    }:undefined,
     allowInactiveDamageReactionCommit: options.allowInactiveDamageReactionCommit === true &&
       activity?.activation.kind === 'reaction' && activity.invocation?.kind === 'triggered' &&
       activity.invocation.event === 'before-damage',
@@ -772,7 +836,7 @@ export function resolveAndCommitDnd5eActivityCommand(
       history.usedDistinctTargetBonusFeatureIds = [...history.usedDistinctTargetBonusFeatureIds ?? [], conditionalBonusId]
     }
   }
-  if (committed.ok && activity && continuation) finishDnd5eActivityContinuationV1(committed.state, authority.command, activity, continuation.rolls, resolution.checks, continuation.pending)
+  if (committed.ok && activity && continuation) finishDnd5eActivityContinuationV1(committed.state, authority.command, activity, executionAuthority.authoritativeRolls, resolution.checks, continuation.pending)
   if (committed.ok) stampDnd5eActivityGrantProvenance(committed.state, committed.events,
     `activity:${source.combatId}:${authority.currentRevision}:${authority.command.commandId}`)
   if (committed.ok && inventoryOwner) {
@@ -785,4 +849,7 @@ export function resolveAndCommitDnd5eActivityCommand(
     result: committed.ok ? { ...committed, ...(equipmentAttackSlot ? { equipmentAttackSlot } : {}),
       ...(inventoryOwner ? { inventoryOwner, ...(exchangeMap ? { map: exchangeMap } : {}) } : {}) } : committed,
   }
+  })
 }
+
+function withActivityAttackFailureScopes<T>(run:()=>T):T{return withFailedD20NativeAttackScope(()=>withMasterDuelistNativeAttackScope(run))}

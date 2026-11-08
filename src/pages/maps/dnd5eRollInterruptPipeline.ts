@@ -39,6 +39,8 @@ export interface Dnd5eOptionalBonusDieInterruptRequest {
 }
 
 export interface Dnd5eSavingThrowInterruptResult {
+  effectiveD20:number
+  effectiveD20Second?:number
   d20: number
   d20Second?: number
   halflingLuckyD20?: number
@@ -57,6 +59,8 @@ export interface Dnd5eSavingThrowInterruptResult {
 }
 
 export interface Dnd5eAbilityCheckInterruptResult {
+  effectiveD20:number
+  effectiveD20Second?:number
   d20: number
   d20Second?: number
   halflingLuckyD20?: number
@@ -79,6 +83,8 @@ type SavingThrowMode = 'normal' | 'advantage' | 'disadvantage'
  * leave the choice to the owner before or after seeing the d20 result.
  */
 export async function resolveDnd5eAbilityCheckInterrupts(input: {
+  confirmedChoices?: Pick<Dnd5eAbilityCheckInterruptResult,'bardicInspirationRoll'|'optionalBonusDieUse'|'additionalBonusDieRoll'|'darkOnesOwnLuckRoll'>
+  resolveOriginalDice?: (request:{d20:number;d20Second?:number})=>Promise<readonly number[]|undefined>
   grappleSourceId?: string
   combatant: Dnd5eCombatant
   target?: Character
@@ -138,29 +144,32 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
       )
     return [d20, d20Second]
   })()
-  const halflingLuckyD20 = input.combatant.racialRules?.halflingLucky && d20 === 1
+  const retained=await input.resolveOriginalDice?.({d20,d20Second})
+  if(retained&&(retained.length!==(input.mode==='normal'?1:2)||retained.some(face=>!Number.isInteger(face)||face<1||face>20)))throw Error('invalid-original-d20-retained-faces')
+  const halflingLuckyD20 = !retained && input.combatant.racialRules?.halflingLucky && d20 === 1
     ? await input.rollD20(
         '半身人幸运·属性检定重投',
         input.targetName,
         { ...sharedContext, skipChoiceReroll: true },
       )
     : undefined
-  const halflingLuckyD20Second = input.combatant.racialRules?.halflingLucky && d20Second === 1
+  const halflingLuckyD20Second = !retained && input.combatant.racialRules?.halflingLucky && d20Second === 1
     ? await input.rollD20(
         '半身人幸运·属性检定重投',
         input.targetName,
         { ...sharedContext, skipChoiceReroll: true },
       )
     : undefined
+  if(input.confirmedChoices&&!retained)throw Error('confirmed-choices-original-required')
   const baseTotal = input.previewTotal(
-    halflingLuckyD20 ?? d20,
-    halflingLuckyD20Second ?? d20Second,
+    retained?.[0] ?? halflingLuckyD20 ?? d20,
+    retained?.[1] ?? halflingLuckyD20Second ?? d20Second,
   )
   if (baseTotal == null) return undefined
 
   let runningTotal = baseTotal
   const inspirationDie = dnd5eHeldBardicInspirationDie(input.combatant)
-  const bardicInspirationRoll = input.requestBardicInspiration && canBonusDieChangeFailure({
+  const bardicInspirationRoll = input.confirmedChoices ? input.confirmedChoices.bardicInspirationRoll : input.requestBardicInspiration && canBonusDieChangeFailure({
     success: runningTotal >= input.dc,
     currentTotal: runningTotal,
     targetNumber: input.dc,
@@ -177,21 +186,21 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
     : undefined
   runningTotal += bardicInspirationRoll ?? 0
 
-  const optionalBonusDieUse = input.requestOptionalBonusDie
+  const optionalBonusDieUse = input.confirmedChoices ? input.confirmedChoices.optionalBonusDieUse : input.requestOptionalBonusDie
     ? await input.requestOptionalBonusDie({
         target: input.target,
         combatant: input.combatant,
         rollKind: 'ability-check',
         source: input.grappleSourceId ? { actorId: input.grappleSourceId, kind: 'grapple-escape' } : undefined,
         rollType: '属性检定',
-        originalD20: halflingLuckyD20 ?? d20,
+        originalD20: retained?.[0] ?? halflingLuckyD20 ?? d20,
         total: runningTotal,
         targetNumber: input.dc,
       })
     : undefined
   runningTotal += optionalBonusDieUse?.roll ?? 0
 
-  const additionalBonusDieRoll = input.requestAdditionalBonusDie && canBonusDieChangeFailure({
+  const additionalBonusDieRoll = input.confirmedChoices ? input.confirmedChoices.additionalBonusDieRoll : input.requestAdditionalBonusDie && canBonusDieChangeFailure({
     success: runningTotal >= input.dc,
     currentTotal: runningTotal,
     targetNumber: input.dc,
@@ -205,7 +214,7 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
     : undefined
   runningTotal += additionalBonusDieRoll ?? 0
 
-  const darkOnesOwnLuckRoll = input.requestDarkOnesOwnLuck &&
+  const darkOnesOwnLuckRoll = input.confirmedChoices ? input.confirmedChoices.darkOnesOwnLuckRoll : input.requestDarkOnesOwnLuck &&
     dnd5eDarkOnesOwnLuckAvailable(input.combatant) && canBonusDieChangeFailure({
       success: runningTotal >= input.dc,
       currentTotal: runningTotal,
@@ -223,6 +232,8 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
   runningTotal += darkOnesOwnLuckRoll ?? 0
 
   return {
+    effectiveD20:retained?.[0]??halflingLuckyD20??d20,
+    effectiveD20Second:retained?.[1]??halflingLuckyD20Second??d20Second,
     d20,
     d20Second,
     halflingLuckyD20,
@@ -251,6 +262,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
   sourceActorId?: string
   /** Host-validated mandatory effect dice, collected before the d20. */
   effectDiceModifier?: number
+  resolveOriginalDice?: (original:{d20:number;d20Second?:number})=>Promise<readonly number[]|undefined>
   state: Dnd5eHeadlessCombatState
   combatant: Dnd5eCombatant
   target?: Character
@@ -322,14 +334,16 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
       )
     return [d20, d20Second]
   })()
-  const halflingLuckyD20 = input.combatant.racialRules?.halflingLucky && d20 === 1
+  const retained=await input.resolveOriginalDice?.({d20,d20Second})
+  if(retained&&(retained.length!==(input.mode==='normal'?1:2)||retained.some(face=>!Number.isInteger(face)||face<1||face>20)))throw Error('invalid-original-d20-retained-faces')
+  const halflingLuckyD20 = !retained && input.combatant.racialRules?.halflingLucky && d20 === 1
     ? await input.rollD20(
         input.halflingLuckyLabel ?? `半身人幸运·${input.label}重投`,
         input.targetName,
         { ...sharedContext, skipChoiceReroll: true },
       )
     : undefined
-  const halflingLuckyD20Second = input.combatant.racialRules?.halflingLucky && d20Second === 1
+  const halflingLuckyD20Second = !retained && input.combatant.racialRules?.halflingLucky && d20Second === 1
     ? await input.rollD20(
         input.halflingLuckyLabel ?? `半身人幸运·${input.label}重投`,
         input.targetName,
@@ -348,8 +362,8 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     (blessRoll ?? 0) - (baneRoll ?? 0) + (input.effectDiceModifier ?? 0)
   const initial = previewDnd5eSavingThrowRoll({
     rolls: input.mode === 'normal'
-      ? [halflingLuckyD20 ?? d20]
-      : [halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? 0],
+      ? [retained?.[0] ?? halflingLuckyD20 ?? d20]
+      : [retained?.[0] ?? halflingLuckyD20 ?? d20, retained?.[1] ?? halflingLuckyD20Second ?? d20Second ?? 0],
     mode: input.mode,
     modifier,
     dc: input.dc,
@@ -381,7 +395,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
         rollKind: 'saving-throw',
         source: input.sourceActorId ? { actorId: input.sourceActorId, kind: 'saving-throw' } : undefined,
         rollType: '豁免',
-        originalD20: halflingLuckyD20 ?? d20,
+        originalD20: retained?.[0] ?? halflingLuckyD20 ?? d20,
         total: runningTotal,
         targetNumber: input.dc,
       })
@@ -429,6 +443,8 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
       })
 
   return {
+    effectiveD20:retained?.[0] ?? halflingLuckyD20 ?? d20,
+    effectiveD20Second:retained?.[1] ?? halflingLuckyD20Second ?? d20Second,
     d20,
     d20Second,
     halflingLuckyD20,

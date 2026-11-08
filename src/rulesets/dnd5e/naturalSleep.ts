@@ -1,16 +1,21 @@
 import type { Character } from '../../types/character'
 import { createDnd5eConditionEffect, effectiveDnd5eActiveEffects, projectDnd5eActiveEffectState } from './activeEffects'
 import { dnd5eStandardConditionId } from './conditions'
+import { dnd5ePluginBooleanStaticModifierForCharacter } from './plugins/pluginContentCatalog'
 
 /** Host-confirmed ordinary sleep. Magical-sleep immunity is deliberately not
  * used as a proxy for whether a creature sleeps. This does not grant a rest. */
 export function beginDnd5eNaturalSleep(character: Character, input: {
-  eventId: string; worldMinute: number; durationMinutes: number; canSleep: boolean
+  eventId: string; worldMinute: number; durationMinutes: number; canSleep: boolean; forced?: boolean
 }): { ok: true; character: Character } | { ok: false; reason: string } {
   if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(input.eventId) || !Number.isSafeInteger(input.worldMinute) ||
     input.worldMinute < 0 || character.dnd5eWorldTimeAppliedMinute !== input.worldMinute ||
     !Number.isSafeInteger(input.durationMinutes) || input.durationMinutes < 1 || input.durationMinutes > 1440) {
     return { ok: false, reason: 'invalid-sleep-session' }
+  }
+  if (input.forced != null && typeof input.forced !== 'boolean') return { ok: false, reason: 'invalid-sleep-session' }
+  if (input.forced === true && dnd5ePluginBooleanStaticModifierForCharacter(character, 'cannotBeForcedToSleep')) {
+    return { ok: false, reason: 'forced-sleep-immune' }
   }
   if (input.canSleep !== true || character.currentHp <= 0 || (character.deathSaveFailures ?? 0) >= 3) {
     return { ok: false, reason: 'sleep-ineligible' }

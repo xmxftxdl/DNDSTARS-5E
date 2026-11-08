@@ -1,3 +1,4 @@
+import{copyDnd5eOrdinaryWeaponScene}from'./ordinaryWeaponScene'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eCombatEvent, Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMechanicalEffect } from './activeEffects'
@@ -6,8 +7,11 @@ export type Dnd5eWeaponHitEvent = Extract<Dnd5eCombatEvent, { type: 'attack-reso
 /** Host-internal rule decision, never a player action payload. The caller must
  * authorize the registered Activity before supplying its costs and dice. */
 export interface Dnd5eWeaponHitDecision {
+  /** Host-only DM fact continuation. Undefined origin is a pending request, never a commit. */
+  planarBanishments?: readonly {packageId:string;activityId:string;targetId:string;sourceId:string;
+    sourceConcentrationId:string;sourceExecutionId:string;sourceGrantEffectId:string;maximumHitPoints:50;origin?:'native'|'foreign'}[]
   /** Host-resolved, effects-only continuation; damage and costs stay in the weapon transaction. */
-  linkedEffectApplications?: readonly { packageId: string; activityId: string; targetId: string; sourceId: string;
+  linkedEffectApplications?: readonly { packageId: string; activityId: string; targetId: string; sourceId: string; sourceKind?: 'spell' | 'feature';
     resolution: Extract<import('./activities/dnd5eActivityExecutor').Dnd5eActivityExecutionResult, {ok:true}> }[]
   followRequests?: readonly {packageId:string;activityId:string;actorId:string;targetId:string;targetRadiusFeet:number}[]
   pushMovements?: readonly (import('./weaponHitMovement').Dnd5eHitMovementPlan & {activityId:string;maximumFeet:number})[]
@@ -79,7 +83,7 @@ export function withDnd5eWeaponHitCheckpoints<T>(listener: Listener, run: () => 
 
 export function visitDnd5eWeaponHitCheckpoint(event: Dnd5eWeaponHitEvent, state: Dnd5eHeadlessCombatState) {
   if (!active || !event.hit || (!['weapon', 'spell'].includes(event.attackCategory ?? '') && !event.attackDelivery)) return
-  try { return active.listener(structuredClone(event), structuredClone(state)) }
+  try { return active.listener(structuredClone(event), copyDnd5eOrdinaryWeaponScene(state,structuredClone(state))) }
   catch (error) { active.interrupted = true; active.error = error; throw error }
 }
 

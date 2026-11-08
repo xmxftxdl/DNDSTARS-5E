@@ -1,6 +1,6 @@
 import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5eIsIncapacitated } from './passiveDefenses'
-import { dnd5eBoundHpRetaliationGrant } from './activities/dnd5eAutonomousRetaliationContract'
+import { dnd5eAutonomousRetaliationGrant } from './activities/dnd5eAutonomousRetaliationContract'
 import type { Dnd5eActivityDefinitionV1, Dnd5eActivityTriggerContextV1 } from './activities/dnd5eActivityContracts'
 
 let current: { combatId: string; round: number; actorId: string; packageId: string; activityId: string } | undefined
@@ -17,7 +17,7 @@ export function withDnd5eIncapacitatedActivityAuthority<T>(state: Dnd5eHeadlessC
     (trigger.event === 'self-dropped-to-zero' ? actor.currentHp === 0 : dnd5eIsIncapacitated(actor))
   const autonomous = trigger.event === 'reaction-window' &&
     trigger.source.kind === 'attack' && trigger.source.targetId === actorId && trigger.source.result !== 'miss' &&
-    dnd5eBoundHpRetaliationGrant(actor, packageId, activity) != null
+    dnd5eAutonomousRetaliationGrant(actor, packageId, activity) != null
   if (!selfTrigger && !autonomous) return run()
   const previous = current
   current = { combatId: state.combatId, round: state.round, actorId, packageId, activityId: activity.id }

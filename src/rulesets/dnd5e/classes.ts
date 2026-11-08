@@ -1,3 +1,4 @@
+import {registeredEldritchInvocationOptions,registeredEldritchInvocationAvailable} from './eldritchInvocationOptions'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
@@ -51,6 +52,8 @@ export interface Dnd5eClassFeatureDefinition {
 }
 
 export interface Dnd5eClassChoiceOption {
+  /** Only the actual registered invocation reader creates this source binding. */
+  invocationFeatureId?: string
   id: string
   name: string
   summary: string
@@ -637,6 +640,7 @@ const ELDRITCH_INVOCATIONS: Dnd5eClassChoiceGroup = {
     ['eyes-of-rune-keeper', '符文守护者之眼', '可以阅读所有文字。'],
     ['fiendish-vigor', '邪魔活力', '可随意以1环施放虚假生命。'],
     ['gaze-of-two-minds', '双生视界', '用动作触碰自愿类人生物并通过其感官感知。'],
+    ['grasp-of-hadar', '哈达之握', '需要魔能爆；在自己的每个回合中一次，魔能爆命中生物时可将其沿直线向自己拉近10尺。'],
     ['lifedrinker', '饮命者', '需要12级与刃之契约；契约武器命中额外造成魅力调整值的黯蚀伤害。'],
     ['mask-of-many-faces', '千面之颜', '可随意施放易容术。'],
     ['master-of-myriad-forms', '万形之主', '需要15级；可随意施放变身术。'],
@@ -663,6 +667,7 @@ const ELDRITCH_INVOCATIONS: Dnd5eClassChoiceGroup = {
       'chains-of-carceri': { minimumClassLevel: 15, requiresPactBoon: 'chain' },
       'dreadful-word': { minimumClassLevel: 7 },
       'eldritch-spear': { requiresKnownSpell: 'eldritch-blast' },
+      'grasp-of-hadar': { requiresKnownSpell: 'eldritch-blast' },
       lifedrinker: { minimumClassLevel: 12, requiresPactBoon: 'blade' },
       'master-of-myriad-forms': { minimumClassLevel: 15 },
       'minions-of-chaos': { minimumClassLevel: 9 },
@@ -700,17 +705,29 @@ export const DND5E_SRD_CLASS_DEFINITIONS: readonly Dnd5eClassDefinition[] = [
 const byId = new Map(DND5E_SRD_CLASS_DEFINITIONS.map((definition) => [definition.id, definition]))
 const byName = new Map(DND5E_SRD_CLASS_DEFINITIONS.map((definition) => [definition.name, definition]))
 
+let invocationOptionsSnapshot: ReturnType<typeof registeredEldritchInvocationOptions> | undefined
+let invocationWarlockDefinition: Dnd5eClassDefinition | undefined
+function withRegisteredInvocations(definition: Dnd5eClassDefinition | undefined): Dnd5eClassDefinition | undefined {
+ if(definition?.id!=='warlock')return definition
+ const baseDefinition=byId.get('warlock')??definition
+ const options=registeredEldritchInvocationOptions()
+ if(options===invocationOptionsSnapshot)return invocationWarlockDefinition??baseDefinition
+ invocationOptionsSnapshot=options
+ invocationWarlockDefinition=options.length?{...baseDefinition,choiceGroups:baseDefinition.choiceGroups?.map(group=>group.id==='eldritch-invocations'?{...group,options:[...group.options,...options]}:group)}:baseDefinition
+ return invocationWarlockDefinition
+}
+
 export function dnd5eClassDefinition(idOrName: Dnd5eClassId | string): Dnd5eClassDefinition | undefined {
-  return byId.get(idOrName as Dnd5eClassId) ?? byName.get(idOrName) ?? registeredDeclarativeClassDefinitionV1(idOrName)
+  return withRegisteredInvocations(byId.get(idOrName as Dnd5eClassId) ?? byName.get(idOrName) ?? registeredDeclarativeClassDefinitionV1(idOrName))
 }
 
 export function dnd5eClassDefinitionForCharacter(character: Pick<Character, 'charClass'>): Dnd5eClassDefinition | undefined {
-  return byName.get(character.charClass) ?? registeredDeclarativeClassDefinitionV1(character.charClass)
+  return withRegisteredInvocations(byName.get(character.charClass) ?? registeredDeclarativeClassDefinitionV1(character.charClass))
 }
 
 export function availableDnd5eClassDefinitions(): readonly Dnd5eClassDefinition[] {
   return [
-    ...DND5E_SRD_CLASS_DEFINITIONS,
+    ...DND5E_SRD_CLASS_DEFINITIONS.map(definition=>withRegisteredInvocations(definition)!),
     ...registeredDeclarativeClassesV1().map((entry) => entry.definition),
   ]
 }
@@ -729,10 +746,11 @@ export function dnd5eClassChoiceLimit(group: Dnd5eClassChoiceGroup, level: numbe
 }
 
 export function dnd5eClassChoiceOptionAvailable(
-  character: Pick<Character, 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'level' | 'dnd5eClassChoices'> & Partial<Character>,
   classId: Dnd5eClassId,
   option: Dnd5eClassChoiceOption,
 ): boolean {
+  if (option.invocationFeatureId) return classId === 'warlock' && option.id === option.invocationFeatureId && registeredEldritchInvocationAvailable(character,option.invocationFeatureId)
   if ((option.minimumClassLevel ?? 1) > character.level) return false
   const selections = character.dnd5eClassChoices?.classes?.[classId]?.selections ?? {}
   if (option.requiresPactBoon && !selections['pact-boon']?.includes(option.requiresPactBoon)) return false
@@ -742,7 +760,8 @@ export function dnd5eClassChoiceOptionAvailable(
 }
 
 export function dnd5eAllClassChoiceGroups(definition: Dnd5eClassDefinition): readonly Dnd5eClassChoiceGroup[] {
-  return [...(definition.choiceGroups ?? []), ...(definition.subclass.choiceGroups ?? [])]
+  const current=withRegisteredInvocations(definition)!
+  return [...(current.choiceGroups ?? []), ...(current.subclass.choiceGroups ?? [])]
 }
 
 export function dnd5eClassSpellSlots(definition: Dnd5eClassDefinition, level: number): readonly number[] {

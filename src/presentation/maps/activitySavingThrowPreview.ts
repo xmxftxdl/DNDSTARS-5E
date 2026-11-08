@@ -21,7 +21,7 @@ export function activitySavingThrowPreview(
         ...input,
         checkRollModes: { ...input.checkRollModes, [`${check.id}${declaration.id.slice(check.rollId.length)}`]: mode },
         rolls: { ...input.rolls, [declaration.id]: { values: mode === 'normal' ? [first] : [first, second ?? first] } },
-      }, declaration.id, mode)!.success, mode)
+      }, declaration.id, mode)!.success === true, mode)
   }
   if (declaration.d20RollKind !== 'saving-throw') return undefined
   const target = input.targets.find(candidate => candidate.id === declaration.rollerTokenId)
@@ -37,5 +37,5 @@ export function activitySavingThrowPreview(
       ...input,
       rolls: { ...input.rolls, [declaration.id]: { values: mode === 'normal' ? [first] : [first, second ?? first] } },
       checkRollModes: { ...input.checkRollModes, [key]: mode },
-    }, declaration.id, target.id, mode)!.success, mode)
+    }, declaration.id, target.id, mode)!.success === true, mode)
 }

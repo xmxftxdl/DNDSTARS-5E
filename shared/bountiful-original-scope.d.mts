@@ -1,0 +1,6 @@
+export interface BountifulOriginalSceneScopeData {kind:'ordinary-scene';combatBoundary:string;campaignTimeSignature:string;campaignTimeRevision:number}
+export interface BountifulOriginalScopeIdentity {mapId:string;combatId:string;round:number;initiativeIndex:number;sceneScope?:BountifulOriginalSceneScopeData}
+export function bountifulSceneClockSignature(value:unknown):string
+export function bountifulSceneCombatBoundary(combat:unknown):string
+export function bountifulOriginalScopeMatches(combat:unknown,identity:BountifulOriginalScopeIdentity):boolean
+export function validBountifulOriginalSceneScope(value:unknown):value is BountifulOriginalSceneScopeData

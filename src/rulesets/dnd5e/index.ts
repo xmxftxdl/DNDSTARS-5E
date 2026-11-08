@@ -1,3 +1,4 @@
+export * from './plugins/pluginContentCatalog'
 import { registerRulesetAdapter } from '../registry'
 import { dnd5e2014Adapter } from './dnd5e2014Adapter'
 

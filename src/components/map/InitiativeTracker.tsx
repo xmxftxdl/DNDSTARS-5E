@@ -23,6 +23,7 @@ export interface InitiativeEntry {
   /** Confirmed scheduling score, including a possible DM rank override. */
   roll: number
   /** Original dice evidence belonging to this creature, never transferred by reordering. */
+  initiativeRollReceipt?: {id:string;combatId:string;phase:'combat-start'|'live-join'}
   initiativeCalculation?: {
     rolls: number[]
     d20: number

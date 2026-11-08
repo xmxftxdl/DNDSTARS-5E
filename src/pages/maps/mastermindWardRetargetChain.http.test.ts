@@ -1,0 +1,5 @@
+import{it,expect}from'vitest'
+import{installCurrent152}from'./mastermindCurrent152Source.fixture'
+import{genuineFailedWardOriginal}from'./mastermindWardRetargetChainFailed.fixture'
+import{prepareMastermindQueuedFormWardOutcome}from'./mastermindQueuedFormParent'
+it('a genuinely acquired second Majesty on a legal adjacent target remains available to the original actor after its first genuine failed Ward',async()=>{const dispose=await installCurrent152();try{const f=await genuineFailedWardOriginal(),before=await Promise.all(['characters','maps','combat'].map(f.api.read));expect(f.secondWardGrowth).toHaveLength(13);expect(await prepareMastermindQueuedFormWardOutcome(f.native,f.port('dm'))).toBeUndefined();const choice=(await f.api.read('mastermind-ward-attacks')).choices[f.prompt.id];expect(choice.phase).toBe('waiting');expect(choice.retargetTokenIds).toContain(f.secondWardTokenId);expect(await Promise.all(['characters','maps','combat'].map(f.api.read))).toEqual(before)}finally{dispose()}})

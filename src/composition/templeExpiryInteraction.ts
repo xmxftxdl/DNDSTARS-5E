@@ -3,6 +3,7 @@ import type {Dnd5eSolidExitFeatherFallChoice} from '../rulesets/dnd5e/solidMater
 import type {BattleMap} from '../store/maps'
 
 export interface TempleExpiryInteraction {
+ damageReactions?:(map:BattleMap)=>import('../rulesets/dnd5e/damageReactionFlow').Dnd5eDamageReactionFlowOptions
  chooseFeatherFall:(state:Dnd5eHeadlessCombatState,falls:readonly Dnd5eUnsupportedAirborneFallPreview[],map:BattleMap,transactionId:string)=>Promise<Dnd5eSolidExitFeatherFallChoice|undefined>
  rollFalls:(falls:readonly Dnd5eUnsupportedAirborneFallPreview[],map:BattleMap)=>Promise<Readonly<Record<string,readonly number[]>>>
 }

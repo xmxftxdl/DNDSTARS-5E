@@ -1,3 +1,5 @@
+import {validateBountifulOriginalParents,validateBountifulLuckCommand} from '../../shared/bountiful-luck-state.mjs'
+import {validateSecondChanceAttackReceipts,validateSceneReactionSpent} from '../../shared/second-chance-state.mjs'
 import { isStrongWindFlameReceiptId } from '../rulesets/dnd5e/strongWindFlameReceipt'
 import { validAreaVisualRecognition } from '../../shared/area-visual-recognition.mjs'
 import { SHORT_REST_RECOVERY_RESOURCE, validShortRestRecoveryJournal } from '../../shared/short-rest-recovery.mjs'
@@ -631,6 +633,8 @@ function migrateDnd5eStateEnvelope(
 export function validateAndMigrateSharedResource(name: string, input: unknown): SharedResourceValidation {
   if (!isPlainObject(input)) return { status: 'invalid', reasons: ['共享状态必须是对象'] }
   const reasons: string[] = []
+  const sceneRows=name==='characters'&&Array.isArray(input.characters)?input.characters:name==='maps'&&Array.isArray(input.maps)?input.maps.flatMap((map:unknown)=>map&&typeof map==='object'&&Array.isArray((map as {tokens?:unknown}).tokens)?(map as {tokens:unknown[]}).tokens:[]):[]
+  if(sceneRows.some((row:unknown)=>row&&typeof row==='object'&&!validateSceneReactionSpent((row as {dnd5eCombatState?:{sceneReactionSpent?:unknown}}).dnd5eCombatState?.sceneReactionSpent)))reasons.push('sceneReactionSpent 场景反应记录损坏')
   if (name === MAP_FOG_RESOURCE && !normalizeSharedMapFog(input)) {
     reasons.push('战争迷雾资源结构损坏')
   }
@@ -699,6 +703,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   if (name === 'combat' && input.monsterControl != null && !isDnd5eMonsterControlWireStateV1(input.monsterControl)) {
     reasons.push('combat.monsterControl 怪物控制状态损坏')
   }
+  if(name==='combat'&&input.bountifulOriginalParents!==undefined&&!validateBountifulOriginalParents(input.bountifulOriginalParents))reasons.push('combat.bountifulOriginalParents 原骰收据损坏')
+  if(name==='player-action-requests'&&Array.isArray(input.requests)&&input.requests.some((row:unknown)=>!!row&&typeof row==='object'&&'type'in row&&row.type==='dnd5e-bountiful-luck'&&(!('bountifulLuck'in row)||!validateBountifulLuckCommand(row.bountifulLuck))))reasons.push('bountiful 原骰响应损坏')
+  if(name==='combat'&&input.secondChanceAttacks!==undefined&&!validateSecondChanceAttackReceipts(input.secondChanceAttacks))reasons.push('combat.secondChanceAttacks 反应收据损坏')
   if (name === 'combat' && input.flowPause != null && !normalizeSharedCombatFlowPause(input.flowPause)) {
     reasons.push('combat.flowPause 战斗暂停状态损坏')
   }

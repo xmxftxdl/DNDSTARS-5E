@@ -371,6 +371,7 @@ export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
   }
   /** Omit only when the relation has no ordinary escape check (for example swallowed). */
   escapeDc?: number
+  escapeSavingThrow?: { ability: AbilityKey; alternativeAbility?: AbilityKey; dc: number; economy: 'action' }
   /** Some relations are applied only after a failed save on the weapon hit. */
   savingThrow?: {
     ability: AbilityKey
@@ -1402,6 +1403,8 @@ export interface Dnd5eMonsterTargetEligibility {
 }
 
 export interface Dnd5eMonsterAction {
+  /** Fixed head anchor, validated by the multipart creature authority. */
+  multipartHeadId?: string
   id: string
   name: string
   description: string
@@ -1499,6 +1502,8 @@ export interface Dnd5eMonsterCapabilities {
 }
 
 export interface Dnd5eMonsterStatBlock {
+  /** Reviewed homebrew ruleset; heads remain parts of one creature. */
+  multipartRule?: 'false-hydra-v1'
   id: string
   slug: string
   name: string

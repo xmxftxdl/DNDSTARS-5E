@@ -1,0 +1,13 @@
+import{it,expect}from'vitest'
+import{createHash}from'node:crypto'
+import{genuineHalflingCauseFearDeathSavingTurn}from'./testFixtures/bountifulDeathHalfCauseFear.scene.fixture'
+import{createDnd5eDeathRepeatSavingOriginalSession,readDnd5eDeathRepeatSavingOriginal}from'./deathRepeatSavingOriginal'
+const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
+it.each(['use-first','decline-first-use-second','decline-both']as const)('genuine Brave paired check allows one own Lucky use and preserves independent B source: %s',async choice=>{
+ const f=await genuineHalflingCauseFearDeathSavingTurn(),before=hash({prepared:f.prepared,command:f.command}),native=createDnd5eDeathRepeatSavingOriginalSession({prepared:f.prepared,command:{...f.command,d20:12}})
+ try{let stage=native.run();if(stage.status!=='missing-death-repeat-saving-original')throw Error(stage.status);expect(readDnd5eDeathRepeatSavingOriginal(stage.operation).frame).toMatchObject({mode:'advantage',count:2});stage=native.supply(stage.operation,{d20:1,d20Second:1});for(const die of[0,1]){if(stage.status!=='pending-ally-natural-one')throw Error(stage.status);expect(stage.request).toMatchObject({actorId:'foe-token',kind:'saving-throw',originalRolls:[1,1],dieIndex:die});expect(stage.request.nativeLucky).toBeUndefined();stage=native.resume(stage,undefined)}
+ if(stage.status!=='pending-ally-natural-one')throw Error(stage.status);expect(stage.request).toMatchObject({nativeLucky:true,dieIndex:0});const own={ownerId:'foe-token',featureId:'dnd5e-racial-halfling-lucky',replacement:18};stage=native.resume(stage,choice==='use-first'?own:undefined)
+ if(choice!=='use-first'){if(stage.status!=='pending-ally-natural-one')throw Error(stage.status);expect(stage.request).toMatchObject({nativeLucky:true,dieIndex:1});stage=native.resume(stage,choice==='decline-first-use-second'?own:undefined)}
+ expect(stage.status).toBe('resolved');if(stage.status!=='resolved'||!stage.result.result.ok)throw Error('Actual complete Native check required');const result=stage.result.result,lucky=result.events.filter(e=>e.type==='halfling-lucky-rerolled');expect(lucky).toHaveLength(choice==='decline-both'?0:1);if(choice!=='decline-both')expect(lucky[0]).toMatchObject({actorId:'foe-token',dieIndex:choice==='use-first'?0:1,reroll:18});expect(result.state.combatants['foe-token'].deathSaves).toMatchObject({successes:1,failures:0});expect(result.state.combatants['helper-token'].turn.reactionAvailable).toBe(true);expect(hash({prepared:f.prepared,command:f.command})).toBe(before)
+ }finally{native.dispose();f.dispose()}
+},180000)

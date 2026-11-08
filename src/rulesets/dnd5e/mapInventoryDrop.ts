@@ -8,7 +8,7 @@ import type { Dnd5eInventoryEntry } from '../../types/inventory'
 import { dnd5eInventoryContainerContents, normalizeDnd5eMapInventoryContents } from './mapInventoryContents'
 
 export function dnd5eInventoryEntryCanDrop(entry: Dnd5eInventoryEntry): boolean {
-  return (entry.quantity === 1 || !!dnd5eInventoryItemTemplate(entry.templateId)?.ammunitionKind) && !entry.condition?.destroyed && dnd5eMapPhysicalItemTemplate(entry.item) &&
+  return (entry.quantity === 1 || !!dnd5eInventoryItemTemplate(entry.templateId)?.ammunitionKind) && !entry.condition?.destroyed && dnd5eMapPhysicalItemTemplate(entry.item,entry) &&
     !(entry.item.equipment?.dnd5e?.kind === 'weapon' && entry.item.equipment.dnd5e.vanishesAfterRelease)
 }
 

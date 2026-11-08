@@ -7,6 +7,7 @@ import type {
 import { matchDnd5eActivityInvocationV1, resolveDnd5eActivityInvocationV1 } from './dnd5eActivityInvocation'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
 import {
+  contentDefinitionRegistryRevision,
   getRegisteredContentActivity,
   listRegisteredContentActivities,
   listRegisteredContentDefinitionPackages,
@@ -98,6 +99,68 @@ export function listRegisteredDnd5eActivityPackages(): readonly RegisteredDnd5eA
   }))
 }
 
+let currentActivityCatalogSignature: { revision: number; signature: string } | undefined
+
+/** Only detached plain-data graphs are eligible. structuredClone can retain
+ * shared backing memory in nonplain objects, so those keep the original path. */
+function plainActivityCatalogData(value: unknown): boolean {
+  try {
+    const pending: unknown[] = [value], seen = new WeakSet<object>()
+    while (pending.length) {
+      const current = pending.pop()
+      if (current === null || typeof current !== 'object') {
+        if (typeof current === 'function' || typeof current === 'symbol') return false
+        continue
+      }
+      if (seen.has(current)) continue
+      if (!Array.isArray(current) && ![Object.prototype, null].includes(Object.getPrototypeOf(current))) return false
+      seen.add(current)
+      for (const child of Object.values(current)) pending.push(child)
+    }
+    return true
+  } catch {
+    // Eligibility is optional; its failure must preserve the original JSON path.
+    return false
+  }
+}
+
+/** Primitive canonical catalog data only. Every registry epoch is freshly read;
+ * mutable public copies, Source authority and Native results are never retained. */
+export function registeredDnd5eActivityCatalogSignature(): string {
+  const revision = contentDefinitionRegistryRevision()
+  if (currentActivityCatalogSignature?.revision === revision) return currentActivityCatalogSignature.signature
+  const snapshot = listRegisteredDnd5eActivityPackages()
+  const signature = JSON.stringify(snapshot)
+  // A thrown serialization never publishes an entry. A synchronous registry
+  // change during serialization also cannot publish a stale-epoch entry.
+  if (contentDefinitionRegistryRevision() === revision && plainActivityCatalogData(snapshot)) currentActivityCatalogSignature = { revision, signature }
+  return signature
+}
+
+let currentRuntimeActivityCatalog: { revision: number; packages: readonly RegisteredDnd5eActivityPackage[] } | undefined
+/** Private detached mechanical definitions only; no Source/Native/result authority.
+ * The public catalog and every selected output retain their editable copies. */
+function runtimeActivityCatalogForSelection(): readonly RegisteredDnd5eActivityPackage[] {
+  const revision = contentDefinitionRegistryRevision()
+  if (currentRuntimeActivityCatalog?.revision === revision) return currentRuntimeActivityCatalog.packages
+  const snapshot = listRegisteredDnd5eActivityPackages()
+  if (contentDefinitionRegistryRevision() !== revision || !plainActivityCatalogData(snapshot)) return snapshot
+  try {
+    const pending: object[] = [snapshot], seen = new WeakSet<object>()
+    while (pending.length) {
+      const current = pending.pop()!
+      if (seen.has(current)) continue
+      seen.add(current)
+      for (const child of Object.values(current)) if (child !== null && typeof child === 'object') pending.push(child)
+      Object.freeze(current)
+    }
+    if (contentDefinitionRegistryRevision() === revision) currentRuntimeActivityCatalog = { revision, packages: snapshot }
+  } catch {
+    // Optional private reuse must not replace the original lookup's outcome.
+  }
+  return snapshot
+}
+
 /** Finds every registered Activity that the Host may offer for one event window. */
 export function listAvailableRegisteredDnd5eActivitiesV1(input: {
   triggerContext: Dnd5eActivityTriggerContextV1
@@ -105,7 +168,7 @@ export function listAvailableRegisteredDnd5eActivitiesV1(input: {
   targetIds: readonly string[]
 }): readonly AvailableRegisteredDnd5eActivityV1[] {
   const available: AvailableRegisteredDnd5eActivityV1[] = []
-  for (const value of listRegisteredDnd5eActivityPackages()) {
+  for (const value of runtimeActivityCatalogForSelection()) {
     for (const activity of value.activities) {
       // These Activities are the unified catalog entry for mechanics already
       // dispatched inside the authoritative attack/spell/turn transaction.
@@ -138,7 +201,8 @@ export function listAvailableRegisteredDnd5eActivitiesV1(input: {
       })
     }
   }
-  return available
+  return available.sort((a,b)=>(b.activity.invocation?.kind==='triggered'?b.activity.invocation.priority??0:0)-
+    (a.activity.invocation?.kind==='triggered'?a.activity.invocation.priority??0:0))
 }
 
 export function clearDnd5eActivityRegistryForTests(): void {

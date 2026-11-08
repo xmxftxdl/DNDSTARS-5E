@@ -25,7 +25,12 @@ export interface Dnd5eActivityWeaponAttackGrantV1 {
   attackActionFollowUp?: true
   inheritedAttackOrigin?: 'attack-action' | 'bonus-action' | 'reaction' | 'other'
   attackAdvantage?: true
+  additionalSneakAttackDifferentTarget?: true
+  allowUnarmedStrikes?: true
   attackResourceCost?: { resourceId: string; amount: number }
+  /** Host-only immediate Relentless Endurance window; consumed by ordinary weapon authority. */
+  consumesReaction?: true
+  immediate?: true
   economy: 'bonus-action' | 'none'
   /** Omitted by legacy snapshots and interpreted as one. */
   remainingAttacks?: number
@@ -65,6 +70,10 @@ export function dnd5eActivityWeaponAttackGrantMatchesV1(
     !Number.isInteger(grant.remainingAttacks ?? 1) || (grant.remainingAttacks ?? 1) < 1 ||
     (grant.remainingAttacks ?? 1) > 10
   ) return false
+  if (grant.additionalSneakAttackDifferentTarget != null && (
+    grant.additionalSneakAttackDifferentTarget !== true || grant.economy !== 'bonus-action' ||
+    (grant.remainingAttacks ?? 1) !== 1 || grant.pendingNextOwnTurn || grant.inheritedAttackOrigin != null
+  )) return false
   if (grant.inheritedAttackOrigin != null && (
     !['attack-action', 'bonus-action', 'reaction', 'other'].includes(grant.inheritedAttackOrigin) ||
     grant.economy !== 'none' || grant.pendingNextOwnTurn

@@ -105,6 +105,8 @@ export type Dnd5ePersistentAreaLighting =
     }
   | {
       kind: 'magical-darkness'
+      /** Original resource-cast permission; scoped to this area's actual source. */
+      sourceCanSeeThrough?: true
       radiusFeet: number
       spellLevel: number
       suppressesMagicalLightThroughLevel?: number
@@ -1352,14 +1354,16 @@ export function normalizeDnd5ePersistentAreaLighting(
         lighting.suppressesMagicalDarknessThroughLevel as number | undefined,
     }
   }
-  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel', 'lightSuppressionScope'])
+  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel', 'lightSuppressionScope', 'sourceCanSeeThrough'])
   if (Object.keys(lighting).some((key) => !allowed.has(key)) ||
     lighting.kind !== 'magical-darkness' || !integer(lighting.radiusFeet, 1, 1_000) ||
+    (lighting.sourceCanSeeThrough != null && lighting.sourceCanSeeThrough !== true) ||
     (lighting.lightSuppressionScope != null && lighting.lightSuppressionScope !== 'within-area') ||
     (lighting.suppressesMagicalLightThroughLevel != null &&
       !integer(lighting.suppressesMagicalLightThroughLevel, 0, 9))) return undefined
   return {
     kind: 'magical-darkness',
+    ...(lighting.sourceCanSeeThrough === true ? {sourceCanSeeThrough:true as const}:{}),
     radiusFeet: Number(lighting.radiusFeet),
     spellLevel: Number(lighting.spellLevel),
     lightSuppressionScope: lighting.lightSuppressionScope as 'within-area' | undefined,

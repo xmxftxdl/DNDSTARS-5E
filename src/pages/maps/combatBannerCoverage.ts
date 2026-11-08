@@ -8,6 +8,9 @@ export type CombatBannerRoute = 'turn' | 'spell' | 'attack' | 'action' | 'none'
  */
 export const PLAYER_ACTION_COMBAT_BANNER_ROUTES = {
   'end-turn': 'none',
+  'dnd5e-bountiful-luck': 'none',
+  'dnd5e-second-chance': 'none',
+  'dnd5e-pact-weapon': 'none',
   'dnd5e-death-save': 'action',
   'dnd5e-weapon-attack': 'attack',
   'dnd5e-fighter-feature': 'action',

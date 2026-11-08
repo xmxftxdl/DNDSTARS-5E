@@ -1,0 +1,62 @@
+import{restoreBountifulOpportunitySequenceOriginalRaw,readBountifulOpportunitySequenceLockedRaw}from'./bountifulOpportunitySequenceSource'
+import{it,expect,vi}from'vitest'
+import{normalizeCharacter}from'../../store/characters'
+import type{BattleMap}from'../../store/maps'
+import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
+import type{SharedRoomGatewayPort}from'../../ports/sharedRoomGateway'
+import{createDnd5eTurnEconomyCounts}from'./turnEconomy'
+import{prepareDnd5eOpportunityMoveSequence,resolvePreparedDnd5eOpportunityMoveSequence,readDnd5eOpportunitySequenceRawRequest,readDnd5eOpportunitySequenceRawSource}from'./opportunityMoveSequence'
+import{issueBountifulOpportunitySequenceRawSource,readBountifulOpportunitySequenceRawRoute,confirmBountifulOpportunitySequenceOriginal,readBountifulOpportunitySequencePlayerDiceOwner,recordBountifulOpportunitySequenceHostConfirmation}from'./bountifulOpportunitySequenceSource'
+import{bountifulReadyHttpFixture}from'./opportunityMove.httpSupport'
+import{decodeSecondChanceParentWire,type SecondChanceParentWire}from'../../lib/secondChanceParentWire'
+const session=vi.hoisted(()=>({value:{roomId:'room',memberId:'host',role:'dm'}}));vi.mock('../../lib/roomSession',()=>({getRoomSession:()=>session.value}))
+it('routes both real original OA PC dice through actual Page owner and independent DM confirmation producers',async()=>{
+ const http=await bountifulReadyHttpFixture()
+ try{
+ const characters=[normalizeCharacter({id:'first',name:'First',charClass:'战士',level:4,roomMemberId:'first-member',currentHp:36,maxHp:36}),normalizeCharacter({id:'mover',name:'Mover',charClass:'战士',level:4,roomMemberId:'second-member',currentHp:36,maxHp:36}),normalizeCharacter({id:'next',name:'Next',charClass:'战士',level:4,roomMemberId:'helper-member',currentHp:36,maxHp:36})]
+ const map:BattleMap={id:'map',name:'Map',width:1000,height:1000,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[{id:'first-token',characterId:'first',label:'First',x:450,y:375,size:1,type:'player',dnd5eSide:'player',hp:36,maxHp:36,color:'',emoji:''},{id:'mover-token',characterId:'mover',label:'Mover',x:500,y:375,size:1,type:'player',dnd5eSide:'enemy',hp:36,maxHp:36,color:'',emoji:''},{id:'next-token',characterId:'next',label:'Next',x:550,y:425,size:1,type:'player',dnd5eSide:'player',hp:36,maxHp:36,color:'',emoji:''}]},initiativeOrder=map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,emoji:'',color:'',roll:20-index})),economies=Object.fromEntries(map.tokens.map(token=>[token.id,createDnd5eTurnEconomyCounts('combat:1:'+token.id)]))
+ const data:Record<string,any>={characters:{characters,_sync:{revision:1,schemaVersion:1,writerId:'host',writtenAt:1}},maps:{maps:[map],selectedId:'map',_sync:{revision:1,schemaVersion:1,writerId:'host',writtenAt:1}},combat:{active:true,mapId:'map',combatId:'combat',round:1,initiativeIndex:1,initiativeOrder,dnd5eTurnEconomyByToken:economies,_sync:{revision:1,schemaVersion:1,writerId:'host',writtenAt:1}},'player-action-requests':{requests:[],_sync:{revision:1,schemaVersion:1,writerId:'host',writtenAt:1}}}
+ const commandId='same-whole-queued-move',appended=await http.command(commandId,{schemaVersion:1,command:{schemaVersion:1,commandId,type:'move-token',mapId:'map',combatId:'combat',actorTokenId:'mover-token',characterId:'mover',round:1,initiativeIndex:1,seq:1,expectedRevisions:{combat:1,maps:1},issuedAt:1,expectedPosition:{x:500,y:375},expectedElevationFeet:0,targetPosition:{x:725,y:375}}},data,'second-member');expect(appended.status,JSON.stringify(appended.payload)).toBe(202);data['player-action-requests']=appended.queue;data['combat-command-receipts']=appended.receipts
+ const action=appended.queue.requests.find((row:SharedPlayerActionState)=>row.id===commandId)as SharedPlayerActionState,prepared=prepareDnd5eOpportunityMoveSequence({action,map,characters,initiativeOrder,turnEconomyByToken:economies,firstHostNow:1234});if(!prepared.ok)throw Error(prepared.reason)
+ const before=structuredClone(data),events:{channel:string;payload:any}[]=[],gateway:Pick<SharedRoomGatewayPort,'publishEvent'>={publishEvent:async(channel,payload)=>{events.push({channel,payload});const response=await http.event(channel,payload,data,'host');if(response.status!==200)throw Error(JSON.stringify(response.payload))}}
+ const missing=(attacks:Parameters<typeof resolvePreparedDnd5eOpportunityMoveSequence>[0]['attacks'])=>{try{resolvePreparedDnd5eOpportunityMoveSequence({prepared:prepared.prepared,attacks})}catch(error){if(readDnd5eOpportunitySequenceRawRequest(error))return error;throw error}throw Error('Real missing-raw checkpoint expected')}
+ const firstError=missing({}),firstRolls={d20:15,damageRolls:[]},secondError=missing({'first-token':firstRolls})
+ expect(readDnd5eOpportunitySequenceRawRequest(firstError)).toMatchObject({windowIndex:0,actorTokenId:'first-token',originalAction:action});expect(readDnd5eOpportunitySequenceRawRequest(secondError)).toMatchObject({windowIndex:1,actorTokenId:'next-token',originalAction:action})
+ expect(()=>readDnd5eOpportunitySequenceRawSource({...prepared.prepared},firstError)).toThrow('actual-host-raw-checkpoint-required');await expect(issueBountifulOpportunitySequenceRawSource(prepared.prepared,new Error(String(firstError)),{cursor:1,issuerMode:'dm'},gateway)).rejects.toThrow('actual-host-raw-checkpoint-required')
+ const first=await issueBountifulOpportunitySequenceRawSource(prepared.prepared,firstError,{cursor:1,issuerMode:'dm'},gateway),firstRoute=readBountifulOpportunitySequenceRawRoute(first),sourcePayload=events.at(-1)!.payload
+ expect(readBountifulOpportunitySequencePlayerDiceOwner(first,firstRoute.requestId,'first-token')).toEqual({actorId:'first-token',characterId:'first',memberId:'first-member',hostMemberId:'host'})
+ expect(()=>readBountifulOpportunitySequencePlayerDiceOwner({...first},firstRoute.requestId,'first-token')).toThrow('exact-issued-player-dice-route-required')
+ expect(()=>readBountifulOpportunitySequencePlayerDiceOwner(first,firstRoute.requestId,'next-token')).toThrow('exact-issued-player-dice-route-required')
+ await expect(recordBountifulOpportunitySequenceHostConfirmation({requestId:firstRoute.requestId,rollerTokenId:'next-token',sides:20,rawValues:[7],values:[15]},gateway)).rejects.toThrow('actual-host-confirmation-scope-required')
+ expect((await http.event('bountiful-opportunity-source-dm-to-host',sourcePayload,data,'first-member')).status).toBe(403)
+ await expect(confirmBountifulOpportunitySequenceOriginal(first,[7],[15],gateway)).rejects.toThrow('actual-raw-confirmation-required')
+ await expect(issueBountifulOpportunitySequenceRawSource(prepared.prepared,secondError,{cursor:2,issuerMode:'dm'},gateway)).rejects.toThrow('confirmed-preceding-original-required')
+ const physical=async(route:ReturnType<typeof readBountifulOpportunitySequenceRawRoute>,characterId:string,memberId:string,raw:number)=>{
+  const request={mapId:'map',combatId:'combat',requestId:route.requestId,kind:'d20',count:route.count,sides:20,rollKind:'attack',rollerTokenId:route.actorTokenId,targetCharacterId:characterId,delivery:'player-roll-request'}
+  expect((await http.event('dice-roll-request-dm-to-player',{...request,count:route.count===1?2:1},data,'host')).status).toBe(403)
+  expect((await http.event('dice-roll-request-dm-to-player',request,data,'host')).status).toBe(200)
+  const result={...request,delivery:'player-roll-result',values:[raw]};expect((await http.event('dice-roll-request-player-to-dm',result,data,'spectator')).status).toBe(403);expect((await http.event('dice-roll-request-player-to-dm',result,data,'host')).status).toBe(403);expect((await http.event('dice-roll-request-player-to-dm',result,data,memberId==='first-member'?'helper-member':'first-member')).status).toBe(403);expect((await http.event('dice-roll-request-player-to-dm',result,data,memberId)).status).toBe(200)
+ }
+ await physical(firstRoute,'first','first-member',7)
+ const readPayload={parentId:action.id,mapId:action.mapId,combatId:action.combatId}
+ for(const member of['first-member','helper-member','spectator'])expect((await http.state('POST','bountiful-opportunity-sequence/source',readPayload,data,member)).status).toBe(403)
+ const locked=await http.state('POST','bountiful-opportunity-sequence/source',readPayload,data,'host');expect(locked.status,JSON.stringify(locked.payload)).toBe(200);expect(locked.payload.rows).toMatchObject([{windowIndex:0,actorId:'first-token',raw:{memberId:'first-member',values:[7]}}]);expect(locked.payload.rows[0].confirmed).toBeUndefined()
+ const recoveredSource=decodeSecondChanceParentWire(locked.payload.source as SecondChanceParentWire)as{prepared:typeof prepared.prepared},fresh=prepareDnd5eOpportunityMoveSequence(recoveredSource.prepared.input);if(!fresh.ok)throw Error(fresh.reason)
+ let freshError:unknown;try{resolvePreparedDnd5eOpportunityMoveSequence({prepared:fresh.prepared,attacks:{}})}catch(error){freshError=error}
+ const freshRoute=await issueBountifulOpportunitySequenceRawSource(fresh.prepared,freshError,{cursor:1,issuerMode:'dm'},gateway);expect(readBountifulOpportunitySequenceRawRoute(freshRoute).requestId).toBe(firstRoute.requestId)
+ const loadOriginal=async()=>{const response=await http.state('POST','bountiful-opportunity-sequence/source',readPayload,data,'host');expect(response.status).toBe(200);return response.payload}
+ expect(await restoreBountifulOpportunitySequenceOriginalRaw(freshRoute,loadOriginal)).toEqual({rawValues:[7]})
+ expect(readBountifulOpportunitySequenceLockedRaw(freshRoute,firstRoute.requestId,'first-token',1,20)).toEqual([7])
+ expect(()=>readBountifulOpportunitySequenceLockedRaw(freshRoute,firstRoute.requestId,'first-token',2,20)).toThrow('exact-issued-raw-scope-required')
+ await expect(confirmBountifulOpportunitySequenceOriginal(freshRoute,[8],[15],gateway)).rejects.toThrow('actual-raw-confirmation-required');await recordBountifulOpportunitySequenceHostConfirmation({requestId:firstRoute.requestId,rollerTokenId:'first-token',sides:20,rawValues:locked.payload.rows[0].raw.values,values:[15]},gateway);expect(await restoreBountifulOpportunitySequenceOriginalRaw(freshRoute,loadOriginal)).toEqual({rawValues:[7],values:[15]})
+ await expect(confirmBountifulOpportunitySequenceOriginal(first,[7],[16],gateway)).rejects.toThrow('confirmation-immutable')
+ const second=await issueBountifulOpportunitySequenceRawSource(prepared.prepared,secondError,{cursor:2,issuerMode:'dm'},gateway),secondRoute=readBountifulOpportunitySequenceRawRoute(second);expect(secondRoute.requestId).not.toBe(firstRoute.requestId);expect(secondRoute.parentId).toBe(action.id)
+ await physical(secondRoute,'next','helper-member',9);await recordBountifulOpportunitySequenceHostConfirmation({requestId:secondRoute.requestId,rollerTokenId:'next-token',sides:20,rawValues:[9],values:[13]},gateway);expect(readBountifulOpportunitySequencePlayerDiceOwner(second,secondRoute.requestId,'next-token')).toEqual({actorId:'next-token',characterId:'next',memberId:'helper-member',hostMemberId:'host'})
+ const recovered=await http.state('POST','bountiful-opportunity-sequence/source',readPayload,data,'host');expect(recovered.status).toBe(200);expect(recovered.payload.rows).toMatchObject([{windowIndex:0,raw:{values:[7]},confirmed:{memberId:'host',rawValues:[7],values:[15]}},{windowIndex:1,raw:{values:[9]},confirmed:{memberId:'host',rawValues:[9],values:[13]}}])
+ await expect(confirmBountifulOpportunitySequenceOriginal({...second},[9],[13],gateway)).rejects.toThrow('actual-issued-route-required')
+ const final=resolvePreparedDnd5eOpportunityMoveSequence({prepared:prepared.prepared,attacks:{'first-token':firstRolls,'next-token':{d20:13,damageRolls:[1]}}});expect(final.result.ok).toBe(true);expect(final.attacks).toEqual(['first-token','next-token']);expect(final.originalAction).toEqual(action);expect(final.application.map.tokens.find(token=>token.id==='mover-token')).toMatchObject({x:725,y:375});expect(final.result.state.combatants['mover-token'].turn.movementRemaining).toBe(10)
+ for(const name of['characters','maps','combat'])expect(await http.readActualResource(name)).toEqual(before[name]);expect(data).toEqual(before)
+ // Changing an unrelated world leaf after confirmation cannot issue a new slot.
+ data.maps._sync.revision++;await expect(issueBountifulOpportunitySequenceRawSource(prepared.prepared,secondError,{cursor:2,issuerMode:'dm'},gateway)).rejects.toThrow('stale-original-source')
+ }finally{await http.close()}
+})

@@ -1,0 +1,1 @@
+export function mutateEffectEndConfirmedReceipt(current:unknown,snapshot:unknown,identity:unknown,operation:string,input:unknown,now:number):{ok:boolean;changed:boolean;status?:number;error?:string;next?:unknown;receipt?:unknown;contextKey?:string;combatRevision?:number;hasPending?:boolean}

@@ -302,6 +302,21 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('/assets/icons/fighter-action-surge-feature-action.png')
   })
 
+  it('exposes an ordinary scene weapon attack while preserving pending, actor and reaction restrictions', () => {
+    for (const [canAct, pending, canUseTriggeredReactions, enabled] of [[true,false,false,true],[true,true,false,false],[false,false,false,false],[false,false,true,false]] as const) {
+      const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+        character: character(), mode: 'exploration', canAct, pending, canUseTriggeredReactions,
+        triggeredReactionSpellIds: canUseTriggeredReactions ? ['shield'] : [],
+        turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+        onCommand: () => undefined,
+      }))
+      const attack = html.match(/<button[^>]*data-action-id="system:weapon-attack"[^>]*>/)?.[0]
+      expect(attack).toBeTruthy()
+      expect(attack).toContain('aria-disabled="'+!enabled+'"')
+      expect(html).toMatch(/data-action-id="system:move"[^>]*aria-disabled="true"/)
+    }
+  })
+
   it('renders the complete hotbar during exploration and locks basic combat actions', () => {
     const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
       character: character(),

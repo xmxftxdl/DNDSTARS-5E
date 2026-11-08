@@ -5,7 +5,8 @@ import EmptyState from '../components/EmptyState'
 import type { CharacterSetupResult } from '../components/character/CharacterSetupDialog'
 import DMRoster from '../components/character/DMRoster'
 import AccountCharacterVaultPanel from '../components/character/AccountCharacterVaultPanel'
-import { useCharacterStore } from '../store/characters'
+import { normalizeCharacter, useCharacterStore } from '../store/characters'
+import { applyDnd5eInitialSubclassBuildGrantsV1 } from '../rulesets/dnd5e/initialSubclassBuildGrants'
 import { useMapStore } from '../store/maps'
 import { modeFromPort, playerSlotLabel } from '../lib/appMode'
 import {
@@ -20,7 +21,7 @@ import {
 import { getRoomSession } from '../lib/roomSession'
 import { characterCreationDraftKey, clearCharacterCreationDraft, copyCharacterCreationDraft, hasCharacterCreationDraft, readCharacterCreationDraft, writeCharacterCreationDraft } from '../lib/characterCreationDraft'
 import type { Character } from '../types/character'
-import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
+import { characterExportFileName, makeCharacterExport, readCharacterImport, prepareDmCharacterImport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
@@ -98,7 +99,7 @@ export default function CharactersPage() {
       dnd5eStartingEquipmentPlan(setup.charClass, setup.background),
       setup.startingEquipment,
     )
-    update(id, {
+    const initialPatch: Partial<Character> = {
       ...(existing && baseline ? {
         ...Object.fromEntries(Object.keys(existing).filter((key) => !(key in baseline)).map((key) => [key, undefined])),
         ...baseline,
@@ -145,7 +146,15 @@ export default function CharactersPage() {
           discardedIndices: [...roll.discardedIndices],
         })) } : {}),
       },
-    })
+    }
+    const initialCharacter = useCharacterStore.getState().characters.find(character => character.id === id)
+    if (!initialCharacter) return
+    const initialBuild = applyDnd5eInitialSubclassBuildGrantsV1(normalizeCharacter({ ...initialCharacter, ...initialPatch }))
+    if (!initialBuild.ok) {
+      void showAppAlert({ title: '初始子职构筑未完成', message: `无法应用所选子职的初始授予：${initialBuild.reason}` })
+      return
+    }
+    update(id, initialBuild.character)
     if (setup.targetLevel > 1) {
       const baseCharacter = useCharacterStore.getState().characters.find((character) => character.id === id)
       if (baseCharacter) writeCharacterCreationDraft(characterCreationDraftKey(`base:${id}`), { character: baseCharacter })
@@ -211,18 +220,27 @@ export default function CharactersPage() {
   }
 
   const importCharacterFile = async (file: File) => {
+    if (isDM && roomSession?.role !== 'dm') {
+      await showAppAlert('请先进入 DM 房间，再导入角色。')
+      return
+    }
     try {
-      const parsed = JSON.parse(await file.text())
-      const character = parseCharacterExport(parsed)
-      if (!character) throw new Error('Invalid character JSON')
-      const id = importCharacter(character)
+      const character = readCharacterImport(await file.text())
+      if (!await showAppConfirm({
+        title: '导入新角色',
+        message: `角色：${character.name || '未命名'}\n等级：${character.level ?? '未提供'}\n规则：${character.rulesetId || '未提供'}\n将创建一张新角色卡，不会覆盖已有角色。${isDM ? '\n导入后请在玩家角色列表中分配给玩家。' : ''}`,
+        confirmLabel: '创建角色',
+      })) return
+      const id = importCharacter(isDM && roomSession?.role === 'dm'
+        ? prepareDmCharacterImport(character, roomSession.roomId)
+        : character)
       if (!isDM) {
         setAssignedPlayerCharacterId(id, playerSlot)
       }
       select(id)
     } catch (error) {
       console.error('[character-import-failed]', error)
-      await showAppAlert('无法载入角色 JSON。请确认文件是从本项目导出的角色文件。')
+      await showAppAlert(error instanceof Error ? error.message : '角色导入失败，请稍后重试。')
     }
   }
 
@@ -297,14 +315,7 @@ export default function CharactersPage() {
 
   const confirmExcelImport = (character: Parameters<typeof importCharacter>[0]) => {
     const id = importCharacter(isDM && roomSession?.role === 'dm'
-      ? {
-          ...character,
-          roomId: roomSession.roomId,
-          roomMemberId: undefined,
-          ownerAccountId: undefined,
-          player: 'DM 待分配',
-          visibleToPlayers: true,
-        }
+      ? prepareDmCharacterImport(character, roomSession.roomId)
       : character)
     if (!isDM) setAssignedPlayerCharacterId(id, playerSlot)
     select(id)
@@ -434,6 +445,25 @@ export default function CharactersPage() {
             )}
             {isDM && (
               <>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) void importCharacterFile(file)
+                    event.currentTarget.value = ''
+                  }}
+                />
+                <button
+                  onClick={() => importFileRef.current?.click()}
+                  disabled={roomSession?.role !== 'dm'}
+                  className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Upload className="h-4 w-4" />
+                  导入角色 JSON
+                </button>
                 <input
                   ref={excelImportFileRef}
                   type="file"

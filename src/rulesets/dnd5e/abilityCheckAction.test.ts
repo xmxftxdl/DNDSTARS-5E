@@ -39,6 +39,41 @@ function fixture(payload: NonNullable<SharedPlayerActionState['dnd5eAbilityCheck
 }
 
 describe('D&D 5e ability-check authority bridge', () => {
+  it('applies requested lie detection only after separate Host confirmation, consistently in preview and settlement', () => {
+    const input = fixture({ ability: 'wis', skill: 'insight', requestedPurpose: 'detect-lies', dc: 12 })
+    input.actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'synthetic:ear', label: 'Ear', targetId: input.actor.id, source: { kind: 'feature' },
+      modifiers: { minimumSkillCheckD20: [{ ability: 'wis', skill: 'insight', purpose: 'detect-lies', minimum: 8 }] },
+    })] }
+    const prepared = prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(previewPreparedDnd5eAbilityCheck(prepared.prepared, 2)?.d20).toBe(2)
+    expect(previewPreparedDnd5eAbilityCheck(prepared.prepared, 2, undefined, undefined, undefined, 'detect-lies')?.d20).toBe(8)
+    const ordinary = resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 2 })
+    expect(ordinary.result.events).toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', d20: 2 }))
+    const trusted = resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 2, hostConfirmedPurpose: 'detect-lies' })
+    expect(trusted.result.ok).toBe(true)
+    expect(trusted.result.events).toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', d20: 8 }))
+    // A forged confirmation in a serialized player payload is deliberately ignored.
+    Object.assign(prepared.prepared.payload, { hostConfirmedPurpose: 'detect-lies', abilityCheckPurpose: 'detect-lies' })
+    expect(resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 2 }).result.events)
+      .toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', d20: 2 }))
+    delete prepared.prepared.payload.requestedPurpose
+    expect(resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 2, hostConfirmedPurpose: 'detect-lies' }).result.events)
+      .toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', d20: 2 }))
+  })
+
+  it('rejects lie-detection requests for other checks before any action is spent', () => {
+    for (const payload of [
+      { ability: 'wis' as const, skill: 'perception', requestedPurpose: 'detect-lies' as const, dc: 12, spendAction: true },
+      { ability: 'cha' as const, skill: 'deception', requestedPurpose: 'detect-lies' as const, dc: 12, spendAction: true },
+    ]) {
+      const input = fixture(payload)
+      expect(prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })).toMatchObject({ ok: false, reason: 'invalid-action' })
+    }
+  })
+
   it('accepts smell perception from a shared request and preserves its conditional advantage', () => {
     const input = fixture({ ability: 'wis', skill: 'perception', context: 'smell', dc: 12, spendAction: true })
     input.actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({

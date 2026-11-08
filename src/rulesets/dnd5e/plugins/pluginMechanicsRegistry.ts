@@ -1,3 +1,5 @@
+import{stormGuideWindHandler}from'../stormGuideWindMechanic'
+import{stormGuideRainHandler}from'../stormGuideRainMechanic'
 import { dnd5eActivityHasInventoryExchangeRitualProfile } from '../activities/dnd5eInventoryExchangeProfile'
 import {
   AUTOMATION_PHASES,
@@ -534,18 +536,18 @@ for (const kind of ['action-economy', 'spell-slot', 'resource', 'item-charge', '
   registerCore(`consumption:${kind}`, ['cost'])
 }
 for (const kind of [
-  'ethereal-access', 'combat-active', 'turn-owner', 'rage-state', 'minimum-level', 'class-level', 'hp-percentage', 'hp-value', 'ability-score', 'condition',
+  'ethereal-access', 'combat-active', 'combat-round', 'attack-action-used', 'turn-owner', 'rage-state', 'minimum-level', 'class-level', 'hp-percentage', 'hp-value', 'ability-score', 'condition',
   'illumination', 'airborne-state', 'target-relation', 'target-identity', 'owned-companion', 'can-hear-source', 'shared-language', 'can-understand-source-language', 'can-speak', 'active-effect', 'distance', 'resource',
   'resource-capacity', 'once-per-turn', 'event-source', 'activity-definition', 'weapon-property',
   'attack-weapon-category',
-  'skill-proficiency', 'attack-proficiency', 'attack-category', 'attack-delivery', 'attack-weapon', 'attack-origin', 'attack-hands', 'attack-mode', 'attack-magical', 'attack-result', 'attack-outcome', 'damage-type', 'damage-event', 'size-rank', 'creature-type', 'movement-distance', 'movement-source-distance', 'initial-space-exit', 'initial-space-melee-crossing', 'movement-property',
+  'skill-proficiency', 'attack-proficiency', 'attack-category', 'attack-delivery', 'attack-weapon', 'attack-pact-weapon', 'attack-origin', 'attack-hands', 'attack-mode', 'attack-magical', 'attack-result', 'attack-outcome', 'damage-type', 'damage-event', 'size-rank', 'creature-type', 'movement-distance', 'movement-source-distance', 'initial-space-exit', 'initial-space-melee-crossing', 'movement-property',
   'spell-used', 'skill-used', 'action-economy-available', 'armor-equipped', 'armor-proficiency', 'held-item', 'free-hands',
   'spellcasting-capability', 'choice',
 ] as const) registerCore(`predicate:${kind}`, ['eligibility'])
 for (const event of DND5E_TRIGGER_EVENT_IDS_V1) registerCore(`trigger:${event}`, ['interrupt', 'persistence'])
 for (const kind of [
-  'read-damage-traits', 'detect-planar-portal', 'reveal-target-location', 'reaction-follow', 'secondary-weapon-damage', 'damage', 'healing', 'temporary-hit-points', 'revive', 'stabilize', 'instant-death', 'stand-up', 'apply-standard-condition', 'apply-effect',
-  'remove-standard-condition', 'remove-effect', 'remove-effects-by-tag', 'adjust-exhaustion', 'narrative-prompt', 'recognize-granting-disguise',
+  'read-damage-traits', 'read-sensory-deception', 'detect-planar-portal', 'reveal-target-location', 'reaction-follow', 'weapon-hit-banishment', 'secondary-weapon-damage', 'damage', 'healing', 'temporary-hit-points', 'revive', 'stabilize', 'instant-death', 'stand-up', 'apply-standard-condition', 'apply-effect',
+  'remove-standard-condition', 'remove-effect', 'remove-effects-by-tag', 'adjust-exhaustion', 'narrative-prompt', 'recognize-granting-disguise','transfer-owned-curse-on-bearer-death','heal-owned-curse-on-bearer-death',
   'lower-ability-score', 'recover-ability-score', 'recover-hit-point-maximum', 'reduce-hit-point-maximum', 'transfer-hit-point-maximum', 'resource', 'move', 'set-directional-command', 'summon', 'duplicate-creature', 'dispel-area',
   'relocate-granting-area', 'dismiss-owned-summon', 'dismiss-owned-temporary-summons',
   'reshape-granting-area', 'shrink-granting-area',
@@ -564,13 +566,15 @@ for (const kind of ['instantaneous', 'rounds', 'save-ends', 'concentration', 'pe
 }
 for (const kind of [
   'weapon-attacks-against-target',
+  'damage-rolls-by-source-bonus', 'notify-source-on-bearer-death', 'bound-weapon-ability',
+  'sneak-attack-target',
   'armor-class', 'attacks-against-source-armor-class', 'attacks-by-source-critical-threshold', 'speed', 'attack-roll', 'weapon-attack-roll', 'attacks-against-target', 'cannot-be-surprised-while-conscious', 'perceive-visible-creatures-as-hostile', 'mandatory-opportunity-attacks', 'random-visible-creature-targets', 'prevent-movement-opportunity-attacks', 'speed-after-own-turn-weapon-attack', 'attack-target-lock', 'ability-check', 'perception-target-lock', 'skill-check-bonus-aura', 'minimum-ability-check-d20', 'weapon-damage-roll', 'weapon-damage-multiplier', 'weapon-enchantment', 'armor-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw', 'death-saving-throw', 'maximize-healing-dice',
   'optional-bonus-die', 'roll-dice', 'healing-prevention', 'saving-throw-proficiency', 'equipment-proficiency', 'attack-action-minimum', 'own-turn-attack-action-bonus', 'skill-expertise', 'damage-resistance', 'suppress-damage-resistance', 'conditional-damage-resistance', 'damage-immunity', 'damage-vulnerability',
   'next-source-or-ally-attack-vulnerability',
   'condition-immunity', 'condition-immunity-by-source-creature-type', 'saving-throw-advantage-by-source-creature-type', 'condition-immunity-by-source-magic', 'attacks-against-target-by-creature-type', 'character-capability', 'racial-saving-throw-advantage',
   'prohibit-reaction', 'prevent-actions', 'prevent-rest-benefits', 'forced-flee-from-source',
-  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'swim-speed', 'truesight', 'sight-range-limit', 'spell-targeting-immunity',
-  'flight-speed', 'flight-speed-limit', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'darkvision-concealment', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'solid-material-traversal', 'tracking-capability', 'source-location-awareness', 'environmental-capability',
+  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'swim-speed', 'truesight', 'through-solid-objects-sight', 'sight-range-limit', 'spell-targeting-immunity',
+  'flight-speed', 'flight-speed-limit', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'darkvision-concealment', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'solid-material-traversal', 'object-creature-traversal', 'tracking-capability', 'source-location-awareness', 'environmental-capability',
   'hit-point-maximum',
   'spell-save-disadvantage-aura', 'spell-action-as-bonus-action', 'attack-profile',
   'damage-reduction', 'on-hit-bonus-damage', 'attack-roll-reroll', 'death-prevention', 'revival-prevention', 'next-d20-advantage',
@@ -942,3 +946,7 @@ registerDnd5eMechanicOperationHandlerV1({
 })
 
 
+
+registerDnd5eMechanicOperationHandlerV1(stormGuideRainHandler)
+
+registerDnd5eMechanicOperationHandlerV1(stormGuideWindHandler)

@@ -1,3 +1,5 @@
+import {deferBountifulReadyGenericChoice} from '../../rulesets/dnd5e/bountifulReadyGenericReplay'
+import {deferBountifulD20Choice,type BountifulDeferredD20Scope} from '../../rulesets/dnd5e/bountifulLuckDeferredD20'
 import type { Character } from '../../types/character'
 import type { SharedRoomGatewayPort } from '../../ports/sharedRoomGateway'
 import { COMBAT_INTERRUPT_RESOURCE, finishCombatInterrupt, type SharedCombatInterruptQueueState } from '../../lib/combatInterruptQueue'
@@ -23,11 +25,12 @@ function revision(value: Snapshot<object>, name: string): number {
  * A missing/retired interrupt never creates a new spend. CAS failures do not retry
  * using newer revision watermarks or fall back to the original d20. */
 export async function commitD20RollResourceSettlement(input: {
-  mapId: string; interruptId: string; acceptedContributionId: string; now?: number
+  mapId: string; interruptId: string; acceptedContributionId: string; now?: number; deferToParent?:BountifulDeferredD20Scope
 }, gateway: Gateway = {
   loadResource: browserSharedRoomService.loadSharedResource,
   saveResourcesAtomically: browserSharedRoomService.saveSharedResourcesAtomically,
 }): Promise<RollConfirmationInterruptResponse> {
+  if(input.deferToParent)return deferBountifulD20Choice({...input,deferToParent:input.deferToParent},gateway)
   const session = getRoomSession()
   const guard = () => {
     const current = getRoomSession()
@@ -45,6 +48,11 @@ export async function commitD20RollResourceSettlement(input: {
   const contribution = prompt.contributions?.find(row => row.id === input.acceptedContributionId)
   if (!contribution || (contribution.kind !== 'replace-d20' &&
     (contribution.kind !== 'choice-reroll' || contribution.decision !== 'use'))) throw Error('reroll-contribution-mismatch')
+  if(prompt.payload.bountifulReadyParent){const bound=prompt.payload.bountifulReadyParent;return deferBountifulReadyGenericChoice({mapId:input.mapId,frameId:bound.frameId,interruptId:input.interruptId,contributionId:input.acceptedContributionId,dieIndex:bound.dieIndex},gateway)}
+  if(prompt.payload.bountifulParent){
+    const bound=prompt.payload.bountifulParent
+    return deferBountifulD20Choice({...input,deferToParent:{parentId:bound.parentId,sourceOccurrence:bound.sourceOccurrence,dieIndex:bound.dieIndex}},gateway)
+  }
   const prior = prompt.response
   if (prompt.status === 'done') {
     if (!prior || prior.acceptedContributionId !== contribution.id ||

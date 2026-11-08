@@ -39,7 +39,7 @@ export function projectDnd5eSourceVisionSensor(token, input = {}) {
   const hearingOnly = token.dnd5eSpellEffect.sensorSense === 'hearing'
   if (blinded || hearingOnly) {
     Object.assign(profile, { normalRangeFeet: 0, darkvisionRangeFeet: 0, darknessSightRangeFeet: 0,
-      magicalDarknessSightRangeFeet: 0, truesightRangeFeet: 0, tokenBaseDarkvisionRangeFeet: 0,
+      magicalDarknessSightRangeFeet: 0, truesightRangeFeet: 0, throughSolidObjectsRangeFeet: 0, tokenBaseDarkvisionRangeFeet: 0,
       intrinsicDarkvisionRangeFeet: 0, projectedCharacterVision: normalizeDnd5eProjectedCharacterVision({}),
       formDarkvisionRangeFeet: undefined, formRetainsDarkvision: undefined })
   }
@@ -107,6 +107,7 @@ export function normalizeDnd5eProjectedCharacterVision(value) {
     ...(typeof effect?.id === 'string' ? { id: effect.id } : {}),
     source: { actorId: typeof effect?.source?.actorId === 'string' ? effect.source.actorId : undefined, ...(effect?.source?.magical === true ? { magical: true } : {}) },
     modifiers: { sightRangeLimitFeet: rangeFeet(effect?.modifiers?.sightRangeLimitFeet), darkvisionRangeFeet: rangeFeet(effect?.modifiers?.darkvisionRangeFeet),
+      throughSolidObjectsRangeFeet: rangeFeet(effect?.modifiers?.throughSolidObjectsRangeFeet),
       darkvisionIfAbsentFeet: rangeFeet(effect?.modifiers?.darkvisionIfAbsentFeet),
       darkvisionExistingBonusFeet: rangeFeet(effect?.modifiers?.darkvisionExistingBonusFeet),
       darkvisionRacialFallbackFeet: rangeFeet(effect?.modifiers?.darkvisionRacialFallbackFeet),
@@ -228,6 +229,21 @@ function monsterHasDevilsSight(monster) {
  * and D&D 5e Headless. All inputs are untrusted snapshots; the returned values
  * are bounded host-owned numbers.
  */
+/** A personal sight grant never becomes another party member's solid-object sight. */
+export function projectDnd5ePersonalSolidSight(value, allowed) {
+  if (allowed || !plainObject(value)) return value
+  const projectState = state => !plainObject(state) ? state : { ...state,
+    activeEffects: Array.isArray(state.activeEffects) ? state.activeEffects.map(effect => {
+      if (!plainObject(effect?.modifiers) || effect.modifiers.throughSolidObjectsRangeFeet == null) return effect
+      const { throughSolidObjectsRangeFeet: _personalSight, ...modifiers } = effect.modifiers
+      return { ...effect, modifiers }
+    }) : state.activeEffects }
+  return { ...value, dnd5eCombatState: projectState(value.dnd5eCombatState), classState: projectState(value.classState),
+    ...(plainObject(value.dnd5eProjectedCharacterVision) ? { dnd5eProjectedCharacterVision: {
+      ...value.dnd5eProjectedCharacterVision, classState: projectState(value.dnd5eProjectedCharacterVision.classState),
+    } } : {}) }
+}
+
 export function compileDnd5eEffectiveVisionProfile(input = {}) {
   const token = plainObject(input.token) ? input.token : {}
   const cachedCharacter = normalizeDnd5eProjectedCharacterVision(token.dnd5eProjectedCharacterVision)
@@ -275,6 +291,7 @@ export function compileDnd5eEffectiveVisionProfile(input = {}) {
     rangeFeet(token.tremorsenseRangeFeet),
     monsterSenseRangeFeet(monster, ['tremorsense', '\u9707\u98a4\u611f\u77e5']),
   )
+  const throughSolidObjectsRangeFeet = activeEffectsFrom(input).reduce((maximum,effect) => token.magicSuppressed === true && effect?.source?.magical === true ? maximum : Math.max(maximum,rangeFeet(effect?.modifiers?.throughSolidObjectsRangeFeet)),0)
   const truesightRangeFeet = Math.max(
     rangeFeet(token.truesightRangeFeet),
     monsterSenseRangeFeet(monster, ['truesight', '\u771f\u89c6']),
@@ -298,13 +315,14 @@ export function compileDnd5eEffectiveVisionProfile(input = {}) {
     ...(blindBeyondBlindsight ? { blindBeyondBlindsight: true } : {}),
     ...(Number.isFinite(sightRangeLimitFeet) ? { sightRangeLimitFeet } : {}),
     normalRangeFeet,
+    ...(throughSolidObjectsRangeFeet > 0 ? {throughSolidObjectsRangeFeet} : {}),
     darkvisionRangeFeet,
-    ...(Number.isFinite(sightRangeLimitFeet) || conditional.conditional || formRange != null || token.dnd5eBaseDarkvisionRangeFeet != null ? { tokenBaseDarkvisionRangeFeet, intrinsicDarkvisionRangeFeet,
+    ...(throughSolidObjectsRangeFeet > 0 || Number.isFinite(sightRangeLimitFeet) || conditional.conditional || formRange != null || token.dnd5eBaseDarkvisionRangeFeet != null ? { tokenBaseDarkvisionRangeFeet, intrinsicDarkvisionRangeFeet,
       formDarkvisionRangeFeet: formRange ?? undefined, formRetainsDarkvision: formRange == null ? undefined : retainsFormSenses,
       projectedCharacterVision: normalizeDnd5eProjectedCharacterVision({ ...effectiveCharacter,
         dnd5eCombatState: undefined,
         classState: { activeEffects: [...activeEffectsFrom({ character: effectiveCharacter }),
-          ...activeEffectsFrom({ token }).filter(effect => effect?.modifiers?.sightRangeLimitFeet != null)] },
+          ...activeEffectsFrom({ token }).filter(effect => effect?.modifiers?.sightRangeLimitFeet != null || effect?.modifiers?.throughSolidObjectsRangeFeet != null)] },
       }) } : {}),
     darknessSightRangeFeet: Math.max(explicitDarknessSightRangeFeet, devilsSightRangeFeet),
     magicalDarknessSightRangeFeet: Math.max(

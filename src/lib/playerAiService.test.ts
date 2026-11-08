@@ -56,7 +56,7 @@ async function fakeOpenAi() {
 }
 
 describe('player AI service', () => {
-  it('only uses Luna for Excel and gpt-image low for portraits, with actor audit records', async () => {
+  it('only uses GPT-6.1 Sol for Excel and gpt-image low for portraits, with actor audit records', async () => {
     const upstream = await fakeOpenAi()
     const root = await mkdtemp(path.join(os.tmpdir(), 'stars-player-ai-'))
     roots.push(root)
@@ -88,7 +88,7 @@ describe('player AI service', () => {
     expect(portrait.billing).toMatchObject({ actualCredits: 250, reservedCredits: 500 })
     expect(upstream.requests[0]).toMatchObject({
       path: '/v1/chat/completions',
-      body: { model: 'gpt-5.6-luna' },
+      body: { model: 'gpt-6.1-sol' },
     })
     expect(upstream.requests[1]).toMatchObject({
       path: '/v1/images/generations',
@@ -101,7 +101,7 @@ describe('player AI service', () => {
     expect(settled).toHaveLength(2)
     expect(settled[0]).toMatchObject({
       providerId: 'openai-compatible',
-      modelId: 'gpt-5.6-luna',
+      modelId: 'gpt-6.1-sol',
       actorId: 'player-member-1',
       roomId: 'ABC234',
       inputTokens: 321,

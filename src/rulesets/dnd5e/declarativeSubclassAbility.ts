@@ -1,3 +1,5 @@
+import {DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS} from './passiveSubclassMechanicKinds'
+import { normalizeDnd5eMinimumSkillCheckD20, normalizeDnd5eHalfSpeedSkillChecks, type Dnd5eMinimumSkillCheckD20Rule, type Dnd5eHalfSpeedSkillCheckRule } from './contextualSkillChecks'
 import { validDnd5eHeldWeaponBaseIds } from './heldMeleeWeaponRequirement'
 import { isDnd5eLegacyCoreResourceId } from './coreResourceIds'
 import { validateResourceRestRecovery, type ResourceRestRecovery, type CombatStartResourceRecovery, validateCombatStartResourceRecovery } from '../../lib/resourceRestRecovery'
@@ -404,13 +406,20 @@ export interface DeclarativeNextD20AdvantageMechanicV1 {
  */
 export interface DeclarativePostD20AdjustmentMechanicV1 {
   kind: 'post-d20-adjustment'
+  /** Two individually checked d4 faces, available only at a genuine final failure. */
+  diceCount?:2
+  requiresFinalFailure?:true
+  /** Explicit nonspell magic is unavailable inside actual antimagic. */
+  magical?: boolean
   rollKinds: readonly DeclarativeNextD20RollKindV1[]
   /** Exactly one amount source is required. */
   dieSides?: number
   fixedAmount?: number
   fixedAmountReference?: 'source-proficiency-bonus'
   directions: readonly ('add' | 'subtract')[]
-  scope?: 'any' | 'attack-against-self' | 'attack-against-nearby'
+  scope?: 'any' | 'attack-against-self' | 'attack-against-nearby' | 'saving-throw-self' | 'self-roll'
+  /** Only an actually failed save by the owner may issue this adjustment. */
+  requiresFailedSave?: boolean
   requiresHeldMeleeWeaponOrShield?: boolean
   resistanceWhenStillHit?: boolean
   attackModes?: readonly ('melee' | 'ranged')[]
@@ -425,6 +434,28 @@ export interface DeclarativePostD20AdjustmentMechanicV1 {
 export type DeclarativeD20ChoiceRerollScopeV1 =
   | 'self-roll'
   | 'attack-against-self'
+
+/** An independent d6 can negate a confirmed hit without replacing the original attack die. */
+export interface DeclarativeIncomingHitDieNegationMechanicV1 {
+  kind: 'incoming-hit-die-negation'
+  dieSides: 6
+  minimumRoll: number
+  requiredAttackerSourceActivityId: string
+}
+
+/** Narrow incoming-hit reroll; unlike Lucky, this replaces one original attack die. */
+/** A genuine incoming hit changes only that attack's target AC, never its roll. */
+export interface DeclarativeIncomingAttackArmorClassMechanicV1 {
+  kind: 'incoming-attack-armor-class'
+  /** Absent keeps the existing nonmagical reaction contract. */
+  magical?: boolean
+  bonus: number
+  maximumSpellLevelAfterUse?: number
+}
+
+export interface DeclarativeIncomingHitAttackDieRerollMechanicV1 {
+  kind: 'incoming-hit-attack-die-reroll'
+}
 
 /**
  * Generic Lucky-style decision window. The imported package only declares
@@ -607,6 +638,8 @@ export interface DeclarativeAlternateResourceSpellcastingMechanicV1 {
     minimumLevel?: number
     castAtLevel: number
     resourceCost: number
+    /** Only the caster sees through Darkness created by this actual resource cast. */
+    sourceCanSeeThroughDarkness?: true
     selection?: { groupId: string; optionId: string }
     upcast?: {
       resourcePerSlotLevel: number
@@ -718,6 +751,12 @@ export interface DeclarativeStoredD20ReplacementMechanicV1 {
 }
 
 /** Passive replacement for the number of attacks granted by one Attack action. */
+export interface DeclarativeMissedAttackAdvantageRerollMechanicV1 {
+  kind: 'missed-attack-advantage-reroll'
+  replacement: 'whole-pool'
+  mustUseNewRoll: true
+}
+
 export interface DeclarativeMissedWeaponAttackRerollMechanicV1 {
   kind: 'missed-weapon-attack-reroll'
   weaponQualification: 'monk-weapon'
@@ -789,6 +828,36 @@ export interface DeclarativeWeaponDamageRiderMechanicV1 {
 }
 
 /** Adds one ability modifier to a qualifying class spell damage roll. */
+/** Fixed source rules; the exact physical bound weapon is resolved by the Host. */
+export interface DeclarativePactWeaponAbilityMechanicV1 {kind:'pact-weapon-ability';ability:'cha'}
+
+export interface DeclarativeImprovedPactWeaponMechanicV1 {
+  kind: 'improved-pact-weapon'
+}
+
+export interface DeclarativeSpellDamageDiceRerollMechanicV1 {
+  kind: 'spell-damage-dice-reroll'
+  damageTypes: readonly Dnd5eDamageType[]
+  originalFaces: readonly number[]
+  maximumRerollsPerDie: 1
+}
+
+/** Automatic self benefit, applied only inside a completed native rest window. */
+export interface DeclarativeRestTemporaryHitPointsMechanicV1 {
+  kind: 'rest-temporary-hit-points'
+  classId: Dnd5eClassId
+  ability: AbilityKey
+  rests: readonly ('short-rest' | 'long-rest')[]
+}
+
+/** Optional CHA bonus to one target and one damage roll per genuine spell cast. */
+export interface DeclarativeSpellDamageSelectedAbilityModifierMechanicV1 {
+ kind:'spell-damage-selected-ability-modifier'
+ ability:'cha'
+ damageTypes:readonly ('fire'|'radiant')[]
+ oncePerSpellCast:true
+}
+
 export interface DeclarativeSpellDamageAbilityModifierMechanicV1 {
   /** Requires trigger after-spell-cast and self targeting. */
   kind: 'spell-damage-ability-modifier'
@@ -798,6 +867,9 @@ export interface DeclarativeSpellDamageAbilityModifierMechanicV1 {
 }
 
 /** Maximizes only spell healing dice, evaluated separately for each current recipient. */
+/** Optional subset of one actual spell-healing pool; a source-owned current-turn use. */
+export interface DeclarativeSpellHealingDiceRerollMechanicV1 {kind:'spell-healing-dice-reroll';maximumRerollsPerDie:1;oncePerTurn:true}
+
 export interface DeclarativeSpellHealingDiceMaximumMechanicV1 {
   kind: 'spell-healing-dice-maximum'
   targetHp: 'zero'
@@ -809,6 +881,11 @@ export interface DeclarativeSpellRangeMinimumMechanicV1 {
   spellIds: readonly string[]
   rangeFeet: number
 }
+
+/** Fixed original Storm Sorcery6 casting-start eruption; no standalone action. */
+export interface DeclarativeStormCastEruptionMechanicV1 {kind:'storm-cast-eruption'}
+export interface DeclarativeStormCastFlightMechanicV1 {kind:'storm-cast-flight'}
+export interface DeclarativeStormFuryMechanicV1 {kind:'storm-fury'}
 
 export interface DeclarativeSpellOptionalBonusActionMechanicV1 {
   kind: 'spell-optional-bonus-action'
@@ -894,6 +971,12 @@ export interface DeclarativeAttackTradeoffMechanicV1 {
 }
 
 /** Closed passive defense predicates compiled into the combatant snapshot. */
+export interface DeclarativePassiveSkillChecksMechanicV1 {
+  kind: 'passive-skill-checks'
+  minimumSkillCheckD20?: readonly Dnd5eMinimumSkillCheckD20Rule[]
+  skillCheckAdvantagesWithinHalfSpeed?: readonly Dnd5eHalfSpeedSkillCheckRule[]
+}
+
 export interface DeclarativePassiveDefenseMechanicV1 {
   kind: 'passive-defense'
   /** Other-creature protection lost separately for each creature until a long rest.
@@ -917,7 +1000,7 @@ export interface DeclarativePassiveDefenseMechanicV1 {
   swimSpeedMinimumFeet?: number
   armorClassBonus?: { value: number; requiresHeavyArmor?: boolean }
   /** Applies only while the owner is currently concentrating on a spell. */
-  concentrationBonuses?: { armorClass?: number; savingThrows?: number }
+  concentrationBonuses?: { armorClass?: number; savingThrows?: number; magical?: boolean }
   damageImmunities?: readonly Dnd5eDamageType[]
   damageResistance?: {
     damageTypes: readonly Dnd5eDamageType[]
@@ -949,7 +1032,7 @@ export interface DeclarativePassiveDefenseMechanicV1 {
 /** Host-issued reaction window that permits exactly one melee weapon attack. */
 export interface DeclarativeReactionWeaponAttackMechanicV1 {
   kind: 'reaction-weapon-attack'
-  event: 'other-creature-hit' | 'marked-target-attacks' | 'enemy-attacks-other' | 'nearby-creature-casts-spell'
+  event: 'other-creature-hit' | 'marked-target-attacks' | 'enemy-attacks-other' | 'nearby-creature-casts-spell' | 'relentless-endurance'
   markAbilityId?: string
 }
 
@@ -973,6 +1056,9 @@ export interface DeclarativeRageFirstHitProtectionMechanicV1 {
 }
 
 /** Passive replacement for an otherwise valid drop to zero hit points. */
+/** Optional real final-drop save. Its explicit original damage cause is Host-owned;
+ * the original source consumes a long-rest use only after its native save succeeds. */
+export interface DeclarativeDamageZeroSavingThrowMechanicV1{kind:'damage-zero-saving-throw';ability:'cha';dcBase:5;hitPointsAfter:1;excludedOnCritical:true;excludedDamageTypes:readonly ['radiant'];consumeOn:'success'}
 export interface DeclarativeDeathPreventionMechanicV1 {
   kind: 'death-prevention'
   hitPointsAfter: number
@@ -1093,7 +1179,7 @@ export interface DeclarativeSubclassAbilityV1 {
   activityOutcomeReferences?: readonly { activityId: string; outcomeId: string }[]
   /** Report-only links to this subclass's executed build/resource declarations. */
   passiveImplementationReferences?: readonly {
-    kind: 'advancement' | 'choice-group' | 'resource' | 'combat-start-resource' | 'feature' | 'bound-source-bonus'
+    kind: 'advancement' | 'choice-group' | 'resource' | 'combat-start-resource' | 'feature' | 'bound-source-bonus' | 'sneak-target-bonus' | 'spell-list' | 'additional-known-spell'
     id: string
   }[]
   schemaVersion: typeof DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION
@@ -1127,7 +1213,11 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeUtilityProjectionAttackAdvantageMechanicV1
     | DeclarativeNextD20AdvantageMechanicV1
     | DeclarativePostD20AdjustmentMechanicV1
+    | {kind: 'ally-natural-one-reroll'}
     | DeclarativeD20ChoiceRerollMechanicV1
+    | DeclarativeIncomingHitAttackDieRerollMechanicV1
+    | DeclarativeIncomingHitDieNegationMechanicV1
+    | DeclarativeIncomingAttackArmorClassMechanicV1
     | { kind: 'rage-saving-throw-reroll' }
     | { kind: 'rage-death-deferral' }
     | DeclarativePostSpellRandomTableMechanicV1
@@ -1154,6 +1244,7 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeAttacksPerActionMechanicV1
     | DeclarativeD20DisadvantageNegationMechanicV1
     | DeclarativeFlurryExtraAttacksMechanicV1
+    | DeclarativeMissedAttackAdvantageRerollMechanicV1
     | DeclarativeMissedWeaponAttackRerollMechanicV1
     | DeclarativeAttackActionDefenseMechanicV1
     | DeclarativeFirstOwnTurnSpeedMechanicV1
@@ -1162,10 +1253,19 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeAttackActionTeleportMechanicV1
     | DeclarativeAttackActionSpeedMechanicV1
     | DeclarativeWeaponDamageRiderMechanicV1
+    | DeclarativePactWeaponAbilityMechanicV1
+    | DeclarativeImprovedPactWeaponMechanicV1
+    | DeclarativeSpellDamageDiceRerollMechanicV1
+    | DeclarativeSpellDamageSelectedAbilityModifierMechanicV1
     | DeclarativeSpellDamageAbilityModifierMechanicV1
+    | DeclarativeRestTemporaryHitPointsMechanicV1
     | DeclarativeSpellHealingDiceMaximumMechanicV1
+    | DeclarativeSpellHealingDiceRerollMechanicV1
     | DeclarativeSpellRangeMinimumMechanicV1
     | DeclarativeSpellOptionalBonusActionMechanicV1
+    | DeclarativeStormCastEruptionMechanicV1
+    | DeclarativeStormCastFlightMechanicV1
+    | DeclarativeStormFuryMechanicV1
     | DeclarativeSpellAbilityCheckBonusMechanicV1
     | DeclarativeSpellInterceptionMechanicV1
     | DeclarativeSourceActionInterruptionMechanicV1
@@ -1174,10 +1274,16 @@ export interface DeclarativeSubclassAbilityV1 {
     | DeclarativeDamageRollMaximizationMechanicV1
     | DeclarativeAttackTradeoffMechanicV1
     | DeclarativeAdvantageForExtraAttackMechanicV1
+    | {kind:'help-tactics';attackRangeFeet:number}
+    | {kind:'mastermind-observation';purpose:'mimicry'|'comparison'}
+    | {kind:'cover-attack-redirection'}
+    | {kind:'soul-of-deceit'}
     | DeclarativePassiveDefenseMechanicV1
+    | DeclarativePassiveSkillChecksMechanicV1
     | DeclarativeReactionWeaponAttackMechanicV1
     | DeclarativeMarkedTargetMechanicV1
     | DeclarativeRageFirstHitProtectionMechanicV1
+    | DeclarativeDamageZeroSavingThrowMechanicV1
     | DeclarativeDeathPreventionMechanicV1
     | DeclarativeZeroHitPointExtraTurnMechanicV1
     | DeclarativeSpellDefeatHealingMechanicV1
@@ -1259,6 +1365,15 @@ export interface DeclarativeSubclassSpellcastingV1 {
  * `expanded-list` entries become legal choices for that class. Spell IDs are
  * resolved only against the Host catalog, so local data cannot inject code.
  */
+export interface DeclarativeSubclassAdditionalKnownSpellV1 {
+  id:string
+  name:string
+  level:number
+  choiceGroupId:string
+  spellsByOption:Readonly<Record<string,string>>
+  replacementClassSpellListIds?:readonly Dnd5eClassId[]
+}
+
 export interface DeclarativeSubclassSpellListV1 {
   id: string
   name: string
@@ -1266,6 +1381,8 @@ export interface DeclarativeSubclassSpellListV1 {
   entries: readonly {
     classLevel: number
     spellIds: readonly string[]
+    /** Live class spell lists expand legal selection; they never grant known/prepared spells. */
+    classSpellListIds?: readonly Dnd5eClassId[]
   }[]
 }
 
@@ -1322,6 +1439,7 @@ export interface DeclarativeSubclassDefinitionV1 {
   choiceGroups?: readonly DeclarativeSubclassChoiceGroupV1[]
   spellcasting?: DeclarativeSubclassSpellcastingV1
   spellLists?: readonly DeclarativeSubclassSpellListV1[]
+  additionalKnownSpells?:readonly DeclarativeSubclassAdditionalKnownSpellV1[]
   advancements?: readonly Dnd5eAdvancementDefinitionV1[]
   combatHooks?: readonly DeclarativeSubclassCombatHookV1[]
   abilities: readonly DeclarativeSubclassAbilityV1[]
@@ -1530,7 +1648,7 @@ function validateHostRollRecipe(
   }
 }
 
-export const DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS: readonly string[] = ['attack-action-teleport', 'distinct-target-bonus-attack', 'first-own-turn-extra-weapon-attack', 'first-own-turn-speed', 'source-condition-aura', 'spell-optional-bonus-action', 'spell-range-minimum', 'spell-healing-dice-maximum', 'passive-defense', 'flurry-extra-attacks', 'attack-action-defense', 'attack-action-speed', 'attacks-per-action', 'rage-first-hit-protection', 'damage-mitigation-retaliation', 'revival-material-waiver', 'rage-death-deferral']
+export {DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS} from './passiveSubclassMechanicKinds'
 
 export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能力'): asserts value is DeclarativeSubclassAbilityV1 {
   if (!record(value)) throw new Error(`${path}无效`)
@@ -1543,7 +1661,7 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
     for (const ref of refs) {
       if (!record(ref)) throw new Error(`${path}被动实现关联无效`)
       assertKeys(ref, ['kind', 'id'], path)
-      if (!['advancement', 'choice-group', 'resource', 'combat-start-resource', 'feature', 'bound-source-bonus'].includes(String(ref.kind)))
+      if (!['advancement', 'choice-group', 'resource', 'combat-start-resource', 'feature', 'bound-source-bonus', 'sneak-target-bonus', 'spell-list', 'additional-known-spell'].includes(String(ref.kind)))
         throw new Error(`${path}被动实现关联类别无效`)
       assertId(ref.id, path)
       const key = `${ref.kind}:${ref.id}`
@@ -1578,7 +1696,8 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   if (!finiteInteger(value.level, 1, 20)) throw new Error(`${path}等级无效`)
   const trigger = value.trigger
   if (!record(trigger) || !['active-use', 'passive', 'before-attack-roll', 'before-saving-throw', 'after-attack-roll', 'after-attack-hit', 'after-attack-miss', 'after-d20-roll', 'before-spell-effect', 'before-damage-taken', 'after-damage-taken', 'after-spell-cast', 'after-condition-attempted', 'after-condition-applied', 'before-drop-to-zero', 'turn-start', 'turn-end', 'short-rest-complete', 'long-rest-complete'].includes(String(trigger.kind))) throw new Error(`${path}触发器无效`)
-  const passiveMechanic = record(value.mechanic) && DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS.includes(String(value.mechanic.kind))
+  const passiveMechanic = record(value.mechanic) && (DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS.includes(String(value.mechanic.kind)) ||
+    (value.mechanic.kind === 'reaction-weapon-attack' && value.mechanic.event === 'relentless-endurance'))
   if (trigger.kind === 'passive' && (
     (!passiveMechanic && (value.automation !== 'manual' || value.mechanic != null)) ||
     (Array.isArray(value.effects) && value.effects.length > 0)
@@ -1785,8 +1904,8 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       assertKeys(
         value.mechanic,
         [
-          'kind', 'rollKinds', 'dieSides', 'fixedAmount', 'fixedAmountReference',
-          'directions', 'scope', 'attackModes', 'sourceHeldWeapon', 'maximumSpellLevelAfterUse', 'requiresHeldMeleeWeaponOrShield', 'resistanceWhenStillHit',
+          'kind', 'rollKinds', 'dieSides', 'diceCount', 'requiresFinalFailure', 'fixedAmount', 'fixedAmountReference',
+          'directions', 'scope', 'attackModes', 'sourceHeldWeapon', 'magical', 'maximumSpellLevelAfterUse', 'requiresHeldMeleeWeaponOrShield', 'resistanceWhenStillHit', 'requiresFailedSave',
         ],
         `${path} post-d20-adjustment mechanic`,
       )
@@ -1798,8 +1917,12 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         hasFixedAdjustment,
         hasReferencedAdjustment,
       ].filter(Boolean).length
+      if(value.mechanic.diceCount!==undefined&&(value.mechanic.diceCount!==2||value.mechanic.dieSides!==4||value.mechanic.requiresFinalFailure!==true))throw Error(path+': two d4 need the final-failure consumer')
+      if(value.mechanic.requiresFinalFailure!==undefined&&(value.mechanic.requiresFinalFailure!==true||value.mechanic.diceCount!==2||value.mechanic.scope!=='self-roll'||!Array.isArray(value.mechanic.rollKinds)||value.mechanic.rollKinds.some(kind=>!['attack','saving-throw'].includes(String(kind)))||!Array.isArray(value.mechanic.directions)||value.mechanic.directions.length!==1||value.mechanic.directions[0]!=='add'||(mechanicCost?.economy??'none')!=='none'))throw Error(path+': final failure bonus requires an exact owner attack or save')
       const heldWeapon = value.mechanic.sourceHeldWeapon
       if (value.mechanic.maximumSpellLevelAfterUse != null && !finiteInteger(value.mechanic.maximumSpellLevelAfterUse, 0, 9)) throw new Error(`${path} post-use spell level limit is invalid`)
+      if (value.mechanic.requiresFailedSave != null && (typeof value.mechanic.requiresFailedSave !== 'boolean' || value.mechanic.scope !== 'saving-throw-self' || !Array.isArray(value.mechanic.rollKinds) || value.mechanic.rollKinds.some(kind => kind !== 'saving-throw'))) throw new Error(`${path} failed-save requirement needs an exact self saving throw`)
+      if (value.mechanic.magical !== undefined && typeof value.mechanic.magical !== 'boolean') throw new Error(`${path} magical must be boolean`)
       for (const key of ['requiresHeldMeleeWeaponOrShield','resistanceWhenStillHit']) if (value.mechanic[key] != null && typeof value.mechanic[key] !== 'boolean') throw new Error(`${path} ${key} must be boolean`)
       if (value.mechanic.resistanceWhenStillHit === true && (value.mechanic.scope !== 'attack-against-nearby' || !Array.isArray(value.mechanic.rollKinds) || value.mechanic.rollKinds.some(kind => kind !== 'attack'))) throw new Error(`${path} resistance requires an attack defense`)
       if (
@@ -1819,7 +1942,7 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         new Set(value.mechanic.directions).size !== value.mechanic.directions.length ||
         value.mechanic.directions.some((direction) =>
           !['add', 'subtract'].includes(String(direction))) ||
-        ![undefined, 'any', 'attack-against-self', 'attack-against-nearby'].includes(value.mechanic.scope as string | undefined) ||
+        ![undefined, 'any', 'attack-against-self', 'attack-against-nearby', 'saving-throw-self','self-roll'].includes(value.mechanic.scope as string | undefined) ||
         (value.mechanic.attackModes != null && (
           !Array.isArray(value.mechanic.attackModes) ||
           value.mechanic.attackModes.length < 1 ||
@@ -1844,6 +1967,35 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         ![undefined, 'none', 'reaction'].includes(value.cost.economy as string | undefined))) {
         throw new Error(`${path} post d20 adjustment economy must be none or reaction`)
       }
+    } else if (value.mechanic.kind === 'incoming-hit-die-negation') {
+      assertKeys(value.mechanic,['kind','dieSides','minimumRoll','requiredAttackerSourceActivityId'],`${path} incoming-hit die negation`)
+      if(trigger.kind!=='after-d20-roll' || !record(value.cost) || value.cost.economy!=='reaction' ||
+        (Array.isArray(value.cost.resources) && value.cost.resources.length>0) ||
+        !record(value.targeting) || value.targeting.kind!=='self' || value.mechanic.dieSides!==6 ||
+        !Number.isInteger(value.mechanic.minimumRoll) || Number(value.mechanic.minimumRoll)<1 || Number(value.mechanic.minimumRoll)>6 ||
+        typeof value.mechanic.requiredAttackerSourceActivityId!=='string' || !/^[a-z0-9][a-z0-9._:-]{0,255}$/.test(value.mechanic.requiredAttackerSourceActivityId))
+        throw Error(`${path} incoming-hit die negation requires self reaction, exact source and bounded d6 threshold`)
+    } else if (value.mechanic.kind === 'incoming-attack-armor-class') {
+      assertKeys(value.mechanic, ['kind','bonus','maximumSpellLevelAfterUse','magical'], `${path} incoming attack AC`)
+      if (value.mechanic.magical !== undefined && typeof value.mechanic.magical!=='boolean' || !finiteInteger(value.mechanic.bonus,1,20) ||
+        value.mechanic.maximumSpellLevelAfterUse != null && !finiteInteger(value.mechanic.maximumSpellLevelAfterUse,0,9) ||
+        trigger.kind !== 'after-d20-roll' || mechanicTargeting?.kind !== 'self' || mechanicCost?.economy !== 'reaction' || (mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length!==0)) || (mechanicCost?.movementFeet??0)!==0 ||
+        (Array.isArray(value.effects) && value.effects.length > 0) || (Array.isArray(value.rolls) && value.rolls.length > 0))
+        throw new Error(`${path} incoming attack AC requires a reaction on its own genuine hit`)
+    } else if (value.mechanic.kind === 'incoming-hit-attack-die-reroll') {
+      assertKeys(value.mechanic, ['kind'], `${path} incoming-hit attack die reroll mechanic`)
+      if (trigger.kind !== 'after-d20-roll' || !record(value.cost) || value.cost.economy !== 'reaction' ||
+        !Array.isArray(value.cost.resources) || value.cost.resources.length !== 1 ||
+        value.cost.resources[0].amount !== 1 || !record(value.targeting) || value.targeting.kind !== 'self') {
+        throw new Error(`${path} incoming-hit attack die reroll requires a reaction, one use and self ownership`)
+      }
+    } else if (value.mechanic.kind === 'ally-natural-one-reroll') {
+      assertKeys(value.mechanic,['kind'],path)
+      if(!record(value.trigger)||!record(value.cost)||!record(value.targeting)||
+        value.trigger.kind!=='after-d20-roll'||value.cost.economy!=='reaction'||
+        (value.cost.resources!=null&&(!Array.isArray(value.cost.resources)||value.cost.resources.length!==0))||
+        value.targeting.kind!=='single-creature'||value.targeting.relation!=='ally'||value.targeting.includeSelf!==false||
+        value.targeting.rangeFeet!==30||value.targeting.requiresSight!==true)throw new Error(path+' ally natural-one reroll declaration invalid')
     } else if (value.mechanic.kind === 'd20-choice-reroll') {
       assertKeys(
         value.mechanic,
@@ -1980,6 +2132,19 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         !finiteInteger(value.mechanic.additionalDice, 1, 8) ||
         trigger.kind !== 'after-spell-cast'
       ) throw new Error(`${path} spell damage maximum die bonus declaration is invalid`)
+    } else if (value.mechanic.kind === 'storm-cast-flight') {
+      assertKeys(value.mechanic,['kind'],`${path} storm same-cast flight`)
+      if(trigger.kind!=='before-spell-effect'||mechanicTargeting?.kind!=='self'||value.level!==1||mechanicCost?.economy!=='bonusAction'||mechanicCost?.uses!=null||mechanicCost?.movementFeet!=null||(mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length!==0))||value.predicates!=null||(value.rolls!=null&&(!Array.isArray(value.rolls)||value.rolls.length!==0))||!Array.isArray(value.effects)||value.effects.length!==0||value.duration!=null||value.limits!=null||value.canModifyEnemyD20===true)
+        throw new Error(`${path} Storm1 flight requires its native same-spell bonus-action movement and no independent effect`)
+    } else if (value.mechanic.kind === 'storm-fury') {
+      assertKeys(value.mechanic,['kind'],path+' storm hit reaction')
+      if(trigger.kind!=='after-attack-hit'||mechanicTargeting?.kind!=='single-creature'||mechanicTargeting.relation!=='any'||mechanicTargeting.requiresSight===true||mechanicTargeting.rangeFeet!=null||value.level!==14||mechanicCost?.economy!=='reaction'||mechanicCost?.uses!=null||mechanicCost?.movementFeet!=null||(mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length!==0))||value.predicates!=null||(value.rolls!=null&&(!Array.isArray(value.rolls)||value.rolls.length!==0))||!Array.isArray(value.effects)||value.effects.length!==0||value.duration!=null||value.limits!=null||value.canModifyEnemyD20===true)throw Error(path+' Storm14 requires the actual melee-hit reaction, native Sorcerer damage/DC and optional forced push')
+    } else if (value.mechanic.kind === 'storm-cast-eruption') {
+      assertKeys(value.mechanic,['kind'],`${path} storm casting-start eruption`)
+      if(trigger.kind!=='before-spell-effect'||mechanicTargeting?.kind!=='self'||value.level!==6||
+        (mechanicCost?.economy??'none')!=='none'||mechanicCost?.uses!=null||mechanicCost?.movementFeet!=null||(mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length!==0))||
+        value.predicates!=null||(value.rolls!=null&&(!Array.isArray(value.rolls)||value.rolls.length!==0))||!Array.isArray(value.effects)||value.effects.length!==0||value.duration!=null||value.limits!=null||value.canModifyEnemyD20===true)
+        throw new Error(`${path} Storm6 requires its native casting-start phase and no independent cost, target or effect`)
     } else if (value.mechanic.kind === 'spell-ability-check-bonus') {
       assertKeys(value.mechanic, ['kind', 'spellIds', 'bonus'], `${path} spell ability check bonus mechanic`)
       if (
@@ -2219,6 +2384,18 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         (mechanicCost != null && (mechanicCost.economy !== 'none' || (mechanicCost.resources as unknown[] | undefined)?.length))) {
         throw new Error(`${path} rage death deferral must be a passive self capability`)
       }
+    } else if (value.mechanic.kind === 'soul-of-deceit') {
+      assertKeys(value.mechanic,['kind'],`${path} Soul of Deceit`)
+      if(trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||(mechanicCost?.resources as unknown[]|undefined)?.length||!Array.isArray(value.effects)||value.effects.length)throw Error(`${path} Soul of Deceit requires a free passive self policy`)
+    } else if (value.mechanic.kind === 'cover-attack-redirection') {
+      assertKeys(value.mechanic,['kind'],`${path} cover redirection`)
+      if(trigger.kind!=='before-attack-roll'||mechanicTargeting?.kind!=='self'||mechanicCost?.economy!=='reaction'||(mechanicCost?.resources as unknown[]|undefined)?.length||!Array.isArray(value.effects)||value.effects.length)throw Error(`${path} cover redirection requires a self reaction policy`)
+    } else if (value.mechanic.kind === 'mastermind-observation') {
+      assertKeys(value.mechanic,['kind','purpose'],`${path} Mastermind observation`)
+      if(!['mimicry','comparison'].includes(String(value.mechanic.purpose))||trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||(mechanicCost?.resources as unknown[]|undefined)?.length||!Array.isArray(value.effects)||value.effects.length)throw Error(`${path} Mastermind observation requires a free passive self policy`)
+    } else if (value.mechanic.kind === 'help-tactics') {
+      assertKeys(value.mechanic,['kind','attackRangeFeet'],`${path} Help tactics`)
+      if(trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||(mechanicCost?.resources as unknown[]|undefined)?.length||!Number.isSafeInteger(value.mechanic.attackRangeFeet)||Number(value.mechanic.attackRangeFeet)<5||Number(value.mechanic.attackRangeFeet)>120||!Array.isArray(value.effects)||value.effects.length)throw Error(`${path} Help tactics requires a free passive self policy and a bounded attack range`)
     } else if (value.mechanic.kind === 'rage-saving-throw-reroll') {
       assertKeys(value.mechanic, ['kind'], `${path} rage saving throw reroll`)
       if (trigger.kind !== 'after-d20-roll' || mechanicCost?.economy !== 'none' ||
@@ -2247,7 +2424,7 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       for (const grant of value.mechanic.grants) {
         if (!record(grant)) throw new Error(`${path} alternate spell grant is invalid`)
         assertKeys(grant, [
-          'id', 'spellId', 'minimumLevel', 'castAtLevel', 'resourceCost', 'selection', 'upcast',
+          'id', 'spellId', 'minimumLevel', 'castAtLevel', 'resourceCost', 'sourceCanSeeThroughDarkness', 'selection', 'upcast',
         ], `${path} alternate spell grant`)
         assertId(grant.id, `${path} alternate spell grant`)
         if (typeof grant.spellId !== 'string' || grant.spellId.length > 160 ||
@@ -2258,7 +2435,12 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
           grantIds.has(grant.id) ||
           (grant.minimumLevel != null && !finiteInteger(grant.minimumLevel, 1, 20)) ||
           !finiteInteger(grant.castAtLevel, 0, 9) ||
-          !finiteInteger(grant.resourceCost, 0, 99)
+          !finiteInteger(grant.resourceCost, 0, 99) ||
+          (grant.sourceCanSeeThroughDarkness != null &&
+            (grant.sourceCanSeeThroughDarkness !== true || grant.spellId !== 'darkness' ||
+              grant.castAtLevel !== 2 || grant.resourceCost !== 2 || grant.upcast != null ||
+              value.mechanic.classId !== 'sorcerer' || value.mechanic.resourceScope === 'plugin' ||
+              value.mechanic.resourceId !== 'dnd5e-sorcery-points'))
         ) throw new Error(`${path} alternate spell grant is invalid`)
         grantIds.add(grant.id)
         if (grant.selection != null) {
@@ -2474,6 +2656,9 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
           previousLevel = Number(step.level)
         }
       }
+    } else if (value.mechanic.kind === 'missed-attack-advantage-reroll') {
+      assertKeys(value.mechanic,['kind','replacement','mustUseNewRoll'],`${path} missed attack advantage reroll`)
+      if(value.mechanic.replacement!=='whole-pool'||value.mechanic.mustUseNewRoll!==true||trigger.kind!=='after-attack-miss'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||!Array.isArray(mechanicCost?.resources)||mechanicCost.resources.length!==1||mechanicCost.resources[0].amount!==1||(mechanicCost.resources[0].scope??'plugin')!=='plugin')throw Error(`${path} missed attack advantage reroll requires its own one-use resource, a real miss and a fresh mandatory whole pool`)
     } else if (value.mechanic.kind === 'missed-weapon-attack-reroll') {
       assertKeys(value.mechanic,['kind','weaponQualification','ownTurnOnly','usesPerTurn'],`${path} missed weapon attack reroll`)
       if (value.mechanic.weaponQualification !== 'monk-weapon' || value.mechanic.ownTurnOnly !== true || value.mechanic.usesPerTurn !== 1 ||
@@ -2590,6 +2775,45 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       if (value.mechanic.targetHp !== 'zero' || trigger.kind !== 'passive' || mechanicTargeting?.kind !== 'self') {
         throw new Error(`${path} spell healing dice maximum requires zero HP, passive trigger and self targeting`)
       }
+    } else if(value.mechanic.kind==='pact-weapon-ability'){
+      assertKeys(value.mechanic,['kind','ability'],path+' pact weapon ability')
+      if(value.mechanic.ability!=='cha'||trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||
+        (mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length>0))||
+        !Array.isArray(value.effects)||value.effects.length!==0||(Array.isArray(value.rolls)&&value.rolls.length>0)||value.duration!=null||value.limits!=null)
+        throw Error(path+' pact weapon ability requires fixed passive self CHA without costs, effects, rolls, duration or limits')
+    } else if (value.mechanic.kind === 'improved-pact-weapon') {
+      assertKeys(value.mechanic, ['kind'], path+' improved pact weapon')
+      if(trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||
+        (mechanicCost?.resources!=null&&(!Array.isArray(mechanicCost.resources)||mechanicCost.resources.length>0))||
+        !Array.isArray(value.effects)||value.effects.length!==0||
+        (Array.isArray(value.rolls)&&value.rolls.length>0)||value.duration!=null||value.limits!=null)
+        throw Error(path+' improved pact weapon requires a fixed passive self declaration without resource, roll, effect, duration or limit')
+    } else if (value.mechanic.kind === 'spell-healing-dice-reroll') {
+      assertKeys(value.mechanic,['kind','maximumRerollsPerDie','oncePerTurn'],path+' spell healing dice reroll')
+      const cost=Array.isArray(mechanicCost?.resources)?mechanicCost.resources:undefined
+      if(trigger.kind!=='passive'||mechanicTargeting?.kind!=='single-creature'||mechanicTargeting.relation!=='ally'||mechanicTargeting.rangeFeet!==5||mechanicTargeting.includeSelf!==true||mechanicTargeting.requiresSight===true||(mechanicCost?.economy??'none')!=='none'||cost?.length!==1||cost[0].scope!=='core'||cost[0].resourceId!=='dnd5e-sorcery-points'||cost[0].amount!==1||value.mechanic.maximumRerollsPerDie!==1||value.mechanic.oncePerTurn!==true||!Array.isArray(value.effects)||value.effects.length!==0||(Array.isArray(value.rolls)&&value.rolls.length>0)||value.duration!=null||value.limits!=null)
+        throw Error(path+' healing reroll requires a passive ally/self 5-foot current-turn source, one sorcery point, and each original die at most once')
+    } else if (value.mechanic.kind === 'spell-damage-dice-reroll') {
+      assertKeys(value.mechanic, ['kind','damageTypes','originalFaces','maximumRerollsPerDie'], path+' spell damage dice reroll')
+      if(trigger.kind!=='passive'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||
+        value.mechanic.maximumRerollsPerDie!==1||!Array.isArray(value.mechanic.damageTypes)||value.mechanic.damageTypes.length<1||
+        value.mechanic.damageTypes.some(type=>!DND5E_DAMAGE_TYPES.includes(type as Dnd5eDamageType))||
+        new Set(value.mechanic.damageTypes).size!==value.mechanic.damageTypes.length||
+        !Array.isArray(value.mechanic.originalFaces)||value.mechanic.originalFaces.length<1||
+        value.mechanic.originalFaces.some(face=>!finiteInteger(face,1,100))||
+        new Set(value.mechanic.originalFaces).size!==value.mechanic.originalFaces.length)throw Error(path+' invalid spell damage dice reroll')
+    } else if (value.mechanic.kind === 'rest-temporary-hit-points') {
+      assertKeys(value.mechanic, ['kind', 'classId', 'ability', 'rests'], path+' rest temporary hit points')
+      if (!CLASS_IDS.has(value.mechanic.classId as Dnd5eClassId) || !ABILITIES.has(value.mechanic.ability as AbilityKey) ||
+        !Array.isArray(value.mechanic.rests) || value.mechanic.rests.length < 1 || value.mechanic.rests.length > 2 ||
+        value.mechanic.rests.some(rest=>rest!=='short-rest'&&rest!=='long-rest') || new Set(value.mechanic.rests).size!==value.mechanic.rests.length ||
+        trigger.kind!=='passive' || mechanicTargeting?.kind!=='self' || (mechanicCost?.economy??'none')!=='none') throw Error(path+' invalid rest temporary hit points')
+    } else if (value.mechanic.kind === 'spell-damage-selected-ability-modifier') {
+      assertKeys(value.mechanic,['kind','ability','damageTypes','oncePerSpellCast'],path+' selected spell ability bonus')
+      if(value.mechanic.ability!=='cha'||value.mechanic.oncePerSpellCast!==true||
+        !Array.isArray(value.mechanic.damageTypes)||value.mechanic.damageTypes.length<1||value.mechanic.damageTypes.length>2||
+        value.mechanic.damageTypes.some(type=>type!=='fire'&&type!=='radiant')||new Set(value.mechanic.damageTypes).size!==value.mechanic.damageTypes.length||
+        trigger.kind!=='after-spell-cast'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none')throw Error(path+' invalid selected spell ability bonus')
     } else if (value.mechanic.kind === 'spell-damage-ability-modifier') {
       assertKeys(
         value.mechanic,
@@ -2603,6 +2827,14 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         trigger.kind !== 'after-spell-cast' ||
         mechanicTargeting?.kind !== 'self'
       ) throw new Error(`${path} spell damage ability modifier declaration is invalid: requires a valid spellcastingClassId and ability, maximumSpellLevel integer 0..9, trigger.kind=after-spell-cast, targeting.kind=self`)
+    } else if (value.mechanic.kind === 'passive-skill-checks') {
+      assertKeys(value.mechanic, ['kind', 'minimumSkillCheckD20', 'skillCheckAdvantagesWithinHalfSpeed'], `${path} passive skill checks`)
+      if (trigger.kind !== 'passive' || mechanicTargeting?.kind !== 'self' || (mechanicCost?.economy ?? 'none') !== 'none' ||
+        (value.mechanic.minimumSkillCheckD20 == null && value.mechanic.skillCheckAdvantagesWithinHalfSpeed == null) ||
+        (value.mechanic.minimumSkillCheckD20 != null && !normalizeDnd5eMinimumSkillCheckD20(value.mechanic.minimumSkillCheckD20)) ||
+        (value.mechanic.skillCheckAdvantagesWithinHalfSpeed != null && !normalizeDnd5eHalfSpeedSkillChecks(value.mechanic.skillCheckAdvantagesWithinHalfSpeed))) {
+        throw new Error(`${path} passive skill checks are invalid`)
+      }
     } else if (value.mechanic.kind === 'passive-defense') {
       const peace = value.mechanic.creaturePeaceProtection
       if (peace != null) {
@@ -2637,8 +2869,9 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
       const concentrationBonuses = value.mechanic.concentrationBonuses
       if (concentrationBonuses != null) {
         if (!record(concentrationBonuses)) throw new Error(`${path} passive concentration bonuses are invalid`)
-        assertKeys(concentrationBonuses, ['armorClass', 'savingThrows'], `${path} passive concentration bonuses`)
-        const bonuses = Object.values(concentrationBonuses)
+        assertKeys(concentrationBonuses, ['armorClass', 'savingThrows', 'magical'], `${path} passive concentration bonuses`)
+        if(concentrationBonuses.magical !== undefined && typeof concentrationBonuses.magical !== 'boolean')throw new Error(`${path} passive concentration magical must be boolean`)
+        const bonuses = Object.entries(concentrationBonuses).filter(([key])=>key!=='magical').map(([,value])=>value)
         if (!bonuses.length || bonuses.some(bonus => !Number.isInteger(bonus) || Number(bonus) < 1 || Number(bonus) > 10)) {
           throw new Error(`${path} passive concentration bonuses are invalid`)
         }
@@ -2757,11 +2990,12 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
     } else if (value.mechanic.kind === 'reaction-weapon-attack') {
       assertKeys(value.mechanic, ['kind', 'event', 'markAbilityId'], `${path} reaction weapon attack mechanic`)
       if (
-        !['other-creature-hit', 'marked-target-attacks', 'enemy-attacks-other', 'nearby-creature-casts-spell'].includes(String(value.mechanic.event)) ||
+        !['other-creature-hit', 'marked-target-attacks', 'enemy-attacks-other', 'nearby-creature-casts-spell', 'relentless-endurance'].includes(String(value.mechanic.event)) ||
         (value.mechanic.event === 'other-creature-hit' && trigger.kind !== 'after-attack-hit') ||
         (value.mechanic.event === 'marked-target-attacks' && trigger.kind !== 'before-attack-roll') ||
         (value.mechanic.event === 'enemy-attacks-other' && trigger.kind !== 'after-attack-roll') ||
         (value.mechanic.event === 'nearby-creature-casts-spell' && trigger.kind !== 'after-spell-cast') ||
+        (value.mechanic.event === 'relentless-endurance' && trigger.kind !== 'passive') ||
         mechanicCost?.economy !== 'reaction' || mechanicTargeting?.kind !== 'single-creature' ||
         mechanicTargeting.relation !== 'enemy'
       ) throw new Error(`${path} reaction weapon attack declaration is invalid`)
@@ -2803,6 +3037,9 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
         mechanicCost.resources.length === 0 || value.limits != null) {
         throw new Error(`${path} zero HP extra turn requires a personal reaction and explicit resource costs`)
       }
+    } else if(value.mechanic.kind==='damage-zero-saving-throw'){
+      assertKeys(value.mechanic,['kind','ability','dcBase','hitPointsAfter','excludedOnCritical','excludedDamageTypes','consumeOn'],path+' damage zero saving throw')
+      if(trigger.kind!=='before-drop-to-zero'||mechanicTargeting?.kind!=='self'||(mechanicCost?.economy??'none')!=='none'||value.mechanic.ability!=='cha'||value.mechanic.dcBase!==5||value.mechanic.hitPointsAfter!==1||value.mechanic.excludedOnCritical!==true||value.mechanic.consumeOn!=='success'||!Array.isArray(value.mechanic.excludedDamageTypes)||value.mechanic.excludedDamageTypes.length!==1||value.mechanic.excludedDamageTypes[0]!=='radiant'||!Array.isArray(mechanicCost?.resources)||mechanicCost.resources.length!==1||mechanicCost.resources[0].scope==='core'||mechanicCost.resources[0].amount!==1||value.limits!=null||value.rolls!=null||value.choices!=null||value.duration!=null||value.predicates!=null||value.requirements!=null||value.activityEffects!=null||!Array.isArray(value.effects)||value.effects.length!==0)throw Error(path+' damage zero saving throw requires an optional native CHA final-damage save and success-only one-use resource')
     } else if (value.mechanic.kind === 'death-prevention') {
       assertKeys(value.mechanic, ['kind', 'hitPointsAfter', 'preventsMassiveDamage'], `${path} death prevention mechanic`)
       if (
@@ -3407,13 +3644,17 @@ export function validateDeclarativeSubclassSpellListsV1(
     let previousLevel = 0
     for (const entry of list.entries) {
       if (!record(entry)) throw new Error(`${path}等级条目无效`)
-      assertKeys(entry, ['classLevel', 'spellIds'], `${path}等级条目`)
+      assertKeys(entry, ['classLevel', 'spellIds', 'classSpellListIds'], `${path}等级条目`)
       if (!finiteInteger(entry.classLevel, 1, 20) || Number(entry.classLevel) <= previousLevel) {
         throw new Error(`${path}等级必须严格递增`)
       }
       previousLevel = Number(entry.classLevel)
+      const liveClassLists = entry.classSpellListIds
+      if (liveClassLists !== undefined && (list.mode !== 'expanded-list' || !Array.isArray(liveClassLists) ||
+        liveClassLists.length < 1 || liveClassLists.length > 12 || new Set(liveClassLists).size !== liveClassLists.length ||
+        liveClassLists.some(id => typeof id !== 'string' || !(['barbarian','bard','cleric','druid','fighter','monk','paladin','ranger','rogue','sorcerer','warlock','wizard'].includes(id) || id.includes(':') && ID.test(id))))) throw new Error("live class spell lists require validated expanded-list class identities")
       if (
-        !Array.isArray(entry.spellIds) || entry.spellIds.length < 1 || entry.spellIds.length > 16 ||
+        !Array.isArray(entry.spellIds) || entry.spellIds.length < (Array.isArray(liveClassLists) && liveClassLists.length ? 0 : 1) || entry.spellIds.length > 16 ||
         entry.spellIds.some((spellId) => typeof spellId !== 'string' || !ID.test(spellId)) ||
         new Set(entry.spellIds).size !== entry.spellIds.length
       ) throw new Error(`${path}法术 ID 列表无效`)
@@ -3425,7 +3666,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
   if (!record(value)) throw new Error(`${path}无效`)
   assertKeys(value, [
     'schemaVersion', 'id', 'classId', 'name', 'summary',
-    'resources', 'choiceGroups', 'spellcasting', 'spellLists', 'advancements', 'combatHooks', 'abilities',
+    'resources', 'choiceGroups', 'spellcasting', 'spellLists', 'additionalKnownSpells', 'advancements', 'combatHooks', 'abilities',
   ], path)
   if (value.schemaVersion !== 1) throw new Error(`${path} schemaVersion 不受支持`)
   assertId(value.id, path)
@@ -3499,6 +3740,7 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
   )
   if (value.spellcasting != null) validateDeclarativeSubclassSpellcastingV1(value.spellcasting, `${path}施法`)
   if (value.spellLists != null) validateDeclarativeSubclassSpellListsV1(value.spellLists, `${path}法术表`)
+  if(value.additionalKnownSpells!=null)validateDeclarativeSubclassAdditionalKnownSpellsV1(value.additionalKnownSpells,(value.choiceGroups??[]) as readonly DeclarativeSubclassChoiceGroupV1[],path)
   if (value.advancements != null) {
     if (!Array.isArray(value.advancements) || value.advancements.length < 1 || value.advancements.length > 64) {
       throw new Error(`${path}构筑成长列表无效`)
@@ -3683,7 +3925,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
     ability.mechanic?.kind === 'utility-projection-attack-advantage'
   const auditedNextD20 = ability.mechanic?.kind === 'next-d20-advantage'
   const auditedPostD20Adjustment = ability.mechanic?.kind === 'post-d20-adjustment'
-  const auditedD20ChoiceReroll = ability.mechanic?.kind === 'missed-weapon-attack-reroll' || ability.mechanic?.kind === 'd20-choice-reroll' || ability.mechanic?.kind === 'rage-saving-throw-reroll' || ability.mechanic?.kind === 'rage-death-deferral'
+  const auditedD20ChoiceReroll = ability.mechanic?.kind === 'missed-attack-advantage-reroll' || ability.mechanic?.kind === 'ally-natural-one-reroll' || ability.mechanic?.kind === 'missed-weapon-attack-reroll' || ability.mechanic?.kind === 'd20-choice-reroll' || ability.mechanic?.kind === 'rage-saving-throw-reroll' || ability.mechanic?.kind === 'rage-death-deferral'
   const auditedPostSpellRandomTable =
     ability.mechanic?.kind === 'post-spell-random-table'
   const auditedPostSpellRandomTableChoice =
@@ -3699,23 +3941,28 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedAlternateResourceSpellcasting = ability.mechanic?.kind === 'alternate-resource-spellcasting' || ability.mechanic?.kind === 'revival-material-waiver'
   const auditedGrantedDieCombatOptions = ability.mechanic?.kind === 'granted-die-combat-options'
   const auditedAttackDisadvantage = ability.mechanic?.kind === 'attack-disadvantage-interrupt'
-  const auditedAttackRetarget = ability.mechanic?.kind === 'attack-retarget-interrupt' || ability.mechanic?.kind === 'critical-hit-cancellation'
+  const auditedAttackRetarget = ability.mechanic?.kind === 'cover-attack-redirection' || ability.mechanic?.kind === 'attack-retarget-interrupt' || ability.mechanic?.kind === 'critical-hit-cancellation'
   const auditedDamageMitigation = ability.mechanic?.kind === 'damage-mitigation-interrupt'
   const auditedWardPool = ability.mechanic?.kind === 'ward-pool'
   const auditedSpellResistanceAura = ability.mechanic?.kind === 'spell-damage-resistance-aura' || ability.mechanic?.kind === 'source-condition-aura'
   const auditedStoredD20Replacement = ability.mechanic?.kind === 'stored-d20-replacement'
   const auditedAttacksPerAction = ability.mechanic?.kind === 'attack-action-teleport' || ability.mechanic?.kind === 'distinct-target-bonus-attack' || ability.mechanic?.kind === 'first-own-turn-extra-weapon-attack' || ability.mechanic?.kind === 'first-own-turn-speed' || ability.mechanic?.kind === 'attack-action-defense' || ability.mechanic?.kind === 'flurry-extra-attacks' || ability.mechanic?.kind === 'attacks-per-action' || ability.mechanic?.kind === 'attack-action-speed'
-  const auditedWeaponDamageRider = ability.mechanic?.kind === 'weapon-damage-rider'
-  const auditedSpellDamageAbilityModifier = ability.mechanic?.kind === 'spell-damage-ability-modifier' || ability.mechanic?.kind === 'spell-healing-dice-maximum' || ability.mechanic?.kind === 'spell-range-minimum' || ability.mechanic?.kind === 'spell-optional-bonus-action'
+  const auditedWeaponDamageRider = ability.mechanic?.kind === 'pact-weapon-ability' || ability.mechanic?.kind === 'weapon-damage-rider' || ability.mechanic?.kind === 'improved-pact-weapon'
+  const auditedSpellDamageAbilityModifier = ability.mechanic?.kind === 'spell-damage-selected-ability-modifier' || ability.mechanic?.kind === 'spell-healing-dice-reroll' || ability.mechanic?.kind === 'spell-damage-dice-reroll' || ability.mechanic?.kind === 'spell-damage-ability-modifier' || ability.mechanic?.kind === 'spell-healing-dice-maximum' || ability.mechanic?.kind === 'spell-range-minimum' || ability.mechanic?.kind === 'spell-optional-bonus-action'
   const auditedSpellAbilityCheckBonus = ability.mechanic?.kind === 'spell-ability-check-bonus'
   const auditedSpellInterception = ability.mechanic?.kind === 'spell-interception' || ability.mechanic?.kind === 'source-action-interruption'
   const auditedSpellTargetExpansion = ability.mechanic?.kind === 'spell-target-expansion'
   const auditedDamageRollMaximization = ability.mechanic?.kind === 'damage-roll-maximization'
   const auditedAttackTradeoff = ability.mechanic?.kind === 'attack-tradeoff' || ability.mechanic?.kind === 'advantage-for-extra-attack'
-  const auditedPassiveDefense = ability.mechanic?.kind === 'passive-defense'
+  const auditedPassiveDefense = ability.mechanic?.kind === 'rest-temporary-hit-points' || ability.mechanic?.kind === 'soul-of-deceit' || ability.mechanic?.kind === 'mastermind-observation' || ability.mechanic?.kind === 'help-tactics' || ability.mechanic?.kind === 'passive-defense' || ability.mechanic?.kind === 'passive-skill-checks'
   const auditedReactionWeaponAttack = ability.mechanic?.kind === 'reaction-weapon-attack'
+  // This closed mechanic is executed by the native owner/material interrupt chain.
+  let auditedStormFury = false
+  if (ability.mechanic?.kind === 'storm-fury') {
+    try { validateDeclarativeSubclassAbilityV1(ability); auditedStormFury = true } catch { /* An invalid declaration never gains the native exception. */ }
+  }
   const auditedMarkedTarget = ability.mechanic?.kind === 'marked-target'
-  const auditedDeathPrevention = ability.mechanic?.kind === 'death-prevention' || ability.mechanic?.kind === 'zero-hit-point-extra-turn'
+  const auditedDeathPrevention = ability.mechanic?.kind === 'damage-zero-saving-throw' || ability.mechanic?.kind === 'death-prevention' || ability.mechanic?.kind === 'zero-hit-point-extra-turn'
   const auditedSpellDefeatHealing = ability.mechanic?.kind === 'spell-defeat-healing'
   const auditedSummonedCreatureBonus = ability.mechanic?.kind === 'summoned-creature-bonus'
   const auditedCreatureFormEligibility = ability.mechanic?.kind === 'creature-form-eligibility'
@@ -3723,7 +3970,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   const auditedBonusWeaponAttack = ability.mechanic?.kind === 'bonus-weapon-attack'
   const auditedTurnStartSavingThrowAura =
     ability.mechanic?.kind === 'turn-start-saving-throw-aura'
-  const auditedMechanic = auditedDisadvantageNegation || ability.mechanic?.kind === 'damage-mitigation-retaliation' || ability.mechanic?.kind === 'rage-first-hit-protection' || ability.mechanic?.kind === 'missed-melee-redirection' || auditedCombatManeuver || auditedMartialSpellSynergy ||
+  const auditedMechanic = ability.mechanic?.kind === 'storm-fury' || ability.mechanic?.kind === 'storm-cast-flight' || ability.mechanic?.kind === 'storm-cast-eruption' || ability.mechanic?.kind === 'incoming-hit-die-negation' || ability.mechanic?.kind === 'incoming-attack-armor-class' || auditedDisadvantageNegation || ability.mechanic?.kind === 'damage-mitigation-retaliation' || ability.mechanic?.kind === 'rage-first-hit-protection' || ability.mechanic?.kind === 'missed-melee-redirection' || auditedCombatManeuver || auditedMartialSpellSynergy ||
     auditedRageFeature || auditedOpeningAttack || auditedHiddenSpellSave ||
     auditedUtilityProjection || auditedNextD20 || auditedPostD20Adjustment ||
     auditedD20ChoiceReroll ||
@@ -3792,7 +4039,7 @@ export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAb
   if (ability.trigger.kind === 'after-attack-hit') {
     if (
       (ability.cost?.economy ?? 'none') !== 'none' &&
-      !auditedReactionWeaponAttack
+      !auditedReactionWeaponAttack && !auditedStormFury
     ) reasons.push('命中后需要选择是否消耗行动经济，必须经过 Interrupt')
     // Generic after-hit Activities are now routed through the production
     // trigger window. The Host compiles and rolls their dice only after the
@@ -4005,10 +4252,18 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
 
 export { migrateLegacyFeatureActionToDeclarativeV1 } from './plugins/pluginLegacyMigration'
 
-
-
-
-
-
-
-
+export function validateDeclarativeSubclassAdditionalKnownSpellsV1(value:unknown,groups:readonly {id:string;level:number;maxSelections:number;maxSelectionsByLevel?:readonly{maxSelections:number}[];options:readonly{id:string}[]}[],path='additional-known'):asserts value is readonly DeclarativeSubclassAdditionalKnownSpellV1[]{
+ if(!Array.isArray(value)||value.length<1||value.length>16)throw Error(path+': invalid additional known slots')
+ const ids=new Set<string>()
+ for(const slot of value){
+  if(!record(slot))throw Error(path+': invalid additional known slot');assertKeys(slot,['id','name','level','choiceGroupId','spellsByOption','replacementClassSpellListIds'],path)
+  assertId(slot.id,path);if(ids.has(slot.id))throw Error(path+': duplicate additional known source');ids.add(slot.id);assertText(slot.name,path,160)
+  if(!finiteInteger(slot.level,1,20)||typeof slot.choiceGroupId!=='string'||!ID.test(slot.choiceGroupId)||!record(slot.spellsByOption))throw Error(path+': invalid source choice')
+  const group=groups.find(g=>g.id===slot.choiceGroupId)
+  if(!group||group.level>Number(slot.level)||group.maxSelections!==1||group.maxSelectionsByLevel?.some(step=>step.maxSelections!==1))throw Error(path+': additional known requires its single actual source choice')
+  const lists=slot.replacementClassSpellListIds
+  if(lists!==undefined&&(!Array.isArray(lists)||lists.length<1||lists.length>12||new Set(lists).size!==lists.length||lists.some(id=>typeof id!=='string'||!(['barbarian','bard','cleric','druid','fighter','monk','paladin','ranger','rogue','sorcerer','warlock','wizard'].includes(id)||id.includes(':')&&ID.test(id)))))throw Error(path+': invalid additional known replacement class list')
+  const mapping=slot.spellsByOption;const keys=Object.keys(mapping)
+  if(keys.length!==group.options.length||keys.some(id=>!group.options.some(o=>o.id===id))||group.options.some(o=>!Object.prototype.hasOwnProperty.call(mapping,o.id)||typeof mapping[o.id]!=='string'||!ID.test(mapping[o.id] as string)))throw Error(path+': additional known option mapping must exactly cover its source group')
+ }
+}

@@ -1,0 +1,3 @@
+/** Data projection only; no graph data carries Native or controller authority. */
+export function validBountifulActivityOriginalRequest(value:unknown):value is{activityId:string;checkId:string;rollId:string;actorId:string;skill?:string;mode:'normal'|'advantage'|'disadvantage';count:1|2;sides:20};
+export function bountifulActivityOriginalSourceFacts(wire:unknown):{base:unknown;action:unknown;map:unknown;characters:unknown;actorToken:unknown;headlessAction:unknown;rolls:unknown;combatId:unknown;round:unknown;initiativeIndex:unknown;initiativeOrder:unknown;initiativeSlotIds:unknown;turns:Readonly<Record<string,{currentHp:unknown;turn:unknown}>>}|null;

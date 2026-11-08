@@ -1,3 +1,5 @@
+import{dnd5eAdditionalKnownSpellIdsV1}from'./additionalKnownSpells'
+import{dnd5eSubclassLiveSpellListClassIdsV1}from'./plugins/pluginSubclassLiveSpellLists'
 import coreSpellRules from '../../content/srd-5.1/core-spells.json'
 import coreSpellChinese from '../../content/srd-5.1/localization/zh-CN.json'
 import coreSpellEnglish from '../../content/srd-5.1/localization/en-US.json'
@@ -480,6 +482,7 @@ export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd
     ...(selections?.['mystic-arcanum-9'] ?? []),
     ...(classId === 'bard' ? dnd5eBardMagicalSecretSpellIds(classCharacter) : []),
     ...subclassSpells,
+    ...dnd5eAdditionalKnownSpellIdsV1({classId,classLevel:dnd5eCharacterClassLevel(character,classId),subclassId,selections}),
   ])]
 }
 
@@ -525,6 +528,8 @@ export function dnd5eSpellcastingClassIdsForSpell(
     if (buildGrant) return true
     if (
       !allowedClasses || allowedClasses.includes(source.spellListClassId) ||
+      dnd5eAdditionalKnownSpellIdsV1({classId,classLevel:dnd5eCharacterClassLevel(character,classId),subclassId:classId==='fighter'?character.dnd5eClassChoices?.fighter?.subclass:character.dnd5eClassChoices?.classes?.[classId]?.subclass,selections:dnd5eEffectiveSpellSelections(character,source)}).includes(spellId) ||
+      dnd5eSubclassLiveSpellListClassIdsV1(classId==='fighter'?character.dnd5eClassChoices?.fighter?.subclass:character.dnd5eClassChoices?.classes?.[classId]?.subclass,dnd5eCharacterClassLevel(character,classId),classId).some(id=>allowedClasses.includes(id)) ||
       dnd5eSubclassSpellIdsForClass(character, classId).includes(spellId)
     ) return true
     return classId === 'bard' && dnd5eBardMagicalSecretSpellIds({

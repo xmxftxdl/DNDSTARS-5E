@@ -1,13 +1,17 @@
 import type {Token} from '../../store/maps'
-import type {Dnd5eInventoryItemTemplate} from '../../types/inventory'
+import type {Dnd5eInventoryEntry,Dnd5eInventoryItemTemplate} from '../../types/inventory'
 import {dnd5eInventoryItemTemplate,listDnd5eInventoryItemTemplates} from './items'
 import {normalizeDnd5eMapObjectStateV1} from './mapObjectState'
 
-export function dnd5eMapPhysicalItemTemplate(item: Dnd5eInventoryItemTemplate): boolean {
-  return !item.magicItem && !item.resources?.length
+export function dnd5eMapPhysicalItemTemplate(item: Dnd5eInventoryItemTemplate,instance?:Dnd5eInventoryEntry): boolean {
+  if(!item.magicItem)return !item.resources?.length
+  // Only transport an already-issued exact Pact physical instance. Catalogue
+  // authoring still passes no instance and cannot mint magic objects.
+  const marker=(instance as (Dnd5eInventoryEntry&{pactWeaponPhysicalIdentity?:{schemaVersion:number;inventoryInstanceId:string;equipmentId:string}})|undefined)?.pactWeaponPhysicalIdentity
+  return instance?.item.equipment?.dnd5e?.kind==='weapon'&&instance?.quantity===1&&instance.templateId===item.id&&marker?.schemaVersion===1&&marker.inventoryInstanceId===instance.instanceId&&/^pact-weapon:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(marker.equipmentId)&&instance.item.equipment?.id===marker.equipmentId
 }
 export function dnd5eMapPhysicalItemTemplates() {
-  return listDnd5eInventoryItemTemplates().filter(dnd5eMapPhysicalItemTemplate)
+  return listDnd5eInventoryItemTemplates().filter(item=>dnd5eMapPhysicalItemTemplate(item))
 }
 /** DM scene authoring only. Never infer a registered item from its display name. */
 export function authorDnd5eMapInventoryItem(token:Token,templateId:string,quantity=1):Partial<Token>|undefined {

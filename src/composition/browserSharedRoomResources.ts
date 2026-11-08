@@ -23,3 +23,44 @@ export type {
   SharedResourceWriteOptions,
   SharedServerClockSample,
 } from '../ports/sharedRoomGateway'
+
+export const requestSharedMastermindWardAttack = browserSharedRoomService.requestSharedMastermindWardAttack
+export const requestSharedMastermindWardOriginal = browserSharedRoomService.requestSharedMastermindWardOriginal
+export const requestSharedMastermindWardSavingChoice = browserSharedRoomService.requestSharedMastermindWardSavingChoice
+export const loadBountifulActivityOriginalSource = browserSharedRoomService.loadBountifulActivityOriginalSource
+export const requestSharedStormFurySaving = browserSharedRoomService.requestSharedStormFurySaving
+export const requestSharedTempestuousLandingOriginal = browserSharedRoomService.requestSharedTempestuousLandingOriginal
+export const requestSharedTempestuousHostOriginal = browserSharedRoomService.requestSharedTempestuousHostOriginal
+export const loadDmUndoHistory = browserSharedRoomService.loadDmUndoHistory
+export const subscribeSharedResourceInvalidation = browserSharedRoomService.subscribeSharedResourceInvalidation
+export type{DmUndoTransactionSummary}from'../ports/sharedRoomGateway'
+
+export const requestSharedBountifulInitiativeOriginal = browserSharedRoomService.requestSharedBountifulInitiativeOriginal
+export const requestSharedMastermindSpellWindow = browserSharedRoomService.requestSharedMastermindSpellWindow
+export const requestSharedMastermindNativeWardOriginal = browserSharedRoomService.requestSharedMastermindNativeWardOriginal
+export const requestSharedMastermindNativeWardBountiful = browserSharedRoomService.requestSharedMastermindNativeWardBountiful
+
+export const requestSharedMastermindNativeWardOutcome = browserSharedRoomService.requestSharedMastermindNativeWardOutcome
+
+export const loadBountifulPluginSpellAbilityOriginalSource = browserSharedRoomService.loadBountifulPluginSpellAbilityOriginalSource
+export const loadBountifulPluginSpellSavingOriginalSource = browserSharedRoomService.loadBountifulPluginSpellSavingOriginalSource
+export const loadBountifulPluginSpellCompoundPrimarySource = browserSharedRoomService.loadBountifulPluginSpellCompoundPrimarySource
+
+export const loadSpellcastingOriginalPreparation=browserSharedRoomService.loadSpellcastingOriginalPreparation
+export const requestSharedSpellcastingOriginalSaving=browserSharedRoomService.requestSharedSpellcastingOriginalSaving
+
+export const loadBountifulDeathRepeatSavingSource=browserSharedRoomService.loadBountifulDeathRepeatSavingSource
+
+// Lazy calls preserve the existing composition cycle without eager API reads.
+export const requestSharedPluginTempestuousOriginal = (operation:'prepare'|'read'|'probe'|'publication'|'inputs-read'|'inputs-start'|'inputs-record'|'inputs-save-start'|'saving-read'|'saving-begin'|'saving-append'|'saving-answer'|'saving-complete'|'saving-material-read'|'saving-material',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousOriginal(operation,payload)
+export const requestSharedPluginTempestuousLandingOriginal = (operation:'prepare'|'inspect'|'read'|'dice',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousLandingOriginal(operation,payload)
+
+export const loadBountifulDeathFirstOriginalSource=browserSharedRoomService.loadBountifulDeathFirstOriginalSource
+export const inspectBountifulDeathFirstOriginal=browserSharedRoomService.inspectBountifulDeathFirstOriginal
+export const loadBountifulDeathFirstRepeatSavingSource=browserSharedRoomService.loadBountifulDeathFirstRepeatSavingSource
+
+export const requestSharedPluginTempestuousSavingOwned = (operation:'read'|'claim',payload:unknown) => browserSharedRoomService.requestSharedPluginTempestuousSavingOwned(operation,payload)
+
+export const requestSharedBountifulMonsterSavingLate=<T>(input:{parentId:string;mapId:string;combatId:string}):Promise<T>=>browserSharedRoomService.requestSharedBountifulMonsterSavingLate<T>(input)
+
+export const loadBountifulDeathAreaOriginalSource:typeof browserSharedRoomService.loadBountifulDeathAreaOriginalSource=(input)=>browserSharedRoomService.loadBountifulDeathAreaOriginalSource(input)

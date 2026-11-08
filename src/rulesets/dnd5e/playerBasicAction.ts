@@ -1,3 +1,4 @@
+import { escapeSaveAbility } from './escapeSaveAbility'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import type { Dnd5eActiveEffectSavingThrowRoll } from './activeEffects'
 import { dnd5eAttackActionSlot } from './attackActionSlot'
@@ -20,6 +21,7 @@ import {
   dnd5eBestGrappleDefense,
   dnd5eBasicAttackTargetEligible,
   dnd5eBasicHelpTargetEligible,
+  dnd5eBasicHelpTacticsRangeFeet,
   dnd5eBasicWakeTargetEligible,
   dnd5eActiveEffectRemovalAllowed,
   resolveDnd5eHeadlessAction,
@@ -297,7 +299,8 @@ export function prepareDnd5ePlayerBasicAction(input: {
       effect.removal.action.maxDistanceFeet === 0 && effect.removal.action.abilityCheck == null) === true
   const freeAction = freeSelfDismissal || payload.kind === 'release-grapple' || payload.kind === 'mount' || payload.kind === 'dismount' ||
     (payload.kind === 'set-flame-blade-manifestation' && !payload.manifested)
-  const spendsBonusAction = basicActionGranted ||
+  if(payload.kind==='help'&&payload.economy!==undefined&&payload.economy!=='bonusAction')return{ok:false,reason:'invalid-action'}
+  const spendsBonusAction = (payload.kind==='help'&&payload.economy==='bonusAction') || basicActionGranted ||
     payload.kind === 'other-bonus-action' || payload.kind === 'command-animate-dead' || payload.kind === 'command-animate-objects' ||
     (payload.kind === 'set-flame-blade-manifestation' && payload.manifested) ||
     (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat')
@@ -387,6 +390,7 @@ export function prepareDnd5ePlayerBasicAction(input: {
     )
   )) return { ok: false, reason: 'invalid-action' }
   const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
+  if(payload.kind==='help'&&payload.economy==='bonusAction'&&dnd5eBasicHelpTacticsRangeFeet(combatant)===undefined)return{ok:false,reason:'action-unavailable'}
   if (payload.kind === 'help' && !dnd5eBasicHelpTargetEligible(snapshot.state, token.id, payload.targetTokenId, payload.helpKind)) return { ok: false, reason: 'invalid-target' }
   if (payload.kind === 'wake' && !dnd5eBasicWakeTargetEligible(snapshot.state, token.id, payload.targetTokenId)) return { ok: false, reason: 'invalid-target' }
   if ((payload.kind === 'grapple' || payload.kind === 'shove') &&
@@ -470,7 +474,7 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const escapeOption = escapeEffect?.escapeCheck
     ? dnd5eBestActiveEffectEscapeOption(combatant, escapeEffect.escapeCheck, escapeEffect.standardCondition === 'grappled')
     : undefined
-  const escapeAbility = escapeOption?.ability ?? escapeEffect?.escapeSavingThrow?.ability
+  const escapeAbility = escapeOption?.ability ?? (escapeEffect?.escapeSavingThrow ? escapeSaveAbility(combatant,escapeEffect.escapeSavingThrow) : undefined)
   const escapeSkill = escapeOption?.skill
   const actorContestSkill = escapingGrapple
     ? dnd5eBestGrappleDefense(combatant, true).skill
@@ -497,7 +501,7 @@ export function prepareDnd5ePlayerBasicAction(input: {
         : { ability: 'str' as const, skill: 'athletics' }
   const actorRollKind = escapeEffect?.escapeSavingThrow ? 'saving-throw' as const : 'ability-check' as const
   const actorRollMode = escapeEffect?.escapeSavingThrow
-    ? dnd5eSavingThrowMode(combatant, escapeEffect.escapeSavingThrow.ability, {
+    ? dnd5eSavingThrowMode(combatant, escapeSaveAbility(combatant,escapeEffect.escapeSavingThrow), {
         effectVisible: true, sourceIsSpell: escapeEffect.source.kind === 'spell', sourceIsMagical: escapeEffect.source.magical === true,
       })
     : escapeOption?.mode ?? dnd5eAbilityCheckRollMode(combatant, { ...actorCheck, grappleEscape: escapingGrapple })
@@ -688,7 +692,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       halflingLuckyD20: input.actorHalflingLuckyD20,
       halflingLuckyD20Second: input.actorHalflingLuckyD20Second,
     }; break
-    case 'help': action = { type: 'help', actorId: prepared.actorTokenId, targetId: payload.targetTokenId, helpKind: payload.helpKind }; break
+    case 'help': action = { type: 'help', actorId: prepared.actorTokenId, targetId: payload.targetTokenId, helpKind: payload.helpKind,economy:payload.economy }; break
     case 'ready': action = { type: 'ready', actorId: prepared.actorTokenId, trigger: payload.trigger, actionKind: payload.actionKind, targetId: payload.targetTokenId }; break
     case 'use-object': action = { type: 'use-object', actorId: prepared.actorTokenId, interactionId: payload.interactionId }; break
     case 'grapple': action = {
@@ -871,5 +875,3 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
     application,
   }
 }
-
-

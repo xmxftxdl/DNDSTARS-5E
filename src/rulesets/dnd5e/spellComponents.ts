@@ -1,3 +1,5 @@
+import{pactWeaponPendingSeparationInstance}from'./pactWeaponSeparation'
+import {derivePactWeaponCombatView} from './pactWeaponCombatView'
 import type { Character } from '../../types/character'
 import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eClassId } from './classes'
@@ -114,11 +116,12 @@ function inventoryEntryIsHeldSpellcastingFocus(
   classId: Dnd5eClassId,
   actor?: Partial<Character>,
 ): boolean {
-  return candidate.quantity > 0 &&
+  return candidate.quantity > 0 && (!actor || pactWeaponPendingSeparationInstance(actor)!==candidate.instanceId) &&
     candidate.identified !== false &&
     (candidate.item.magicItem?.attunement !== 'required' || candidate.attuned === true) &&
     (candidate.equippedSlot === 'mainWeapon' || candidate.equippedSlot === 'offHand') &&
     (
+      (classId === 'warlock' && actor && typeof actor.id === 'string' && typeof actor.race === 'string' && typeof actor.charClass === 'string' && typeof actor.level === 'number' && derivePactWeaponCombatView([actor as Character]).facts.some(fact => fact.warlockFocus && fact.instanceId === candidate.instanceId)) ||
       equipmentCanBeSpellcastingFocus(candidate.item.equipment, classId) ||
       trainedWeaponCanBeSpellcastingFocus(actor, candidate.item.equipment, classId) ||
       entryCanBeSpellcastingFocus(candidate.templateId, classId) ||

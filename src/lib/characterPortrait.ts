@@ -20,6 +20,17 @@ export function normalizeCharacterPortrait(value: unknown): string | undefined {
   return isCharacterPortraitDataUrl(value) ? value : undefined
 }
 
+/** Decode a browser-generated portrait locally; fetching data: URLs violates the site's connect-src policy. */
+export function characterPortraitBlob(value: string): Blob {
+  if (!isCharacterPortraitDataUrl(value)) throw new Error('画像数据无效，请重新选择图片。')
+  const comma = value.indexOf(',')
+  const type = value.slice(5, value.indexOf(';'))
+  const binary = atob(value.slice(comma + 1))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return new Blob([bytes], { type })
+}
+
 export function normalizeCharacterInitiativePortrait(value: unknown): string | undefined {
   return isCharacterPortraitDataUrl(value) ? value : undefined
 }

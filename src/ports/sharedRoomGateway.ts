@@ -1,3 +1,9 @@
+import type{BountifulDeathAreaOriginalIdentity,BountifulDeathAreaOriginalBook}from'./dnd5eDeathAreaOriginalTransport'
+import type{BountifulPluginSpellSavingOriginalIdentity,BountifulPluginSpellSavingOriginalBook}from'./dnd5ePluginSpellSavingOriginalTransport'
+import type{BountifulDeathFirstRepeatIdentity,BountifulDeathFirstPreparationBook,BountifulDeathFirstPreparationPresence,BountifulDeathFirstRepeatSavingBook}from'./dnd5eDeathFirstRepeatTransport'
+import type{BountifulDeathRepeatSavingIdentity,BountifulDeathRepeatSavingBook}from'./dnd5eDeathRepeatSavingTransport'
+import type{BountifulPluginSpellAbilityOriginalIdentity,BountifulPluginSpellAbilityOriginalBook}from'./dnd5ePluginSpellAbilityOriginalTransport'
+import type{BountifulActivityOriginalIdentity,BountifulActivityOriginalBook}from'./dnd5eActivityOriginalTransport'
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
   | { status: 'skipped'; reason: 'spectator' | 'forbidden' }
@@ -75,6 +81,32 @@ export interface SharedServerClockSample {
 }
 
 export interface SharedRoomGatewayPort {
+  loadSpellcastingOriginalPreparation?(input:{parentId:string;mapId:string;combatId:string;effectId:string}):Promise<unknown>
+  requestSharedSpellcastingOriginalSaving?(operation:'prepare'|'inspect'|'dice'|'read'|'target-source'|'target-prepare'|'target-inspect'|'target-dice'|'target-read',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedBountifulMonsterSavingLate?<T>(input:{parentId:string;mapId:string;combatId:string}):Promise<T>
+  requestSharedMastermindNativeWardOutcome?<T>(operation:'register'|'answer'|'project'|'list',input:unknown):Promise<T>
+  requestSharedBountifulInitiativeOriginal?<T>(operation:'begin'|'issue'|'qualify'|'answer'|'raw'|'confirm'|'replacement-raw'|'replacement-confirm'|'complete'|'project'|'list',input:unknown):Promise<T>
+  requestSharedMastermindSpellWindow?<T>(operation:'ward-choice-list'|'begin'|'register'|'ward-register'|'ward-complete'|'ward-bountiful-register'|'ward-bountiful-choice'|'ward-bountiful-raw'|'ward-bountiful-confirm'|'ward-bountiful-complete'|'ward-bountiful-project'|'ward-outcome-register'|'ward-outcome'|'ward-retarget-propose'|'ward-retarget-accept'|'ward-retarget-reject'|'issue'|'raw'|'confirm'|'complete'|'abort-extra'|'source'|'request',input:unknown):Promise<T>
+  requestSharedMastermindNativeWardOriginal?<T>(operation:'register'|'request'|'raw'|'confirm'|'complete',input:unknown):Promise<T>
+  requestSharedMastermindNativeWardBountiful?<T>(operation:'register'|'project'|'list'|'answer'|'raw'|'confirm',input:unknown):Promise<T>
+  loadBountifulDeathFirstOriginalSource?(input:BountifulDeathFirstRepeatIdentity):Promise<BountifulDeathFirstPreparationBook>
+  inspectBountifulDeathFirstOriginal?(input:BountifulDeathFirstRepeatIdentity):Promise<BountifulDeathFirstPreparationPresence>
+  loadBountifulDeathFirstRepeatSavingSource?(input:BountifulDeathFirstRepeatIdentity):Promise<BountifulDeathFirstRepeatSavingBook>
+  loadBountifulDeathAreaOriginalSource?(input:BountifulDeathAreaOriginalIdentity):Promise<BountifulDeathAreaOriginalBook>
+  loadBountifulDeathRepeatSavingSource?(input:BountifulDeathRepeatSavingIdentity):Promise<BountifulDeathRepeatSavingBook>
+  loadBountifulActivityOriginalSource?(input:BountifulActivityOriginalIdentity):Promise<BountifulActivityOriginalBook>
+  loadBountifulPluginSpellAbilityOriginalSource?(input:BountifulPluginSpellAbilityOriginalIdentity):Promise<BountifulPluginSpellAbilityOriginalBook>
+  loadBountifulPluginSpellSavingOriginalSource?(input:BountifulPluginSpellSavingOriginalIdentity):Promise<BountifulPluginSpellSavingOriginalBook>
+  loadBountifulPluginSpellCompoundPrimarySource?(input:BountifulPluginSpellSavingOriginalIdentity):Promise<import('./dnd5ePluginSpellCompoundPrimaryTransport').BountifulPluginSpellCompoundPrimaryBook>
+  requestSharedStormFurySaving?(operation:'prepare'|'inspect'|'dice'|'read',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedTempestuousLandingOriginal?(operation:'prepare'|'inspect'|'dice'|'read',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedPluginTempestuousSavingOwned?(operation:'read'|'claim',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedPluginTempestuousOriginal?(operation:'prepare'|'read'|'probe'|'publication'|'inputs-read'|'inputs-start'|'inputs-record'|'inputs-save-start'|'saving-read'|'saving-begin'|'saving-append'|'saving-answer'|'saving-complete'|'saving-material-read'|'saving-material',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedPluginTempestuousLandingOriginal?(operation:'prepare'|'inspect'|'read'|'dice',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedTempestuousHostOriginal?(operation:'begin'|'read'|'cancel'|'spell-window-prefix',payload:unknown):Promise<Record<string,unknown>>
+  requestSharedMastermindWardAttack?<T>(operation:'issue'|'answer'|'project'|'list',input:unknown):Promise<T>
+  requestSharedMastermindWardOriginal?<T>(operation:'register'|'request'|'raw'|'confirm'|'complete'|'abort-extra',input:unknown):Promise<T>
+  requestSharedMastermindWardSavingChoice?<T>(operation:'register'|'request'|'list'|'answer'|'raw'|'confirm'|'complete',input:unknown):Promise<T>
   /** Optional transport capability for authoritative long-casting ownership leases. */
   sendLongCastingOwnerCommand?(
     roomId: string, memberId: string, command: unknown, signal: AbortSignal,

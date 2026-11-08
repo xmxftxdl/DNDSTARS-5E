@@ -1,3 +1,9 @@
+import {syncDnd5eIllOmenHoundAuras} from './illOmenHoundEffects'
+import{dnd5eCombatantCoverRedirectFeatureIds}from'./headlessCombatEngine'
+import {derivePactWeaponCombatView} from './pactWeaponCombatView'
+import {multipartTokenHeadProjections,multipartTokenSurfaceProjections} from './multipartMapGeometry'
+import {expireDnd5eRelentlessThrownObjects,prepareDnd5eRelentlessSourceBoundThrows} from './relentlessThrownMapInventory'
+import { normalizeDnd5eSkillCheckMovement } from './contextualSkillChecks'
 import { dnd5eInherentFeatureLightEffects } from './inherentFeatureLight'
 import { applyDnd5eCounterattackInventoryCosts } from './counterattackInventory'
 import { dnd5eMapEtherealAccess } from './mapPlane'
@@ -55,8 +61,11 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import {
   DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryCanSeeToken,
+  mapGeometryCoreDarknessBlocksSight,
   mapGeometryCoverBetween,
+  mapGeometryCreatureProvidesCover,
   mapGeometryIlluminationAtPoint,
+  mapGeometryVisualIlluminationAtPoint,
   mapGeometrySunlightAtPoint,
   mapGeometryLineOfSightBlocked,
   mapGeometryRuntimeForMap,
@@ -84,6 +93,7 @@ import {
   normalizeDnd5eHitPointMaximumReductionLedger,
 } from './hitPointMaximumReductions'
 import { normalizeDnd5eSpecialSenses, type Dnd5eSpecialSense } from './specialSenses'
+import { createMultipartCreature } from './multipartCreature'
 import { getRoomRulesSnapshot } from '../../lib/roomRulesState'
 import { getRoomSession } from '../../lib/roomSession'
 import {
@@ -884,6 +894,8 @@ interface Dnd5eMapCombatProjectionInput {
 }
 
 function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
+  const pactView = derivePactWeaponCombatView(input.characters)
+  input = {...input, characters:pactView.characters}
   const charactersById = new Map(input.characters.map((character) => [character.id, character]))
   // Lighting participates in Host perception even before the first action has
   // persisted a character effect. Do not write this derived source into the map.
@@ -965,6 +977,7 @@ function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
+      combatant.inspiration=character.inspiration
       // Character effects persist between maps, while Headless concentration
       // ownership uses map-token ids. Rebind self-hosted concentration effects
       // to the new token before the combat starts; otherwise replacing a
@@ -1052,7 +1065,7 @@ function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
           ...combatant.classState.spellControlMentalAbilities,
         }
       }
-      const weaponDamageSources = simulacrum ? {} : characterWeaponDamageSources(character)
+      const weaponDamageSources = simulacrum ? {} : {...characterWeaponDamageSources(character), ...Object.fromEntries(pactView.facts.filter(fact=>fact.wielderId===character.id).map(fact=>[fact.equipmentId,fact.damageSource]))}
       const mainWeaponId = simulacrum ? undefined : character.equipment?.mainWeapon?.id
       return [{
         ...combatant,
@@ -1063,8 +1076,9 @@ function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
         languages: [...dnd5eCharacterKnownLanguagesV1(character)],
         communicationCreatureTypes: [...dnd5eCharacterBuildTagsV1(character, 'creature-communication')].map(type => type.toLowerCase()),
         mainWeaponId,
-        mainWeaponMagical: !!mainWeaponId && weaponDamageSources?.[mainWeaponId]?.magical === true,
+        mainWeaponMagical: !!mainWeaponId && dnd5eWeaponDamageSource(character.equipment?.mainWeapon)?.magical === true,
         weaponDamageSources,
+        pactWeaponEquipmentIds: simulacrum ? [] : pactView.facts.filter(fact=>fact.ownerId===character.id&&fact.wielderId===character.id).map(fact=>fact.equipmentId),
         grappleFreeHandCapacity: characterGrappleFreeHandCapacity(character),
         moralAlignment: normalizeDnd5eMoralAlignment(character.alignment),
         id: token.id,
@@ -1152,7 +1166,7 @@ function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
           ]))
         : undefined,
       skillProficiencies: monster?.skills?.map((skill) => skill.key),
-      languages:[...(monster?.languages??[]),...token.dnd5eSummon?.understoodLanguage?[token.dnd5eSummon.understoodLanguage]:[]],
+      languages:[...(monster?.languages??[]),...(token.dnd5eCombatState?.monsterMultipart?.learnedLanguages??[]),...token.dnd5eSummon?.understoodLanguage?[token.dnd5eSummon.understoodLanguage]:[]],
       protectedFromActorIds:dnd5ePersistentWardProtectedFrom(input.map,token),
       classSelections: {
         expertise: dnd5eMonsterExpertiseSkills(monster),
@@ -1295,6 +1309,7 @@ function projectDnd5eMapCombatants(input: Dnd5eMapCombatProjectionInput) {
         ? { conditions: ['charmed', '魅惑'] }
         : undefined,
     })
+    if (token.dnd5eSummon?.illOmenTarget) combatant.illOmenHound = {...token.dnd5eSummon.illOmenTarget,sourceTokenId:token.dnd5eSummon.sourceTokenId,sourceCharacterId:token.dnd5eSummon.sourceCharacterId}
     if (simulacrum) {
       combatant.level = simulacrum.level
       combatant.proficiencyBonus = simulacrum.proficiencyBonus
@@ -1459,6 +1474,8 @@ export function projectDnd5eMapAreaStatusEffects(map: BattleMap, characters: rea
 export function createDnd5eMapCombatSnapshot(input: Dnd5eMapCombatProjectionInput): Dnd5eMapCombatSnapshot {
   const { combatants, characterIdByCombatantId, geometry } = projectDnd5eMapCombatants(input)
   const state = startDnd5eHeadlessCombat(input.combatId, combatants)
+  // Old map snapshots have no trustworthy current-turn distance baseline.
+  state.skillCheckMovement = normalizeDnd5eSkillCheckMovement(input.map.dnd5eSkillCheckMovement)
   const scope = input.roomMaps ?? [input.map]
   const hasRenewal = input.characters.some(character => Object.values(character.dnd5eCombatState?.spellAuthorityRecords ?? {})
     .some(record => record.kind === 'benefit-history' && record.renewal)) || scope.some(map => map.tokens.some(token =>
@@ -1545,6 +1562,12 @@ export function createDnd5eMapCombatSnapshot(input: Dnd5eMapCombatProjectionInpu
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
   for (const token of combatantTokens) {
     const combatant = state.combatants[token.id]
+    if (combatant.classState.monsterMultipart && !token.dnd5eCombatState?.monsterMultipart) {
+      const units = state.coordinateUnitsPerFoot ?? 1
+      combatant.classState.monsterMultipart = createMultipartCreature({
+        x: token.x / units, y: token.y / units, z: mapGeometryTokenElevation(geometry, token),
+      })
+    }
     combatant.groundElevationFeet = dnd5eEntitySupportElevation({ map: input.map, token, geometry,
       terrainElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, token),
       elevationFeet: mapGeometryTokenElevation(geometry, token) })
@@ -1571,6 +1594,9 @@ export function createDnd5eMapCombatSnapshot(input: Dnd5eMapCombatProjectionInpu
   }
   state.distanceFeetByCombatantPair = {}
   state.utilityProjectionDistanceFeetByPair = {}
+  const coverRedirectOwners=new Set(Object.values(state.combatants).filter(actor=>dnd5eCombatantCoverRedirectFeatureIds(actor).length>0).map(actor=>actor.id))
+  if(coverRedirectOwners.size)state.creatureCoverByCombatantPair={}
+  else delete state.creatureCoverByCombatantPair
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
@@ -1634,6 +1660,7 @@ export function createDnd5eMapCombatSnapshot(input: Dnd5eMapCombatProjectionInpu
           targetHeightFeet,
         })
         const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
+        if(coverRedirectOwners.has(target.id))state.creatureCoverByCombatantPair![directedKey]=input.map.tokens.filter(candidate=>mapGeometryCreatureProvidesCover(geometry,attacker,target,candidate,input.map,{attackerHeightFeet,targetHeightFeet})).map(candidate=>candidate.id)
         if (cover.blocksLineOfEffect) state.lineOfEffectBlockedByCombatantPair[directedKey] = true
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
           state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
@@ -1655,6 +1682,7 @@ export function createDnd5eMapCombatSnapshot(input: Dnd5eMapCombatProjectionInpu
   projectDnd5ePersistentAreaEffectSources(state, input.map, geometry)
   recordDnd5eCreatureSightings(state,dnd5eSightingWorldMinute(input.worldMinute,input.worldSecondRemainder),dnd5eCombatantCanSee)
   reconcileDnd5eSourceConditionAuras(state)
+  syncDnd5eIllOmenHoundAuras(state)
   return { state, characterIdByCombatantId }
 }
 
@@ -1678,9 +1706,22 @@ export interface Dnd5eMapResultPlan {
  */
 function refreshDnd5eMapSightPair(state: Dnd5eHeadlessCombatState, map: BattleMap,
   geometry: import('../../lib/mapGeometry').MapGeometryState | undefined, attacker: Token, target: Token): void {
+  if((attacker.dnd5eCombatState?.monsterMultipart&&!attacker.multipartProjection)||(target.dnd5eCombatState?.monsterMultipart&&!target.multipartProjection)) {
+    const heads=multipartTokenHeadProjections(attacker,map),sources=heads.length?heads:[{...attacker,multipartProjection:true}]
+    const targets=multipartTokenSurfaceProjections(target,map),key=dnd5eDirectedCombatantPairKey(attacker.id,target.id)
+    const flags=['lineOfSightBlockedByCombatantPair','physicalLineOfSightBlockedByCombatantPair','ordinaryDarknessByCombatantPair','magicalDarknessByCombatantPair'] as const
+    const blocked=new Set<string>(flags)
+    for(const origin of sources)for(const endpoint of targets) {
+      const probe={...state,lineOfSightBlockedByCombatantPair:{},physicalLineOfSightBlockedByCombatantPair:{},ordinaryDarknessByCombatantPair:{},magicalDarknessByCombatantPair:{}}
+      refreshDnd5eMapSightPair(probe,map,geometry,origin,endpoint)
+      for(const flag of flags)if(!(probe[flag] as Record<string,boolean>)[key])blocked.delete(flag)
+    }
+    for(const flag of flags){state[flag]??={};if(blocked.has(flag))state[flag]![key]=true;else delete state[flag]![key]}
+    return
+  }
   const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
-  const attackerHeightFeet = dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[attacker.id]))
-  const targetHeightFeet = dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[target.id]))
+  const attackerHeightFeet = attacker.multipartProjection&&attacker.size===1?5:dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[attacker.id]))
+  const targetHeightFeet = target.multipartProjection&&target.size===1?5:dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[target.id]))
   const effectiveViewer = {
     ...attacker,
     ...dnd5eCreatureFormVision(state.combatants[attacker.id].classState),
@@ -1706,14 +1747,17 @@ function refreshDnd5eMapSightPair(state: Dnd5eHeadlessCombatState, map: BattleMa
     toEyeHeightFeet: targetHeightFeet / 2,
   })
   if (physicalLineOfSightBlocked) (state.physicalLineOfSightBlockedByCombatantPair ??= {})[directedKey] = true
-  const targetIllumination = mapGeometryIlluminationAtPoint({
+  const targetIllumination = mapGeometryVisualIlluminationAtPoint({
+    viewer:effectiveViewer,
     geometry,
     map: map,
     tokens: map.tokens,
     point: target,
     elevationFeet: target.elevationFeet ?? 0,
   })
-  if (targetIllumination === 'magical-darkness') {
+  if (targetIllumination === 'magical-darkness' || mapGeometryCoreDarknessBlocksSight({
+    map,geometry,viewer:effectiveViewer,target,viewerHeightFeet:attackerHeightFeet,targetHeightFeet,
+  })) {
     (state.magicalDarknessByCombatantPair ??= {})[directedKey] = true
   } else if (targetIllumination === 'darkness') {
     (state.ordinaryDarknessByCombatantPair ??= {})[directedKey] = true
@@ -1753,6 +1797,8 @@ export function refreshDnd5eMapSpatialRelations(
           ...token,
           x: combatant.position.x,
           y: combatant.position.y,
+          multipartProjection:combatant.classState.monsterMultipart?.activeHeadId!=null,
+          dnd5eCombatState:{...token.dnd5eCombatState,monsterMultipart:combatant.classState.monsterMultipart},
           elevationFeet: combatant.elevationFeet,
         }]
       : []
@@ -1784,6 +1830,9 @@ export function refreshDnd5eMapSpatialRelations(
     ),
   }
   state.distanceFeetByCombatantPair = {}
+  const coverRedirectOwners=new Set(Object.values(state.combatants).filter(actor=>dnd5eCombatantCoverRedirectFeatureIds(actor).length>0).map(actor=>actor.id))
+  if(coverRedirectOwners.size)state.creatureCoverByCombatantPair={}
+  else delete state.creatureCoverByCombatantPair
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
@@ -1814,6 +1863,7 @@ export function refreshDnd5eMapSpatialRelations(
           ),
         })
         const directedKey = dnd5eDirectedCombatantPairKey(source.id, target.id)
+        if(coverRedirectOwners.has(target.id))state.creatureCoverByCombatantPair![directedKey]=positionedTokens.filter(candidate=>mapGeometryCreatureProvidesCover(geometry,source,target,candidate,spatialMap,{attackerHeightFeet:dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[source.id])),targetHeightFeet:dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[target.id]))})).map(candidate=>candidate.id)
         if (cover.blocksLineOfEffect) {
           state.lineOfEffectBlockedByCombatantPair[directedKey] = true
         } else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
@@ -1826,6 +1876,7 @@ export function refreshDnd5eMapSpatialRelations(
     map: spatialMap, tokens: positionedTokens, geometry, round: state.round, worldMinute: state.mapMagicDetection?.worldMinute,
     detectorHeightFeetById: Object.fromEntries(positionedTokens.map(token => [token.id,
       dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(state.combatants[token.id]))])) }) }
+  syncDnd5eIllOmenHoundAuras(state,events)
   reconcileDnd5eSourceLinkedRelations(state, events)
   reconcileDnd5eWebRestraints(state, spatialMap, events)
   projectDnd5eGroundItemEffectOrigins(state, spatialMap, geometry)
@@ -1849,7 +1900,9 @@ export function planDnd5eMapResultApplication(input: {
   characterIdByCombatantId: Readonly<Record<string, string>>
   openedDoorIds?: readonly string[]
   events?: Dnd5eCombatEvent[]
-}): Dnd5eMapResultPlan {
+ }): Dnd5eMapResultPlan {
+  const thrown=prepareDnd5eRelentlessSourceBoundThrows({map:input.map,characters:input.characters,events:input.events??[],characterIdByCombatantId:input.characterIdByCombatantId})
+  input={...input,map:thrown.map,characters:thrown.characters,baselineCharacters:input.baselineCharacters??input.characters}
   recordDnd5eWithinReachMapMovement({...input,events:input.events??[]})
   captureDnd5eLinkedTargetPresentations(input.state, input.map, input.characters)
   // Token IDs identify a scene instance. Persist the character identity too so
@@ -1947,6 +2000,8 @@ export function planDnd5eMapResultApplication(input: {
             deathRound: combatant.classState.deathRound,
             deathInitiativeIndex: combatant.classState.deathInitiativeIndex,
             deathCause: combatant.classState.deathCause,
+            falseHydraConsumedBy: combatant.classState.falseHydraConsumedBy,
+            deathWorldMinute: combatant.classState.deathWorldMinute,
             soulReturnStatus: combatant.classState.soulReturnStatus,
             bodyPresent: combatant.classState.bodyPresent,
             bodyPartPresence: combatant.classState.bodyPartPresence ? { ...combatant.classState.bodyPartPresence } : undefined,
@@ -1998,6 +2053,7 @@ export function planDnd5eMapResultApplication(input: {
             movementStoppedTurnKey: combatant.classState.movementStoppedTurnKey,
             jumpMovementProgress: combatant.classState.jumpMovementProgress,
             runningJumpApproachFeet: combatant.classState.runningJumpApproachFeet,
+            sceneReactionSpent: combatant.classState.sceneReactionSpent,
             normalReactionSpentThisTurn: combatant.classState.normalReactionSpentThisTurn,
             specialOpportunityReactionUsed: combatant.classState.specialOpportunityReactionUsed,
             reactionAvailableBeforeSpecial: combatant.classState.reactionAvailableBeforeSpecial,
@@ -2022,6 +2078,7 @@ export function planDnd5eMapResultApplication(input: {
             stunnedByActorId: combatant.classState.stunnedByActorId,
             stunnedAppliedTurnKey: combatant.classState.stunnedAppliedTurnKey,
             openHandNoReactionsAppliedTurnKeysBySource: combatant.classState.openHandNoReactionsAppliedTurnKeysBySource,
+            spellDamageSelectedAbilityBonusUses: combatant.classState.spellDamageSelectedAbilityBonusUses,
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
             activityTriggerReceipts: combatant.classState.activityTriggerReceipts,
@@ -2079,6 +2136,7 @@ export function planDnd5eMapResultApplication(input: {
             knownCreatureLocations: combatant.classState.knownCreatureLocations,
             damageTraitReports: combatant.classState.damageTraitReports,
             planarPortalReports: combatant.classState.planarPortalReports,
+            sensoryDeceptionReports: combatant.classState.sensoryDeceptionReports,
             activityContinuations: combatant.classState.activityContinuations,
             wildShapeRequiresConcentration: combatant.classState.wildShapeRequiresConcentration,
             wildShapeRetainsHitPoints: combatant.classState.wildShapeRetainsHitPoints,
@@ -2136,6 +2194,7 @@ export function planDnd5eMapResultApplication(input: {
             monsterDamageAversionActive: combatant.classState.monsterDamageAversionActive,
             monsterDamageAversionSourceActorId: combatant.classState.monsterDamageAversionSourceActorId,
             monsterHydraHeadCount: combatant.classState.monsterHydraHeadCount,
+            monsterMultipart: combatant.classState.monsterMultipart,
             monsterHydraHeadsLostSinceLastTurn: combatant.classState.monsterHydraHeadsLostSinceLastTurn,
             monsterHydraDamageTurnKey: combatant.classState.monsterHydraDamageTurnKey,
             monsterHydraDamageTakenThisTurn: combatant.classState.monsterHydraDamageTakenThisTurn,
@@ -2363,6 +2422,7 @@ export function planDnd5eMapResultApplication(input: {
     }
     const hitDiceUnchanged = combatant.hitPointDice == null ||
       JSON.stringify(baselineCharacter.hitPointDice ?? []) === JSON.stringify(combatant.hitPointDice)
+    const inspirationUnchanged=combatant.inspiration===undefined||combatant.inspiration===baselineCharacter.inspiration
     const resourcesUnchanged = JSON.stringify(baselineCharacter.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
     const inventoryUnchanged = JSON.stringify(baselineCharacter.dnd5eInventory ?? {}) === JSON.stringify(inventoryCharacter.dnd5eInventory ?? {})
     const equipmentUnchanged = JSON.stringify(baselineCharacter.equipment ?? {}) === JSON.stringify(inventoryCharacter.equipment ?? {})
@@ -2378,6 +2438,7 @@ export function planDnd5eMapResultApplication(input: {
       (baselineCharacter.deathSaveFailures ?? 0) === combatant.deathSaves.failures &&
       (baselineCharacter.deathSaveStable ?? false) === combatant.deathSaves.stable &&
       (baselineCharacter.concentrating ?? false) === combatant.concentrating &&
+      inspirationUnchanged &&
       resourcesUnchanged &&
       hitDiceUnchanged &&
       inventoryUnchanged &&
@@ -2387,6 +2448,7 @@ export function planDnd5eMapResultApplication(input: {
       conditionsUnchanged
     ) return character
     const patch: Partial<Character> = {
+      ...(!inspirationUnchanged?{inspiration:combatant.inspiration}:{}),
       ...(!alignmentUnchanged ? { alignment: combatant.alignment } : {}),
       currentHp: nextCharacterCurrentHp,
       maxHp: nextCharacterMaxHp,
@@ -2518,6 +2580,7 @@ export function planDnd5eMapResultApplication(input: {
     }
     map = restoredGround
   }
+  map=expireDnd5eRelentlessThrownObjects(map,characters)
   const reactionIds = [...new Set((input.events ?? []).flatMap(event =>
     event.type === 'turn-resource-spent' && event.resource === 'reaction' &&
     input.state.combatants[event.actorId]?.turn.reactionAvailable === false && map.tokens.some(token => token.id === event.actorId)
@@ -2526,9 +2589,8 @@ export function planDnd5eMapResultApplication(input: {
   const interruptedTurnState = currentTurnActor?.classState.zeroHitPointExtraTurn?.phase === 'active' &&
     currentTurnActor.classState.zeroHitPointExtraTurn.slotId === input.state.initiativeSlotIds?.[input.state.initiativeIndex]
     ? structuredClone(input.state) : undefined
+  map = { ...map, dnd5eSkillCheckMovement: input.state.skillCheckMovement ? structuredClone(input.state.skillCheckMovement) : undefined }
+  for(const id of thrown.createdTokenIds){const token=map.tokens.find(t=>t.id===id);if(!token)continue;if(!changedTokenIds.includes(id))changedTokenIds.push(id);tokenPatches[id]={...token,...tokenPatches[id]}}
   return { map, characters, changedTokenIds, changedCharacterIds, tokenPatches, characterPatches, interruptedTurnState,
     ...(reactionIds.length ? { spentReactions: { round: input.state.round, tokenIds: reactionIds } } : {}) }
 }
-
-
-

@@ -1,3 +1,4 @@
+import{readDnd5eInitiativeBeginTurnSource}from'./initiativeOriginal'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
@@ -165,6 +166,8 @@ export function prepareDnd5eBeginTurn(
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
+  const initiativeSource=readDnd5eInitiativeBeginTurnSource(input)
+  if(initiativeSource)for(const[id,combatant]of Object.entries(snapshot.state.combatants)){const actual=initiativeSource.state.combatants[id];if(!actual)throw Error('initiative-original:actual-same-begin-roster-required');combatant.turn=structuredClone(actual.turn)}
   snapshot.state.initiativeIndex = input.initiativeIndex
   snapshot.state.turnSlotId = turnSlotId
   const actorCombatant = snapshot.state.combatants[actorToken.id]
@@ -367,6 +370,8 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
 } {
   const prepared = prepareDnd5eBeginTurn(input)
   if (!prepared.ok) return prepared
+  const provenanceInput = snapshotActualBeginTurnInput(input)
+  const provenancePrepared = snapshotActualBeginTurnData(prepared.prepared)
   const {
     actor,
     actorName,
@@ -397,8 +402,8 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     characterIdByCombatantId,
     events: [...result.events],
   })
-  return {
-    ok: true,
+  const actual = {
+    ok: true as const,
     actor,
     actorName,
     actorToken,
@@ -406,4 +411,32 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     airborneFalls,
     application,
   }
+  const proof={input:provenanceInput,prepared:provenancePrepared,actual,signature:JSON.stringify(actual)}
+  actualBeginTurnResults.set(actual,proof)
+  actualBeginTurnResults.set(result,proof)
+  return actual
+}
+
+type ActualBeginTurnInput=Parameters<typeof resolveDnd5eBeginTurn>[0]
+type ActualBeginTurnSuccess=Extract<ReturnType<typeof resolveDnd5eBeginTurn>,{ok:true}>
+const actualBeginTurnResults=new WeakMap<object,{input:ActualBeginTurnInput;prepared:PreparedDnd5eBeginTurn;actual:ActualBeginTurnSuccess;signature:string}>()
+function assertActualBeginTurnData(value:unknown,seen=new WeakSet<object>()){
+ if(!value||typeof value!=='object'||seen.has(value))return;seen.add(value)
+ for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))){if(descriptor.get||descriptor.set||typeof descriptor.value==='function')throw Error('begin-turn:actual-own-data-required');if('value'in descriptor)assertActualBeginTurnData(descriptor.value,seen)}
+ if(value instanceof Map)for(const[key,child]of value){assertActualBeginTurnData(key,seen);assertActualBeginTurnData(child,seen)}
+ if(value instanceof Set)for(const child of value)assertActualBeginTurnData(child,seen)
+}
+function snapshotActualBeginTurnData<T>(value:T):T{assertActualBeginTurnData(value);return JSON.parse(JSON.stringify(value))as T}
+function snapshotActualBeginTurnInput(input:ActualBeginTurnInput):ActualBeginTurnInput{
+ const keys=['worldMinute','turnEconomy','combatId','round','initiativeIndex','map','characters','initiativeOrder','savingThrowCounterattacks','turnStartActiveEffectSavingThrows','turnStartActiveEffectPeriodicDamageRolls','turnStartGazeResolutions','monsterRechargeRolls','monsterMechanicRolls','optionalBonusDice','airborneFallDamageRollsByCombatantId']as const
+ const own=Object.fromEntries(keys.flatMap(key=>{const descriptor=Object.getOwnPropertyDescriptor(input,key);if(!descriptor)return[];if(descriptor.get||descriptor.set)throw Error('begin-turn:actual-own-data-required');return[[key,descriptor.value]]}))
+ return snapshotActualBeginTurnData(own)as ActualBeginTurnInput
+}
+/** Mechanical provenance only. This reader grants no Room, controller, dice,
+ * continuation or world-publication permission and exposes no issuer. */
+export function readDnd5eActualBeginTurnResult(value:object){
+ const proof=actualBeginTurnResults.get(value);if(!proof)throw Error('begin-turn:actual-native-result-required')
+ assertActualBeginTurnData(proof.actual)
+ if(JSON.stringify(proof.actual)!==proof.signature)throw Error('begin-turn:actual-unchanged-native-result-required')
+ return{resolve:resolveDnd5eBeginTurn,input:snapshotActualBeginTurnData(proof.input),prepared:snapshotActualBeginTurnData(proof.prepared),result:snapshotActualBeginTurnData(proof.actual.result),signature:proof.signature}
 }

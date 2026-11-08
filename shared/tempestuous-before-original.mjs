@@ -1,0 +1,20 @@
+import{bountifulDamageZeroSourceFacts as inspectPreparedSourceData}from'./bountiful-damage-zero-original.mjs'
+const data=v=>!!v&&typeof v==='object'&&!Array.isArray(v),closed=(v,keys)=>data(v)&&Object.keys(v).every(k=>keys.includes(k)),text=v=>typeof v==='string'&&v.length>0&&v.length<=2000
+/** Canonical data inspection only; this issues no native or raw authority. */
+function readWire(wire){
+ if(!closed(wire,['schemaVersion','root','nodes'])||wire.schemaVersion!==1||!Array.isArray(wire.nodes)||wire.nodes.length>100000)throw Error('wire')
+ const read=(value,seen=new Set(),depth=0)=>{if(depth>100)throw Error('depth');if(value===null||['string','boolean'].includes(typeof value)||typeof value==='number'&&Number.isFinite(value))return value;if(closed(value,['undefined'])&&value.undefined===true)return undefined;if(!closed(value,['ref'])||!Number.isSafeInteger(value.ref)||value.ref<0||value.ref>=wire.nodes.length||seen.has(value.ref))throw Error('ref');const next=new Set(seen);next.add(value.ref);const node=wire.nodes[value.ref];if(node?.kind==='array'&&Array.isArray(node.items))return node.items.map(item=>read(item,next,depth+1));if(node?.kind!=='object'||!Array.isArray(node.entries)||new Set(node.entries.map(row=>row?.[0])).size!==node.entries.length||node.entries.some(row=>!Array.isArray(row)||row.length!==2||typeof row[0]!=='string'||['__proto__','prototype','constructor'].includes(row[0])))throw Error('object');return Object.fromEntries(node.entries.map(([key,item])=>[key,read(item,next,depth+1)]))};return read(wire.root)
+}
+export function tempestuousBeforeOriginalSourceFacts(wire){try{
+ const value=readWire(wire),keys=['prepared','effectRolls','opportunityAttackSpell','transactionId'];if(!closed(value,keys)||!value.prepared||!Array.isArray(value.effectRolls)||value.effectRolls.some(n=>!Number.isInteger(n)||n<1||n>100)||value.opportunityAttackSpell!==undefined&&typeof value.opportunityAttackSpell!=='boolean'||value.transactionId!==undefined&&!text(value.transactionId))return null
+ const facts=inspectPreparedSourceData(wire),p=value.prepared;if(facts?.action?.type!=='dnd5e-spell-cast'||!facts.action.dnd5eSpellCast||!Number.isInteger(p.spell?.level)||p.spell.level<1)return null
+ return{...facts,preparedSignature:JSON.stringify(p),actorState:p.state?.combatants?.[p.actorToken?.id],spellLevel:p.spell?.level,transactionId:value.transactionId}
+}catch{return null}}
+export function tempestuousBeforeRecoveryFacts(wire){try{
+ const value=readWire(wire),allowedInput=['action','characters','effectiveRules','geometry','initiativeOrder','map','turnEconomy','turnEconomyByToken','worldMinute','dispelEffectTargetId','coverAttackRedirectPreview'];if(!closed(value,['schemaVersion','input','preparedSignature','features'])||value.schemaVersion!==1||!closed(value.input,allowedInput)||typeof value.preparedSignature!=='string'||!Array.isArray(value.features)||!value.features.length||new Set(value.features.map(f=>f?.featureId)).size!==value.features.length||value.features.some(f=>!closed(f,['featureId','definition'])||!text(f.featureId)||typeof f.definition!=='string'))return null
+ return value
+}catch{return null}}
+export function validTempestuousBeforeOriginalFrame(frame){
+ if(!closed(frame,['id','parentId','ordinal','actorId','spellId','slotLevel','timing','origin','maximumFeet','options'])||!['id','parentId','actorId','spellId'].every(k=>text(frame[k]))||!Number.isSafeInteger(frame.ordinal)||frame.ordinal<0||!Number.isSafeInteger(frame.slotLevel)||frame.slotLevel<1||frame.slotLevel>9||frame.timing!=='before'||frame.maximumFeet!==10||!closed(frame.origin,['x','y','elevationFeet'])||!['x','y','elevationFeet'].every(k=>Number.isFinite(frame.origin[k]))||!Array.isArray(frame.options)||!frame.options.length||new Set(frame.options.map(o=>o?.featureId)).size!==frame.options.length||frame.options.some(o=>!closed(o,['featureId'])||!text(o.featureId)))return false
+ return frame.id===JSON.stringify(['tempestuous-before-offer',frame.parentId,frame.ordinal,frame.actorId,frame.spellId,frame.slotLevel])
+}

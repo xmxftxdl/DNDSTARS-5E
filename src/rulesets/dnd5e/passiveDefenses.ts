@@ -43,6 +43,7 @@ export interface Dnd5eDefensiveCreature {
   pluginFeatureIds?: readonly string[]
   countercharmSourceIds?: readonly string[]
   classState: {
+    monsterMultipart?: import('./multipartCreature').MultipartCreatureState
     activeEffects?: readonly Dnd5eActiveEffectInstance[]
     hiddenCheckTotal?: number
     dodgingTurnKey?: string
@@ -322,6 +323,9 @@ export function dnd5eSavingThrowModeExplanation(
         dnd5eStandardConditionId(condition) === dnd5eStandardConditionId(context.condition!) &&
         dnd5eStandardConditionId(condition) != null) === true, reason: 'feature-condition-save-advantage' },
       { active: sourceQualifiedConditionSaveAdvantage, reason: 'source-qualified-condition-save-advantage' },
+      { active: ['int', 'wis', 'cha'].includes(ability) &&
+          (creature.classState.monsterMultipart?.heads.filter(head => head.alive).length ?? 0) >= 2,
+        reason: 'false-hydra-multiple-heads' },
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: antitoxin, reason: 'antitoxin' },
       { active: dodgeDexterity, reason: 'dodge' },
@@ -342,6 +346,7 @@ export function dnd5eSavingThrowModeExplanation(
       },
     ],
     disadvantage: [
+      { active: context.sourceIsSpell === true && context.sourceActorId != null && effectiveDnd5eActiveEffects(creature.classState.activeEffects).some(effect=>effect.modifiers?.spellSavingThrowDisadvantageFromActorIds?.includes(context.sourceActorId!) === true), reason: 'chosen-target-caster-spell-save-disadvantage' },
       { active: context.sourceIsSpell === true && context.sourceActorId != null &&
           effectiveDnd5eActiveEffects(creature.classState.activeEffects).some(effect =>
             effect.source.actorId === context.sourceActorId && !!effect.sourceTurnSpellSaveDisadvantage?.activeTurnKey),

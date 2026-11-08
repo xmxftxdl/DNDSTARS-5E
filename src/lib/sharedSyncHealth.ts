@@ -25,6 +25,17 @@ let health: SharedSyncHealth = {
 }
 
 const listeners = new Set<() => void>()
+const failedReads = new Set<string>()
+
+export function recordSharedReadFailure(resource: string): void {
+  failedReads.add(resource)
+  update({ status: 'recovering', lastMessage: '部分战役数据暂时无法同步，正在自动重试。请等待恢复后继续操作。' })
+}
+
+export function recordSharedReadSuccess(resource: string): void {
+  failedReads.delete(resource)
+  settleSharedRecovery()
+}
 
 function update(patch: Partial<SharedSyncHealth>): void {
   health = { ...health, ...patch }
@@ -49,9 +60,9 @@ export function recordSharedRevision(resource: string, revision: number): void {
 
 export function recordSharedWrite(resource: string, revision: number): void {
   update({
-    status: 'healthy',
+    status: failedReads.size ? 'recovering' : 'healthy',
     lastSuccessfulWriteAt: Date.now(),
-    lastMessage: `「${resource}」已同步到版本 ${revision}`,
+    lastMessage: failedReads.size ? health.lastMessage : `「${resource}」已同步到版本 ${revision}`,
     resourceRevisions: { ...health.resourceRevisions, [resource]: revision },
   })
 }
@@ -86,16 +97,17 @@ export function recordDuplicateSharedEvent(): void {
 }
 
 export function settleSharedRecovery(): void {
-  if (health.status !== 'recovering') return
+  if (health.status !== 'recovering' || failedReads.size) return
   update({ status: 'healthy', lastMessage: '共享状态重新读取完成' })
 }
 
 export function acknowledgeSharedConflict(): void {
   if (health.status !== 'conflict') return
-  update({ status: 'healthy', lastMessage: '已采用服务器权威版本' })
+  update({ status: failedReads.size ? 'recovering' : 'healthy', lastMessage: failedReads.size ? '部分战役数据仍在重试同步。' : '已采用服务器权威版本' })
 }
 
 export function resetSharedSyncHealthForTests(): void {
+  failedReads.clear()
   health = {
     status: 'healthy',
     conflictsPrevented: 0,

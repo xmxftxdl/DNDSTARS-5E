@@ -1,0 +1,11 @@
+import fs from'node:fs'
+import path from'node:path'
+import ts from'typescript'
+import{it,expect}from'vitest'
+import actualPage from'../../pages/MapsWorkspacePage?raw'
+const before=fs.readFileSync(path.resolve('.codex-temp/xge-next-feature/root-merge-preparation/r61-all-private-r351/view/src/pages/MapsWorkspacePage.tsx'),'utf8')
+function services(source:string){const file=ts.createSourceFile('Page.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),found:ts.ObjectLiteralExpression[]=[];function visit(n:ts.Node){if(ts.isCallExpression(n)&&n.expression.getText(file)==='collectMastermindSpellWardPage'&&n.arguments[1]&&ts.isObjectLiteralExpression(n.arguments[1]))found.push(n.arguments[1]);ts.forEachChild(n,visit)}visit(file);expect(found).toHaveLength(1);return{file,node:found[0],property:(name:string)=>found[0].properties.find(p=>ts.isPropertyAssignment(p)&&p.name.getText(file)===name)as ts.PropertyAssignment|undefined}}
+it('actual Page forwards the own choice lazily and preserves the original Ward physical and wait callbacks',async()=>{
+ const old=services(before),next=services(actualPage);expect(old.property('ownChoice')).toBeUndefined();const property=next.property('ownChoice');expect(property&&ts.isArrowFunction(property.initializer)).toBe(true);if(!property||!ts.isArrowFunction(property.initializer))throw Error('Actual lazy Own callback required');expect(property.initializer.parameters).toHaveLength(1);expect(property.initializer.body.getText(next.file)).toBe('requestSharedChoiceWindow(request)');expect(next.property('physical')?.initializer.getText(next.file)).toBe(old.property('physical')?.initializer.getText(old.file));expect(next.property('wait')?.initializer.getText(next.file)).toBe(old.property('wait')?.initializer.getText(old.file));expect(next.property('allowGeneralRetarget')?.initializer.getText(next.file)).toBe('true')
+ let called=0;const request={id:'actual-current-choice',context:{wardOwnBinding:{parentId:'same-original-parent'}}},result=Object.freeze({presentationOnly:true}),callback=new Function('requestSharedChoiceWindow','return ('+property.initializer.getText(next.file)+')')(async(input:unknown)=>{called++;expect(input).toBe(request);return result})as(input:unknown)=>Promise<unknown>;expect(called).toBe(0);expect(await callback(request)).toBe(result);expect(called).toBe(1)
+})

@@ -1,0 +1,54 @@
+import { dnd5eActiveEmittedLight } from './activeEffects';
+import { flamesOfPhlegethosContentJson } from './flamesOfPhlegethos.testFixture';
+import { it, expect } from 'vitest';
+import { prepareDnd5eLocalContentJson } from './localContentCollection';
+import { dnd5eRulesPluginFromContentPackageV2 } from './contentPackageV2';
+import { registerDnd5eRulesPlugin } from './pluginApi';
+import { createDnd5eCombatant, startDnd5eHeadlessCombat, resolveDnd5eHeadlessAction, dnd5eCombatantPairKey } from './headlessCombatEngine';
+import { collectDnd5eSpellDamageDieRerolls } from './spellDamageDieRerolls';
+import { settleDnd5eConcentrationChecks } from '../../pages/maps/settleDnd5eCombatResult';
+import { settleDnd5eActivityTriggerWindowsV1 } from './activities/dnd5eActivityTriggerSettlement';
+import { normalizeCharacter } from '../../store/characters';
+import type { BattleMap } from '../../store/maps';
+it.each([1, 10])('collects own Hellish Rebuke fire reroll after an actual damage parent, retaining native reaction and slot cost: %s', async (reroll) => { const { package: pkg } = await prepareDnd5eLocalContentJson(flamesOfPhlegethosContentJson()); const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(pkg)); try {
+    const make = (id: string, initiative: number) => createDnd5eCombatant({ id, name: id, controller: id === 'warlock' ? 'player' : 'dm', initiative, abilities: { str: 16, dex: 10, con: 14, int: 10, wis: 10, cha: 18 }, proficiencyBonus: 3, armorClass: 12, currentHp: 50, maxHp: 50, temporaryHp: 0, speed: 30, position: { x: 0, y: 0 }, concentrating: false });
+    const caster = make('warlock', 10), attacker = make('attacker', 20);
+    caster.classId = 'warlock';
+    caster.level = 5;
+    caster.classLevels = { warlock: 5 };
+    caster.classSelections = { 'spell-known': ['hellish-rebuke'] };
+    caster.classResources = { 'dnd5e-pact-slot': { current: 1, max: 2 } };
+    caster.pluginFeatureIds = [pkg.manifest.id + ':feat-flames-of-phlegethos'];
+    const state = startDnd5eHeadlessCombat('hellish-parent', [attacker, caster]);
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey(caster.id, attacker.id)]: 5 };
+    const hit = resolveDnd5eHeadlessAction(state, { type: 'attack', actorId: attacker.id, targetId: caster.id, attackModifier: 5, d20: 18, damage: { count: 1, sides: 6, bonus: 0, rolls: [4], type: 'slashing' } });
+    expect(hit.ok).toBe(true);
+    if (!hit.ok)
+        throw Error(hit.reason);
+    const character = normalizeCharacter({ id: 'warlock-character', name: 'Warlock', race: '提夫林', dnd5eRaceId: 'tiefling', charClass: '邪术师', level: 5, currentHp: 50, maxHp: 50, abilities: caster.abilities, dnd5eFeatIds: [pkg.manifest.id + ':flames-of-phlegethos'], dnd5eClassChoices: { classes: { warlock: { selections: { 'spell-known': ['hellish-rebuke'] } } } }, classResources: { 'dnd5e-pact-slot': { current: 1, max: 2 } } });
+    const map: BattleMap = { id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [{ id: 'warlock', characterId: character.id, type: 'player', label: 'Warlock', x: 25, y: 25, color: '', emoji: '', size: 1, hp: 50, maxHp: 50 }, { id: 'attacker', type: 'enemy', label: 'Attacker', x: 75, y: 25, color: '', emoji: '', size: 1, hp: 50, maxHp: 50 }] };
+    const rolled: string[] = [];
+    const settled = await settleDnd5eConcentrationChecks({ result: hit, priorState: state, map, characters: [character], characterIdByCombatantId: { warlock: character.id }, rollD20: async () => 1, rollD4: async () => 1, rollDice: async (count, sides) => { expect([count, sides]).toEqual([4, 10]); return [1, 2, 3, 4]; }, requestHellishRebuke: async () => true, chooseSpellDamageDice: async (request) => { rolled.push(request.actor.id); return collectDnd5eSpellDamageDieRerolls({ actor: request.actor, groups: [request.group], choose: async () => true, roll: async () => reroll }); } });
+    expect(rolled).toEqual(['warlock']);
+    expect(settled.result.state.combatants.warlock.currentHp).toBe(46);
+    expect(settled.result.state.combatants.attacker.currentHp).toBe(50 - reroll - 9);
+    expect(settled.result.state.combatants.warlock.turn.reactionAvailable).toBe(false);
+    expect(settled.result.state.combatants.warlock.classResources['dnd5e-pact-slot'].current).toBe(0);
+    expect(settled.result.events).toContainEqual(expect.objectContaining({ type: 'spell-damage-dice-rerolled', originalValues: [1, 2, 3, 4], values: [reroll, 2, 3, 4] }));
+    const prompts: string[] = [];
+    const armed = await settleDnd5eActivityTriggerWindowsV1({ state: settled.result.state, events: settled.result.events, eventBatchId: 'hellish-flames', combatRevision: 1, confirm: async (r) => { prompts.push(r.activity.id); return true; }, roll: async () => { throw Error('no ignition dice'); } });
+    expect(prompts).toEqual(['flames-ring']);
+    expect(armed.state.combatants.warlock.turn.reactionAvailable).toBe(false);
+    expect(dnd5eActiveEmittedLight(armed.state.combatants.warlock.classState.activeEffects)).toBeDefined();
+    const enemyEnd = resolveDnd5eHeadlessAction(armed.state,{type:'end-turn',actorId:'attacker'});
+    expect(enemyEnd.ok).toBe(true);
+    if(!enemyEnd.ok)throw Error(enemyEnd.reason);
+    expect(dnd5eActiveEmittedLight(enemyEnd.state.combatants.warlock.classState.activeEffects)).toBeDefined();
+    const nextOwnEnd = resolveDnd5eHeadlessAction(enemyEnd.state,{type:'end-turn',actorId:'warlock'});
+    expect(nextOwnEnd.ok).toBe(true);
+    if(!nextOwnEnd.ok)throw Error(nextOwnEnd.reason);
+    expect(dnd5eActiveEmittedLight(nextOwnEnd.state.combatants.warlock.classState.activeEffects)).toBeUndefined();
+}
+finally {
+    dispose();
+} });

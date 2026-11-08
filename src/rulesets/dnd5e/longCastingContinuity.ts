@@ -199,3 +199,63 @@ export function observeDnd5eLongCasting(receipt: Dnd5eLongCastingReceipt | undef
   if (!stored.valid && stored.started) activeSignatures.delete(stored.signature)
   return stored.valid
 }
+
+/** A completed stage recorded inside a controller-private immutable parent
+ * receipt. It is data, not a player command or a transferable casting licence. */
+export interface Dnd5eCompletedLongCastingWitness{
+ schemaVersion:1
+ binding:Dnd5eLongCastingBinding
+ requiredSeconds:number
+ observedCombatId:string
+ observedRound:number
+ combat:Readonly<CombatCastingProgress>
+}
+/** Only an actually issued, still valid and fully completed live receipt can
+ * produce this witness. No elapsed round or action may be inferred from time. */
+export function captureDnd5eCompletedLongCastingWitness(receipt:Dnd5eLongCastingReceipt|undefined,binding:Dnd5eLongCastingBinding,state:Dnd5eHeadlessCombatState,requiredSeconds:number):Dnd5eCompletedLongCastingWitness|undefined{
+ const stored=receipt&&receipts.get(receipt)
+ if(!stored?.combat||stored.requiredSeconds!==requiredSeconds||!Number.isSafeInteger(requiredSeconds)||requiredSeconds<1||!dnd5eLongCastingCanComplete(receipt,binding,state))return undefined
+ return{schemaVersion:1,binding:structuredClone(binding),requiredSeconds,observedCombatId:state.combatId,observedRound:state.round,combat:structuredClone(stored.combat)}
+}
+/** Host-only replay issuer. The caller must first authenticate and validate the
+ * controller-private original-parent receipt containing this witness. Its data
+ * must never be accepted from player JSON or used to resume an incomplete cast.
+ * This restores the completed stage; it neither spends nor invents past actions. */
+export function restoreDnd5eCompletedLongCastingWitness(witness:Dnd5eCompletedLongCastingWitness,binding:Dnd5eLongCastingBinding,state:Dnd5eHeadlessCombatState,requiredSeconds:number):Dnd5eLongCastingReceipt|undefined{
+ if(!witness||Object.keys(witness).some(key=>!['schemaVersion','binding','requiredSeconds','observedCombatId','observedRound','combat'].includes(key))||witness.schemaVersion!==1||signature(witness.binding)!==signature(binding)||!Number.isSafeInteger(requiredSeconds)||requiredSeconds<1||witness.requiredSeconds!==requiredSeconds||witness.observedCombatId!==state.combatId||witness.observedRound!==state.round)return undefined
+ const combat=witness.combat,actor=state.combatants[binding.actorTokenId]
+ if(!combat||Object.keys(combat).some(key=>!['combatId','requiredRounds','startRound','paidRounds','lastRound'].includes(key))||!state.active||combat.combatId!==state.combatId||!capable(actor,binding)||!actor.concentrating||actor.classState.concentrationSpellId!==dnd5eLongCastingConcentrationId(binding)||[combat.requiredRounds,combat.paidRounds,combat.lastRound,combat.startRound].some(value=>!Number.isSafeInteger(value))||combat.requiredRounds<0||combat.requiredRounds>Math.ceil(requiredSeconds/6)||combat.paidRounds!==combat.requiredRounds||combat.startRound<1||combat.lastRound!==combat.startRound+combat.requiredRounds-1)return undefined
+ if(combat.requiredRounds>0&&(combat.lastRound!==state.round||!castingTurn(state,binding,combat)||actor.turn.actionAvailable))return undefined
+ const receipt=registerDnd5eHostReceipt(Object.freeze({}))as Dnd5eLongCastingReceipt
+ receipts.set(receipt,{signature:signature(binding),valid:true,started:true,requiredSeconds,combat:{...combat}})
+ activeSignatures.add(signature(binding))
+ return dnd5eLongCastingCanComplete(receipt,binding,state)?receipt:undefined
+}
+
+/** Completed exploration progress from an actually armed private receipt.
+ * This never authorizes unfinished casting or infers progress from a new clock. */
+export interface Dnd5eCompletedExplorationCastingWitness{
+ schemaVersion:1;binding:Dnd5eLongCastingBinding;requiredSeconds:number;
+ observedScopeId:string;observedWorldMinute:number;startedAtWorldMinute:number;
+ exploration:Readonly<{remainingSeconds:number;readyAtWorldMinute:number}>
+}
+function completedExplorationBindingClosed(value:Dnd5eLongCastingBinding):boolean{
+ const allowed=['requestId','spellId','mapId','actorTokenId','actorCharacterId']
+ return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).every(key=>allowed.includes(key))&&allowed.every(key=>{const text=(value as unknown as Record<string,unknown>)[key];return typeof text==='string'&&text.length>0&&text.length<=640&&text.trim()===text})
+}
+export function captureDnd5eCompletedExplorationCastingWitness(receipt:Dnd5eLongCastingReceipt|undefined,binding:Dnd5eLongCastingBinding,state:Dnd5eHeadlessCombatState,requiredSeconds:number):Dnd5eCompletedExplorationCastingWitness|undefined{
+ const stored=receipt&&receipts.get(receipt),actor=state.combatants[binding.actorTokenId]
+ if(!stored?.exploration||stored.explorationStartedAtWorldMinute===undefined||stored.requiredSeconds!==requiredSeconds||!Number.isSafeInteger(requiredSeconds)||requiredSeconds<1||!dnd5eLongCastingCanComplete(receipt,binding,state))return undefined
+ return{schemaVersion:1,binding:structuredClone(binding),requiredSeconds,observedScopeId:state.combatId,observedWorldMinute:actor.campaignWorldMinute!,startedAtWorldMinute:stored.explorationStartedAtWorldMinute,exploration:{...stored.exploration}}
+}
+/** Host-only completed-stage issuer. The caller authenticates the immutable
+ * private parent containing the captured witness before invoking this API. */
+export function restoreDnd5eCompletedExplorationCastingWitness(witness:Dnd5eCompletedExplorationCastingWitness,binding:Dnd5eLongCastingBinding,state:Dnd5eHeadlessCombatState,requiredSeconds:number):Dnd5eLongCastingReceipt|undefined{
+ if(!witness||Object.keys(witness).some(key=>!['schemaVersion','binding','requiredSeconds','observedScopeId','observedWorldMinute','startedAtWorldMinute','exploration'].includes(key))||witness.schemaVersion!==1||!completedExplorationBindingClosed(witness.binding)||!completedExplorationBindingClosed(binding)||signature(witness.binding)!==signature(binding)||witness.requiredSeconds!==requiredSeconds||!Number.isSafeInteger(requiredSeconds)||requiredSeconds<1||state.active||witness.observedScopeId!==state.combatId)return undefined
+ const progress=witness.exploration,actor=state.combatants[binding.actorTokenId]
+ if(!progress||Object.keys(progress).some(key=>!['remainingSeconds','readyAtWorldMinute'].includes(key))||[witness.observedWorldMinute,witness.startedAtWorldMinute,progress.remainingSeconds,progress.readyAtWorldMinute].some(value=>!Number.isSafeInteger(value)||value<0)||progress.remainingSeconds>requiredSeconds||progress.readyAtWorldMinute!==witness.startedAtWorldMinute+Math.ceil(progress.remainingSeconds/60)||witness.observedWorldMinute<progress.readyAtWorldMinute||actor?.campaignWorldMinute!==witness.observedWorldMinute||!capable(actor,binding)||!actor.concentrating||actor.classState.concentrationSpellId!==dnd5eLongCastingConcentrationId(binding))return undefined
+ const receipt=registerDnd5eHostReceipt(Object.freeze({}))as Dnd5eLongCastingReceipt
+ receipts.set(receipt,{signature:signature(binding),valid:true,started:true,requiredSeconds,exploration:{...progress},explorationStartedAtWorldMinute:witness.startedAtWorldMinute})
+ activeSignatures.add(signature(binding))
+ return dnd5eLongCastingCanComplete(receipt,binding,state)?receipt:undefined
+}

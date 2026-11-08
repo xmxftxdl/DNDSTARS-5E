@@ -1,0 +1,9 @@
+import{dnd5eCombatantCoverRedirectFeatureIds}from'./headlessCombatEngine'
+import ts from'typescript'
+import pageText from'../../pages/MapsWorkspacePage.tsx?raw'
+import{readBountifulDamageZeroEquipmentUi}from'./bountifulDamageZeroEquipmentUi'
+import{dnd5ePreparedEquipmentAttackMode,dnd5ePreparedEquipmentAttackMagicWeaponBonus,previewDnd5eEquipmentAttack,type resolvePreparedDnd5eEquipmentAttack}from'./equipmentAttackAction'
+import type{SharedPlayerActionState}from'../../lib/sharedCombatTypes'
+type Source=Parameters<typeof resolvePreparedDnd5eEquipmentAttack>[0]
+/** Executes the actual Page closure. No fallback reader, pool or native authority is supplied. */
+export function createActualPageZeroRestorer(action:SharedPlayerActionState){const ast=ts.createSourceFile('MapsWorkspacePage.tsx',pageText,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let initializer:ts.Expression|undefined;function visit(n:ts.Node){if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.name.text==='restoreEquipmentZeroInputs')initializer=n.initializer;ts.forEachChild(n,visit)}visit(ast);if(!initializer)throw Error('Actual new Page zero-input restorer required');const js=ts.transpileModule('const actualRestore='+initializer.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;return new Function('readBountifulDamageZeroEquipmentUi','dnd5ePreparedEquipmentAttackMode','dnd5ePreparedEquipmentAttackMagicWeaponBonus','previewDnd5eEquipmentAttack','dnd5eCombatantCoverRedirectFeatureIds','action',js+';return actualRestore;')(readBountifulDamageZeroEquipmentUi,dnd5ePreparedEquipmentAttackMode,dnd5ePreparedEquipmentAttackMagicWeaponBonus,previewDnd5eEquipmentAttack,dnd5eCombatantCoverRedirectFeatureIds,action)as(source:Source)=>Promise<Record<string,any>>}

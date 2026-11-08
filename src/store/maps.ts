@@ -1,3 +1,5 @@
+import { normalizeDnd5eIllOmenHoundTarget } from '../rulesets/dnd5e/illOmenHound'
+import { normalizeDnd5eSkillCheckMovement } from '../rulesets/dnd5e/contextualSkillChecks'
 import {normalizeDnd5ePendingMovementCompletions} from '../rulesets/dnd5e/pendingMovementCompletion'
 import { transferDnd5eFollowingSensors } from '../rulesets/dnd5e/sensorTargetTransfer'
 import { normalizeDnd5ePersistentAreaGroundCover } from '../rulesets/dnd5e/persistentAreaGroundCover'
@@ -516,7 +518,7 @@ export async function saveMapsStateWithPendingHitPointRetry(input: {
   return { result, payload }
 }
 
-function applyTokenPatchToSharedMaps(
+export function applyTokenPatchToSharedMaps(
   maps: BattleMap[],
   mapId: string,
   tokenId: string,
@@ -765,6 +767,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
       dnd5ePendingMovementCompletions: sharedMap.dnd5ePendingMovementCompletions,
       dnd5eObjectFlightDepartures: sharedMap.dnd5eObjectFlightDepartures,
       dnd5eActivityTurnClock: sharedMap.dnd5eActivityTurnClock,
+      dnd5eSkillCheckMovement: sharedMap.dnd5eSkillCheckMovement,
       tokens: [
         ...map.tokens.flatMap((token) => {
         const sharedToken = sharedTokenById.get(token.id)
@@ -888,6 +891,8 @@ export interface EnemyPlacementOptions {
 }
 
 export interface Token {
+  /** Runtime-only geometry projection; never a separate creature. */
+  multipartProjection?: boolean
   id: string
   dnd5eGroveRooting?: 'pending' | 'rooted' | 'unrooted'
   /** Player display/selection hint; never sufficient for Host command authority. */
@@ -966,6 +971,7 @@ export interface Token {
   dnd5eBehaviorPreference?: Dnd5eMonsterBehaviorPreferenceV1
   /** 由声明式 Headless 事务创建的召唤物；Token 仍由 DM 操作，side 只表示战斗阵营。 */
   dnd5eSummon?: {
+    illOmenTarget?: import('../rulesets/dnd5e/illOmenHound').Dnd5eIllOmenHoundTarget
     schemaVersion: 1
     /** Host-recorded spell provenance; independent of concentration and control. */
     sourceSpellId?: string
@@ -1011,7 +1017,7 @@ export interface Token {
     attacksPerAction?: number
     shareSelfSpellsRangeFeet?: number
   shareSelfSpellsRequiresMounted?: boolean
-  creatureTypeOverride?: 'celestial' | 'fey' | 'fiend'
+  creatureTypeOverride?: 'celestial' | 'fey' | 'fiend' | 'monstrosity'
   minimumIntelligence?: number
     cannotAttack?: true
     walkingSpeedFeet?: number
@@ -1178,6 +1184,8 @@ export interface Token {
     deathRound?: number
     deathInitiativeIndex?: number
     /** Host-confirmed cause used by resurrection magic that excludes death from old age. */
+    falseHydraConsumedBy?: string
+    deathWorldMinute?: number
     deathCause?: 'other' | 'old-age'
     /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
     soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
@@ -1222,6 +1230,7 @@ export interface Token {
     zeroHitPointExtraTurn?: {featureId: string; slotId: string; phase: 'pending' | 'active'}
     interruptedTurnResume?: import('../rulesets/dnd5e/interruptedTurn').Dnd5eInterruptedTurnResume
     movementStoppedTurnKey?: string
+    sceneReactionSpent?:{schemaVersion:1;roomId:string;parentTransactionId:string}
     normalReactionSpentThisTurn?: boolean
     specialOpportunityReactionUsed?: boolean
     reactionAvailableBeforeSpecial?: boolean
@@ -1244,6 +1253,8 @@ export interface Token {
     openHandNoReactionsAppliedTurnKeysBySource?: Record<string, string>
     quiveringPalmTargetId?: string
     tranquilityActive?: boolean
+    /** Native source-qualified uses keyed by [feature id, original cast parent]. */
+    spellDamageSelectedAbilityBonusUses?: Record<string,true>
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
     activityTriggerReceipts?: { combatId: string; ids: string[] }
@@ -1252,6 +1263,7 @@ export interface Token {
     knownCreatureLocations?: Record<string, import('../rulesets/dnd5e/knownCreatureLocations').Dnd5eKnownCreatureLocation>
     damageTraitReports?: Record<string, import('../rulesets/dnd5e/damageTraitReport').Dnd5eDamageTraitReceipt>
     planarPortalReports?: Record<string, import('../rulesets/dnd5e/planarPortalReport').Dnd5ePlanarPortalReceipt>
+    sensoryDeceptionReports?: Record<string, import('../rulesets/dnd5e/sensoryDeceptionReport').Dnd5eSensoryDeceptionReceipt>
     activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
     declarativeAttackRetargetImmunityFeatureIds?: string[]
     declarativeWardPools?: Record<string, { current: number; max: number }>
@@ -1391,6 +1403,7 @@ export interface Token {
     monsterDamageAversionActive?: boolean
     monsterDamageAversionSourceActorId?: string
     monsterHydraHeadCount?: number
+    monsterMultipart?: import('../rulesets/dnd5e/multipartCreature').MultipartCreatureState
     monsterHydraHeadsLostSinceLastTurn?: number
     monsterHydraDamageTurnKey?: string
     monsterHydraDamageTakenThisTurn?: number
@@ -1485,6 +1498,9 @@ type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
 }
 
 export interface BattleMap {
+  /** Host distance accounting for skill checks; reset by the global combat turn key. */
+  dnd5eSkillCheckMovement?: { turnKey: string; distanceByActor: Record<string, number> }
+
   dnd5ePendingMovementCompletions?: import('../rulesets/dnd5e/pendingMovementCompletion').Dnd5ePendingMovementCompletion[]
   /** DM-authored plane identity used for cross-map rules. Undefined is unknown. */
   dnd5ePlane?: string
@@ -1872,7 +1888,8 @@ function normalizeToken(raw: unknown): Token {
     (rawSummon.naturalWeaponAttacksMagical == null || rawSummon.naturalWeaponAttacksMagical === true) &&
     (rawSummon.weaponAttacksMagical == null || rawSummon.weaponAttacksMagical === true) &&
     (rawSummon.attacksPerAction == null || (Number.isInteger(rawSummon.attacksPerAction) && Number(rawSummon.attacksPerAction) >= 1 && Number(rawSummon.attacksPerAction) <= 10)) &&
-    (rawSummon.creatureTypeOverride == null || ['celestial','fey','fiend'].includes(rawSummon.creatureTypeOverride)) &&
+    (rawSummon.creatureTypeOverride == null || ['celestial','fey','fiend','monstrosity'].includes(rawSummon.creatureTypeOverride)) &&
+    (rawSummon.illOmenTarget == null || normalizeDnd5eIllOmenHoundTarget(rawSummon.illOmenTarget)!=null) &&
     (rawSummon.minimumIntelligence == null || (Number.isInteger(rawSummon.minimumIntelligence) && rawSummon.minimumIntelligence >= 1 && rawSummon.minimumIntelligence <= 30)) &&
     (rawSummon.shareSelfSpellsRequiresMounted == null || (typeof rawSummon.shareSelfSpellsRequiresMounted === 'boolean' && rawSummon.shareSelfSpellsRangeFeet != null)) &&
     (rawSummon.shareSelfSpellsRangeFeet == null || (Number.isInteger(rawSummon.shareSelfSpellsRangeFeet) && Number(rawSummon.shareSelfSpellsRangeFeet) >= 5 && Number(rawSummon.shareSelfSpellsRangeFeet) <= 10_000)) &&
@@ -1925,6 +1942,7 @@ function normalizeToken(raw: unknown): Token {
         shareSelfSpellsRangeFeet: rawSummon.shareSelfSpellsRangeFeet,
       shareSelfSpellsRequiresMounted: rawSummon.shareSelfSpellsRequiresMounted,
       creatureTypeOverride: rawSummon.creatureTypeOverride,
+      illOmenTarget: normalizeDnd5eIllOmenHoundTarget(rawSummon.illOmenTarget),
       minimumIntelligence: rawSummon.minimumIntelligence,
         cannotAttack: rawSummon.cannotAttack === true ? true as const : undefined,
         walkingSpeedFeet: rawSummon.walkingSpeedFeet,
@@ -2792,6 +2810,7 @@ function normalizeMap(raw: unknown): BattleMap {
     dnd5ePendingMovementCompletions: normalizeDnd5ePendingMovementCompletions(m.dnd5ePendingMovementCompletions),
     dnd5eObjectFlightDepartures: normalizeDnd5eObjectFlightDepartures(m.dnd5eObjectFlightDepartures),
     dnd5eActivityTurnClock: normalizeDnd5eActivityTurnClock(m.dnd5eActivityTurnClock),
+    dnd5eSkillCheckMovement: normalizeDnd5eSkillCheckMovement(m.dnd5eSkillCheckMovement),
     dnd5eGroveDispelTargets: normalizeDnd5eGroveDispelTargets(m.dnd5eGroveDispelTargets),
     viewportNotes: normalizeMapViewportNotes(m.viewportNotes),
     tokens,
@@ -3026,7 +3045,7 @@ interface MapState {
   }) => Promise<string>
   updateMap: (id: string, patch: Partial<BattleMap>) => void
   removeMap: (id: string) => void
-  addToken: (mapId: string, type: Token['type']) => void
+  addToken: (mapId: string, type: Token['type'], details?: { label: string; portraitImageId?: string; tokenPortraitImageId?: string }) => string | null
   addEnemyFromPool: (mapId: string, template: EnemyTemplate, options?: EnemyPlacementOptions) => string | null
   addEncounterFromPool: (
     mapId: string,
@@ -3257,9 +3276,9 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get())
       },
 
-      addToken: (mapId, type) => {
+      addToken: (mapId, type, details) => {
         const map = get().maps.find((m) => m.id === mapId)
-        if (!map) return
+        if (!map) return null
         const preset = TOKEN_PRESETS[type]
         const defaultHp = type === 'enemy' ? 20 : type === 'npc' ? 12 : type === 'obstacle' ? 10 : undefined
         const tokenSize = defaultTokenSizeForMap(map)
@@ -3273,7 +3292,9 @@ export const useMapStore = create<MapState>()(
         const spawn = snapTokenToGridCenter(spawnX, spawnY, { size: tokenSize, creatureSize }, map)
         const token: Token = {
           id: uid(),
-          label: type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : type === 'obstacle' ? '地图物件' : 'NPC',
+          label: details?.label.trim().slice(0, 80) || (type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : type === 'obstacle' ? '地图物件' : 'NPC'),
+          portraitImageId: details?.portraitImageId,
+          tokenPortraitImageId: details?.tokenPortraitImageId,
           x: spawn.x,
           y: spawn.y,
           color: preset.color,
@@ -3292,6 +3313,7 @@ export const useMapStore = create<MapState>()(
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
         }))
         publishMapsState(get())
+        return token.id
       },
 
       addEnemyFromPool: (mapId, template, options) => {

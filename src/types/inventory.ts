@@ -287,6 +287,8 @@ export interface Dnd5eItemCost {
 }
 
 export type Dnd5eInventoryUseEffect =
+  /** Closed native item primitive; never executes package-supplied code. */
+  | { kind: 'tentacle-rod-2014' }
   | { kind: 'stabilize' }
   | { kind: 'remove-active-effects'; stackingKeys: readonly string[] }
   | {

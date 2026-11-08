@@ -1,0 +1,10 @@
+import{requestSharedMastermindWardSavingChoice}from'../../composition/browserSharedRoomResources'
+import{getRoomSession}from'../../lib/roomSession'
+export type MastermindWardSavingOperation='register'|'request'|'list'|'answer'|'raw'|'confirm'|'complete'
+export type MastermindWardSavingApi=<T>(operation:MastermindWardSavingOperation,input:unknown)=>Promise<T>
+export interface MastermindWardSavingPrompt{id:string;primaryRequestId:string;parentId:string;mapId:string;actorTokenId:string;actorCharacterId:string;controllerMemberId:string;kind:'bardic-inspiration';count:1;sides:6|8|10|12;revision:number;phase:'waiting'|'declined'|'issued'|'raw'|'confirmed';complete:boolean;canAnswer:boolean;choice?:'use'|'decline';raw?:number[];confirmed?:number[]}
+export type MastermindWardSavingSession=()=>{roomId:string;memberId:string;role:string}|null
+export interface MastermindWardSavingPort{request:MastermindWardSavingApi;session:MastermindWardSavingSession}
+export const defaultMastermindWardSavingPort:MastermindWardSavingPort={request:requestSharedMastermindWardSavingChoice,session:getRoomSession}
+export async function listMastermindWardSavingChoices(port:MastermindWardSavingPort=defaultMastermindWardSavingPort){const response=await port.request<{ok:boolean;requests:MastermindWardSavingPrompt[]}>('list',{});if(!response.ok||!Array.isArray(response.requests))throw Error('ward-saving:actual-private-projection-required');return response.requests}
+export async function answerMastermindWardSavingChoice(requestId:string,use:boolean,port:MastermindWardSavingPort=defaultMastermindWardSavingPort){const response=await port.request<{ok:boolean;request:MastermindWardSavingPrompt}>('request',{requestId}),row=response.request,member=port.session();if(!response.ok||row?.id!==requestId||!member||member.memberId!==row.controllerMemberId||!row.canAnswer||row.phase!=='waiting'||row.kind!=='bardic-inspiration')throw Error('ward-saving:actual-holder-required');return port.request('answer',{requestId,use,expectedRecordRevision:row.revision})}

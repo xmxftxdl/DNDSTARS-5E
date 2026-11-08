@@ -1,3 +1,5 @@
+import{dnd5eAdditionalKnownSpellIdsV1,dnd5eAdditionalKnownSpellSlotsV1}from'./additionalKnownSpells'
+import{dnd5eSubclassLiveSpellListClassIdsV1}from'./plugins/pluginSubclassLiveSpellLists'
 import type {
   Character,
   Dnd5eAdvancementSpellSelectionsV1,
@@ -19,7 +21,9 @@ import {
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
+export interface Dnd5eAdditionalKnownSpellAdvancementSlotV1 {sourceId:string;name:string;selectionKey:string;choiceOptionId:string;spellId:string;canReplace:boolean;options:readonly Dnd5eSpellbookEntry[]}
 export interface Dnd5eSpellAdvancementPlan {
+  additionalKnownSpells?:readonly Dnd5eAdditionalKnownSpellAdvancementSlotV1[]
   classId: Dnd5eClassId
   className: string
   fromClassLevel: number
@@ -136,13 +140,19 @@ export function buildDnd5eSpellAdvancementPlanFromSelections(
     toClassLevel,
     'expanded-list',
   ))
+  const extraClassLists = dnd5eSubclassLiveSpellListClassIdsV1(input.subclassId,toClassLevel,input.classId)
   const classOptions = catalog.filter((spell) =>
     (spell.classes as readonly string[]).includes(source.spellListClassId) ||
+    extraClassLists.some(classId=>(spell.classes as readonly string[]).includes(classId)) ||
     expandedSubclassSpells.has(spell.id))
   const cantripOptions = classOptions.filter((spell) => spell.level === 0)
+  const additionalKnownSlots=dnd5eAdditionalKnownSpellSlotsV1({classId:input.classId,classLevel:toClassLevel,subclassId:input.subclassId,selections})
+  const additionalKnownAdvancements=additionalKnownSlots.map(slot=>({sourceId:slot.sourceId,name:slot.name,selectionKey:slot.selectionKey,choiceOptionId:slot.choiceOptionId,spellId:slot.spellId,canReplace:knownCaster&&fromClassLevel>0&&fromClassLevel>=slot.grantedAtClassLevel&&slot.replacementSpellIds.length>0,options:catalog.filter(spell=>spell.id===slot.spellId||slot.replacementSpellIds.includes(spell.id))}))
+  const additionalKnown=new Set(dnd5eAdditionalKnownSpellIdsV1({classId:input.classId,classLevel:toClassLevel,subclassId:input.subclassId,selections}))
   const spellOptions = classOptions.filter((spell) =>
-    spell.level > 0 && spell.level <= targetHighestSpellLevel)
+    spell.level > 0 && spell.level <= targetHighestSpellLevel && (!additionalKnown.has(spell.id)||previousKnownSpells.includes(spell.id)||additionalKnownAdvancements.some(slot=>slot.canReplace&&slot.spellId===spell.id)))
   const defaultSelections: Dnd5eAdvancementSpellSelectionsV1 = {
+    ...(additionalKnownAdvancements.length?{additionalKnownSpells:Object.fromEntries(additionalKnownAdvancements.map(slot=>[slot.sourceId,slot.spellId]))}:{}),
     cantrips: previousCantrips.slice(0, targetCantripCount),
     ...(targetKnownSpellCount == null
       ? {}
@@ -155,6 +165,7 @@ export function buildDnd5eSpellAdvancementPlanFromSelections(
   return {
     classId: input.classId,
     className: source.definition.name,
+    ...(additionalKnownAdvancements.length?{additionalKnownSpells:additionalKnownAdvancements}:{}),
     fromClassLevel,
     toClassLevel,
     cantripSelectionKey: source.cantripSelectionKey,
@@ -239,6 +250,10 @@ export function dnd5eSpellAdvancementSelectionsComplete(
   const cantrips = unique(value.cantrips)
   const knownSpells = unique(value.knownSpells)
   const wizardSpellbook = unique(value.wizardSpellbook)
+  const extraSlots=plan.additionalKnownSpells??[],extra=value.additionalKnownSpells??{}
+  if(Object.keys(extra).some(id=>!extraSlots.some(slot=>slot.sourceId===id)))return false
+  let extraChanges=0
+  for(const slot of extraSlots){const id=extra[slot.sourceId]??slot.spellId;if(!slot.options.some(option=>option.id===id)||id!==slot.spellId&&!slot.canReplace)return false;if(id!==slot.spellId)extraChanges++;if(knownSpells.includes(id)&&!plan.previousKnownSpells.includes(id))return false}
   if (!validSelection(
     cantrips,
     plan.targetCantripCount,
@@ -255,7 +270,7 @@ export function dnd5eSpellAdvancementSelectionsComplete(
       new Set(plan.spellOptions.map((spell) => spell.id)),
     )) return false
     if (
-      removedCount(plan.previousKnownSpells, knownSpells) >
+      removedCount(plan.previousKnownSpells, knownSpells) + extraChanges >
       (plan.canReplaceKnownSpell ? 1 : 0)
     ) return false
   } else if (value.knownSpells != null) {
@@ -307,8 +322,18 @@ export function applyDnd5eSpellAdvancement(
   const stored = source.subclass && source.classId === 'fighter'
     ? character.dnd5eClassChoices?.fighter?.extensionChoices ?? {}
     : character.dnd5eClassChoices?.classes?.[plan.classId]?.selections ?? {}
+  const currentPlan=buildDnd5eSpellAdvancementPlanFromSelections({classId:plan.classId,fromClassLevel:plan.fromClassLevel,toClassLevel:plan.toClassLevel,subclassId,selections:stored})
+  if(!currentPlan||!dnd5eSpellAdvancementSelectionsComplete(currentPlan,value))return{ok:false,reason:'invalid-spell-choice'}
+  plan=currentPlan
+  const extraSelections=Object.fromEntries((currentPlan.additionalKnownSpells??[]).map(slot=>[slot.selectionKey,[slot.choiceOptionId,value.additionalKnownSpells?.[slot.sourceId]??slot.spellId]]))
+  const currentAdditionalKnown = new Set(dnd5eAdditionalKnownSpellIdsV1({
+    classId: plan.classId, classLevel: plan.toClassLevel, subclassId, selections: {...stored,...extraSelections},
+  }))
+  if (value.knownSpells?.some(id => currentAdditionalKnown.has(id) &&
+    !plan.previousKnownSpells.includes(id))) return { ok: false, reason: 'invalid-spell-choice' }
   const selections: Record<string, readonly string[]> = {
     ...stored,
+    ...extraSelections,
     [plan.cantripSelectionKey]: unique(value.cantrips),
     ...(plan.targetKnownSpellCount == null
       ? {}

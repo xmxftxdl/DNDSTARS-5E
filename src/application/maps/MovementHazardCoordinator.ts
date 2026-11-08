@@ -151,6 +151,14 @@ export async function coordinateDnd5eMovementHazards(input: {
         initiativeOrder: projectedInitiativeOrder,
         additionalCreatureTokenIds: Object.keys(settled.state.combatants),
       })
+      // Character/map projection carries HP and effects, but does not persist
+      // the current Headless turn budget. Preserve the actual preceding step's
+      // costs (including OA/BL reactions and voluntary movement), never defaults
+      // from the rebuilt snapshot. The producer alone supplied this state.
+      for (const [id, combatant] of Object.entries(refreshed.state.combatants)) {
+        const previous = settled.state.combatants[id]
+        if (previous) combatant.turn = { ...previous.turn }
+      }
       // The committed movement projection may intentionally be below terrain.
       // Snapshot construction clamps ordinary token heights to ground; retain
       // the validated moved token height until the endpoint ejection settles.

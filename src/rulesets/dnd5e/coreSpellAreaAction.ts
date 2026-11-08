@@ -1,3 +1,4 @@
+import{restoreDnd5ePreparedOrdinaryWeaponScene}from'./ordinaryWeaponScene'
 import { getRegisteredDnd5eActivity } from './activities/dnd5eActivityRegistry'
 import { persistentAreaMovementScope, persistentAreaMovementScopeMatches } from './persistentAreaMovementScope'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
@@ -207,6 +208,7 @@ export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 } {
   const { prepared } = input
+  restoreDnd5ePreparedOrdinaryWeaponScene(prepared)
   if ('currentMovementScope' in input &&
     !persistentAreaMovementScopeMatches(prepared.continuationScope, input.currentMovementScope)) {
     return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-target' } }

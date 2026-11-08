@@ -1,0 +1,1 @@
+export function bountifulNativeDiceController<T extends {id:string;type?:string;characterId?:string;poolId?:string;dnd5eSimulacrum?:{sourceCharacterId:string}},C extends {id:string;roomId?:string;roomMemberId?:string}>(map:{tokens:readonly T[]},characters:readonly C[],actorId:string,roomId:string):{token:T;character?:C}|null

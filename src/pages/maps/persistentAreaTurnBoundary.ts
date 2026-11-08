@@ -429,6 +429,8 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
   events: Dnd5eCombatEvent[]
   initiativeEntries: InitiativeEntry[]
 }> {
+  const lineageInput=JSON.parse(JSON.stringify({transition:input.transition,map:input.map,characters:input.characters,worldMinute:input.worldMinute,initiativeOrder:input.initiativeOrder})) as ActualAreaTurnInput
+  const capture=<T extends ActualAreaTurnResult>(result:T):T=>{actualAreaTurnTransitions.set(result,{input:lineageInput,signature:JSON.stringify(result)});return result}
   let map = input.map
   const durable = map.dnd5eActivityTurnClock
   const origin = durable?.cursor
@@ -451,7 +453,7 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
         const { tokenId, slotId, round, initiativeIndex } = input.transition.cursor
         map = { ...map, dnd5eActivityTurnClock: { ...nextClock, cursor: { tokenId, slotId, round, initiativeIndex } } }
       }
-      return { map, characters: [...input.characters], logs: [], events: [], initiativeEntries: [] }
+      return capture({ map, characters: [...input.characters], logs: [], events: [], initiativeEntries: [] })
     }
     const previous = input.transition.boundaries.find(boundary => boundary.timing === 'turn-end')
     map = initializeDnd5eActivityTurnClock(map, input.transition.cursor.combatId, previous?.turnKey ?? start.turnKey)
@@ -502,8 +504,17 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
       logs.push(...settled.logs)
       events.push(...(settled.events ?? []))
     }
-    return { map, characters, logs, events, initiativeEntries }
+    return capture({ map, characters, logs, events, initiativeEntries })
   } finally {
     input.presentTurnStart?.(null)
   }
 }
+
+type ActualAreaTurnInput={transition:Dnd5ePersistentAreaTurnTransition;map:BattleMap;characters:Character[];worldMinute?:number;initiativeOrder?:InitiativeEntry[]}
+type ActualAreaTurnResult={map:BattleMap;characters:Character[];logs:string[];events:Dnd5eCombatEvent[];initiativeEntries:InitiativeEntry[]}
+const actualAreaTurnTransitions=new WeakMap<object,{input:ActualAreaTurnInput;signature:string}>()
+/** Mechanical lineage of an actual completed turn boundary. No caller world,
+ * controller, roll, or publication permission can be issued by this reader. */
+export function readDnd5eActualPersistentAreaTurnTransition(value:object){const record=actualAreaTurnTransitions.get(value);if(!record)throw Error('area-turn:actual-completed-transition-required');assertActualAreaTurnData(value);if(JSON.stringify(value)!==record.signature)throw Error('area-turn:actual-unchanged-transition-required');return JSON.parse(JSON.stringify({input:record.input,result:value}))as{input:ActualAreaTurnInput;result:ActualAreaTurnResult}}
+
+function assertActualAreaTurnData(value:unknown,seen=new WeakSet<object>()){if(!value||typeof value!=='object'||seen.has(value))return;seen.add(value);for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))){if(descriptor.get||descriptor.set||typeof descriptor.value==='function')throw Error('area-turn:actual-own-data-required');if('value'in descriptor)assertActualAreaTurnData(descriptor.value,seen)}}

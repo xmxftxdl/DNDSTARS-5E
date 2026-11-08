@@ -48,7 +48,7 @@ interface MapDiceRollerProps {
   onCombatRollsVisibleChange?: (visible: boolean) => void
   onRoll: (request: MapFreeDiceRollRequest) => Promise<void>
   onReroll?: () => Promise<void>
-  onCheck: (payload: Dnd5eAbilityCheckPayload) => void
+  onCheck: (payload: Dnd5eAbilityCheckPayload) => boolean | void
 }
 
 export default function MapDiceRoller({
@@ -71,6 +71,7 @@ export default function MapDiceRoller({
 }: MapDiceRollerProps) {
   const [open, setOpen] = useState(false)
   const [rolling, setRolling] = useState(false)
+  const [checkError, setCheckError] = useState<string | null>(null)
   const [groups, setGroups] = useState<MapFreeDiceSelection[]>([])
   const count = groups.reduce((sum, group) => sum + group.count, 0)
   const [sides, setSides] = useState<number>(20)
@@ -88,6 +89,7 @@ export default function MapDiceRoller({
   const [dc, setDc] = useState(10)
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
+  const [detectLies, setDetectLies] = useState(false)
   const [bearAspectTask, setBearAspectTask] = useState(false)
   const [climbingTask, setClimbingTask] = useState(false)
   const [sightPerception, setSightPerception] = useState(false)
@@ -154,7 +156,8 @@ export default function MapDiceRoller({
   }
 
   const submitCheck = () => {
-    if (!selectedCheck) return
+    if (!selectedCheck || checkDisabled) return
+    setCheckError(null)
     const requestedMode = bearAspectAvailable && bearAspectTask ? 'advantage' : mode
     const effectiveMode = character
       ? dnd5eAbilityCheckMode(character, {
@@ -185,8 +188,8 @@ export default function MapDiceRoller({
       })
       return
     }
-    close()
-    onCheck({
+    const accepted = onCheck({
+      requestedPurpose: selectedCheck.ability === 'wis' && selectedCheck.skill === 'insight' && detectLies ? 'detect-lies' : undefined,
       detectedCreatureId: !selectedCheck.toolId && selectedCheck.skill !== 'perception' && detectedCreatureId ? detectedCreatureId : undefined,
       toolId: selectedCheck.toolId,
       ability: selectedCheck.ability,
@@ -207,6 +210,11 @@ export default function MapDiceRoller({
       mode,
       spendAction: spendAction || undefined,
     })
+    if (accepted === false) {
+      setCheckError('检定未能提交。请确认角色已放置在当前地图、由你控制，且 DM 已在线；战斗中还需轮到该角色且上一项行动已完成。')
+      return
+    }
+    close()
   }
 
   const roll = async () => {
@@ -409,6 +417,12 @@ export default function MapDiceRoller({
                   ) : (
                     <p className="mt-2 text-[11px] leading-5 text-emerald-300/80">战斗外鉴定不会消耗行动；骰值、调整值与是否通过会公开同步。</p>
                   )}
+                  {headlessCheck && selectedCheck.ability === 'wis' && selectedCheck.skill === 'insight' ? (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                      <input type="checkbox" checked={detectLies} onChange={event => setDetectLies(event.target.checked)} />
+                      辨别生物是否说谎（由 DM 确认用途）
+                    </label>
+                  ) : null}
                   {headlessCheck && selectedCheck.skill === 'perception' ? (
                     <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
                       <input type="checkbox" checked={sightPerception} onChange={event => setSightPerception(event.target.checked)} />
@@ -448,6 +462,7 @@ export default function MapDiceRoller({
                     onClick={submitCheck}
                     className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-40"
                   >{pending ? '等待 DM 结算…' : `进行${selectedCheck.label}（${selectedCheckModifier >= 0 ? '+' : ''}${selectedCheckModifier}）· DC ${dc}`}</button>
+                  {checkError && <p role="alert" className="mt-2 text-xs text-amber-300">{checkError}</p>}
                 </>
               ) : <p className="rounded-xl border border-amber-300/15 bg-amber-500/[0.06] p-3 text-xs leading-5 text-amber-100/80">请先选择一个已加入地图的玩家角色。</p>}
             </div>

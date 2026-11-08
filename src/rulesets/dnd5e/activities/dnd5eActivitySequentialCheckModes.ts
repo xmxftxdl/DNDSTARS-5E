@@ -52,7 +52,7 @@ export function dnd5eActivitySequentialCheckModesV1(input: {
         [`${key}:target`]: modes.target, [`${key}:target-final`]: modes.target }
     }
     if (check.kind === 'ability-check' || check.kind === 'skill-check' || check.kind === 'concentration-check') {
-      return check.rollMode === 'host-derived' ? { [key]: dnd5eActivityHostActorCheckModeV1(actor, check) } : {}
+      return check.rollMode === 'host-derived' ? { [key]: dnd5eActivityHostActorCheckModeV1(actor, check, input.state) } : {}
     }
     if (check.kind !== 'saving-throw' || check.rollMode !== 'host-derived' || !target) return {}
     return { [key]: dnd5eActivityHostSavingThrowModeV1({

@@ -1,3 +1,24 @@
+import type{Dnd5ePluginTempestuousEarlyBeforePrelude,Dnd5ePluginTempestuousNativeOperation,Dnd5ePluginTempestuousLandingOperation}from'./pluginSpellTransaction'
+import{captureDnd5eTempestuousLandingOriginalOperation,type Dnd5eTempestuousLandingOriginalOperation}from'./damageCommitSession'
+import{stormFuryMoveSourceNeedsNativeReaction}from'./stormFuryMoveRouting'
+import{resolveDnd5eOpportunityMoveSequenceOriginal as furyRoomMoveResolver}from'./opportunityMoveSequence'
+import{captureOptionalStormFuryWeaponOriginalOrigin,bindStormFuryWeaponOriginalOperation,type StormFuryWeaponOriginalOrigin}from'./stormFuryWeaponOriginalOrigin'
+import{resolvePreparedDnd5eEquipmentAttack as furyRoomEquipmentResolver}from'./equipmentAttackAction'
+import{resolvePreparedDnd5eOpportunityAttack as furyRoomOpportunityResolver}from'./opportunityAttackAction'
+import{resolvePreparedDnd5eSpellCast as furyRoomSpellResolver}from'./spellAction'
+import{resolvePreparedDnd5eMonsterAttack as furyRoomMonsterResolver}from'./monsterAttackAction'
+import{captureDnd5eStormFuryOriginalOperation,type Dnd5eStormFuryOriginalOperation}from'./damageCommitSession'
+import{captureDnd5eTempestuousAfterSpellOriginalOperation,type Dnd5eTempestuousAfterSpellOriginalOperation}from'./damageCommitSession'
+import{initializeTempestuousBeforeReactionSession}from'./tempestuousBeforeReactionSession'
+import{captureOptionalBountifulMonsterZeroFlowOperation}from'./bountifulMonsterZeroFlowOperation'
+import{hasActualDnd5eMonsterDamageZeroAllyBoundary,type Dnd5eMonsterDamageZeroOriginalOperation}from'./damageZeroMonsterOriginalOperation'
+import{captureOptionalDnd5eSpellDamageZeroOriginalOperation,hasActualDnd5eSpellDamageZeroAllyBoundary,type Dnd5eSpellDamageZeroOriginalOperation}from'./damageZeroSpellOriginalOperation'
+import{captureOptionalDnd5eDamageZeroOriginalOperation,hasActualDnd5eDamageZeroAllyBoundary,type Dnd5eDamageZeroOriginalOperation}from'./damageZeroOriginalOperation'
+import {Dnd5eAfterOriginalFallDecisionRequired,type Dnd5eAfterOriginalFallRequest,type Dnd5eAfterOriginalFallChoice} from './afterOriginalFallCheckpoint'
+import {AllyNaturalOneDecisionRequired,type AllyNaturalOneRequest,type AllyNaturalOneDecision} from './allyNaturalOneCheckpoint'
+import{copyDnd5eOrdinaryWeaponScene,dnd5eWeaponActivityTurnKey}from'./ordinaryWeaponScene'
+import {collectDnd5eActivitySpellDamageDieChoices} from './activities/dnd5eSpellDamageGroups'
+import type {Dnd5eSpellDamageDiceChoice} from './spellDamageDieRerolls'
 import type { Character } from '../../types/character'
 import { consumeDnd5eSingleUseActivityGrant, dnd5eHeadlessTurnKey, resolveDnd5eHeadlessAction, type Dnd5eAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eDamageCommitSession, createDnd5ePreparedDamageCommitSession, type Dnd5eDamageReplaySession } from './damageCommitSession'
@@ -26,6 +47,49 @@ import { dnd5eZeroHitPointTurnOptions } from './zeroHitPointReaction'
 /** Async Host orchestration. No state is published here; the room commits the
  * sole final result after its own current-revision check. */
 export interface Dnd5eDamageReactionFlowOptions {
+  /** Room support is explicit and currently limited to genuine Monster/Spell originals. */
+  enableStormFuryHit?:boolean
+  chooseStormFuryOwner?:(input:{originalOperation:Dnd5eStormFuryOriginalOperation;frame:Readonly<import('./stormFuryHitCheckpoint').StormFuryHitFrame>;state:Dnd5eHeadlessCombatState})=>Promise<Pick<import('./stormFuryHitCheckpoint').StormFuryHitChoice,'frameIndex'|'featureId'>|undefined>
+  rollStormFurySaving?:(input:{originalOperation:Dnd5eStormFuryOriginalOperation;request:Readonly<import('./stormFuryHitCheckpoint').StormFuryMaterialRequest>;state:Dnd5eHeadlessCombatState})=>Promise<import('./stormFuryHitCheckpoint').StormFurySavingThrow>
+  chooseStormFuryPush?:(input:{originalOperation:Dnd5eStormFuryOriginalOperation;request:Readonly<import('./stormFuryHitCheckpoint').StormFuryMaterialRequest>;state:Dnd5eHeadlessCombatState})=>Promise<import('./headlessCombatEngine').Dnd5eSpellForcedMovement|undefined>
+
+  /** Concrete canonical core-Spell path only; no automatic prompt for other facades. */
+  enableTempestuousBeforeSpell?:boolean
+  enableTempestuousAfterSpell?:boolean
+  resolveTempestuousLandingDice?:(input:{originalOperation:Dnd5eTempestuousLandingOriginalOperation;frame:Readonly<import('./tempestuousLandingCheckpoint').TempestuousLandingDiceFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<readonly number[]>
+  chooseTempestuousAfterSpell?:(input:{originalOperation:Dnd5eTempestuousAfterSpellOriginalOperation;frame:Readonly<import('./tempestuousCastCheckpoint').TempestuousCastFlightFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./tempestuousCastCheckpoint').TempestuousCastFlightChoice|undefined>
+  enablePluginTempestuousFlight?:boolean
+  pluginTempestuousEarlyBefore?:Dnd5ePluginTempestuousEarlyBeforePrelude
+  pluginTempestuousOriginalReplay?:import("./allyNaturalOneCheckpoint").OriginalD20ReplayFacts
+  choosePluginTempestuousFlight?:(input:{originalOperation:Dnd5ePluginTempestuousNativeOperation;phase:'before'|'after';state:Dnd5eHeadlessCombatState;effectTimestamp:number;eventId:string})=>Promise<import('./tempestuousSpellFlight').TempestuousSpellFlightIntent|undefined>
+  resolvePluginTempestuousLanding?:(input:{originalOperation:Dnd5ePluginTempestuousLandingOperation;state:Dnd5eHeadlessCombatState;effectTimestamp:number;eventId:string})=>Promise<readonly number[]>
+  tempestuousBeforeOriginalReplay?:object
+  chooseTempestuousBeforeSpell?:(input:{frame:Readonly<import('./tempestuousBeforeSpellOffer').TempestuousBeforeSpellOfferFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./tempestuousBeforeSpellOffer').TempestuousBeforeSpellOfferChoice|undefined>
+  chooseStormCast?:(input:{frame:Readonly<import('./stormCastCheckpoint').StormCastEruptionFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./stormCastCheckpoint').StormCastEruptionChoice|undefined>
+  chooseDamageZeroSavingThrow?: (input:{frame:Readonly<import('./damageZeroSavingThrowCheckpoint').DamageZeroSavingThrowFrame>;state:Dnd5eHeadlessCombatState;eventId:string;originalOperation?:Dnd5eDamageZeroOriginalOperation;spellOriginalOperation?:Dnd5eSpellDamageZeroOriginalOperation;monsterOriginalOperation?:Dnd5eMonsterDamageZeroOriginalOperation})=>Promise<import('./damageZeroSavingThrowCheckpoint').DamageZeroSavingThrowChoice|undefined>
+  chooseSpellSelectedAbilityBonus?:(input:{frame:Readonly<import('./spellDamageSelectedAbilityBonus').SpellDamageSelectedAbilityBonusFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./spellDamageSelectedAbilityBonus').SpellDamageSelectedAbilityBonusChoice|undefined>
+  chooseSpellHealingReroll?:(input:{frame:Readonly<import('./spellHealingRerollCheckpoint').SpellHealingRerollFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./spellHealingRerollCheckpoint').SpellHealingRerollChoice|undefined>
+  rollFailedD20BonusDamage?:(request:Readonly<import('./failedD20BonusCheckpoint').FailedD20BonusDamageRequest>)=>Promise<readonly number[]>
+  chooseFailedD20BonusDefense?:(input:{request:Readonly<import('./failedD20BonusCheckpoint').FailedD20BonusDefenseRequest>;state:Dnd5eHeadlessCombatState})=>Promise<import('./failedD20BonusCheckpoint').FailedD20BonusDefenseChoice>
+  chooseFailedD20Bonus?:(input:{frame:Readonly<import('./failedD20BonusCheckpoint').FailedD20BonusFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./failedD20BonusCheckpoint').FailedD20BonusChoice|undefined>
+  chooseMasterDuelist?:(input:{frame:Readonly<import('./masterDuelistCheckpoint').MasterDuelistMissFrame>;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./masterDuelistCheckpoint').MasterDuelistChoice|undefined>
+  rollMasterDuelistDamage?:(request:Readonly<import('./masterDuelistCheckpoint').MasterDuelistDamageRequest>)=>Promise<readonly number[]>
+  chooseMasterDuelistDefense?:(input:{request:Parameters<NonNullable<import('./masterDuelistCheckpoint').MasterDuelistPorts['defense']>>[0];state:Dnd5eHeadlessCombatState})=>Promise<import('./masterDuelistCheckpoint').MasterDuelistDefenseChoice>
+  chooseAfterOriginalFall?:(input:{request:Dnd5eAfterOriginalFallRequest;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<Dnd5eAfterOriginalFallChoice|undefined>
+  chooseAllyNaturalOne?: (input:{request:AllyNaturalOneRequest;state:Dnd5eHeadlessCombatState;eventId:string;actualDamageZeroOriginal?:object;actualSpellDamageZeroOriginal?:object;actualMonsterDamageZeroOriginal?:object})=>Promise<AllyNaturalOneDecision|undefined>
+  replayEventBatchId?:string
+  /** Real room implementation must obtain this world fact from the DM, never the actor. */
+  confirmPlanarOrigin?: (request:{eventId:string;occurrence:number;actorId:string;targetId:string;
+    packageId:string;activityId:string;targetName:string})=>Promise<'native'|'foreign'>
+  rollIncomingCriticalDice?:(request:import('./incomingAttackRerollCheckpoint').IncomingCriticalDiceRequest)=>Promise<readonly number[]>
+  chooseFailedSavingThrow?:(input:{facts:import('./failedSavingThrowCheckpoint').FailedSavingThrowFacts;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<import('./failedSavingThrowCheckpoint').FailedSavingThrowChoice|undefined>
+  choosePostD20FeatureUse?:(input:{request:import('./postD20FeatureUseCheckpoint').PostD20FeatureUseRequest;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<import('./postD20FeatureUseCheckpoint').PostD20FeatureUseChoice|undefined>
+  chooseIncomingAttackArmorClass?:(input:{facts:import('./incomingAttackArmorClassCheckpoint').IncomingAttackArmorClassFacts;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<import('./incomingAttackArmorClassCheckpoint').IncomingAttackArmorClassChoice|undefined>
+  chooseIncomingAttackReroll?:(input:{facts:import('./incomingAttackRerollCheckpoint').IncomingAttackRollFacts;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<import('./incomingAttackRerollCheckpoint').IncomingAttackRerollChoice|undefined>
+  /** Owner D6 is a separate hit-nullification choice, not an attack reroll. */
+  chooseIncomingHitNegation?:(input:{facts:import('./incomingHitNegationCheckpoint').IncomingHitNegationFacts;state:Dnd5eHeadlessCombatState;eventId:string;occurrence:number})=>Promise<import('./incomingHitNegationCheckpoint').IncomingHitNegationChoice|undefined>
+  chooseSpellDamageDice?:Dnd5eSpellDamageDiceChoice
+  chooseRelentlessReaction?: (input:{request:import('./relentlessReactionCheckpoint').Dnd5eRelentlessReactionRequest;state:Dnd5eHeadlessCombatState;eventId:string})=>Promise<import('./relentlessReactionCheckpoint').Dnd5eRelentlessReactionChoice>
   prepareZeroHitPointTurnStart?: (actorId:string,state:Dnd5eHeadlessCombatState)=>Promise<Extract<Dnd5eAction,{type:'begin-turn'}>>
   combatRevision: number
   movementMap?: import('../../store/maps').BattleMap
@@ -42,7 +106,7 @@ export interface Dnd5eDamageReactionFlowOptions {
 export function resolveDnd5eActionWithDamageReactions(input: Dnd5eDamageReactionFlowOptions & {
   state:Dnd5eHeadlessCombatState; action:Dnd5eAction; options?:Parameters<typeof resolveDnd5eHeadlessAction>[2]
 }):Promise<Dnd5eActionResult> {
-  return driveDamageReactions(input,input.state,(pause,hitPause)=>createDnd5eDamageCommitSession(input.state,input.action,pause,input.options,undefined,hitPause))
+  return driveDamageReactions(input,input.state,(pause,hitPause)=>createDnd5eDamageCommitSession(input.state,input.action,pause,input.options,undefined,hitPause,input.replayEventBatchId))
 }
 
 export type Dnd5eDamageReactionMapContext = Omit<Parameters<typeof planDnd5eMapResultApplication>[0], 'state' | 'events'>
@@ -67,7 +131,7 @@ export function resolveDnd5ePreparedWithDamageReactions<Input extends {prepared?
   options:Dnd5eDamageReactionFlowOptions,input:Input,resolve:(input:Input)=>Result,
 ):Promise<Result> {
   if(!input.prepared)throw new Error('damage-reaction-prepared-state-required')
-  return driveDamageReactions(options,input.prepared.state,(pause,hitPause)=>createDnd5ePreparedDamageCommitSession(input,resolve,pause,undefined,hitPause))
+  return driveDamageReactions(options,input.prepared.state,(pause,hitPause)=>initializeTempestuousBeforeReactionSession(options,input,resolve,()=>createDnd5ePreparedDamageCommitSession(input,resolve,pause,undefined,hitPause,options.replayEventBatchId,options.enableTempestuousBeforeSpell===true,false,options.enableTempestuousAfterSpell===true,furyRoomEnabled(options,resolve,input),undefined,options.enablePluginTempestuousFlight===true,options.pluginTempestuousEarlyBefore,options.pluginTempestuousOriginalReplay)),undefined,()=>captureOptionalStormFuryWeaponOriginalOrigin(input,resolve))
 }
 
 /** Host-only nested boundary. The owning facade must merge changes into its final application. */
@@ -79,33 +143,38 @@ export function resolveDnd5eDamageBoundaryWithMaterials<Result>(
   return driveDamageReactions(options, state, (pause,hitPause) => createDnd5ePreparedDamageCommitSession(input,
     value => ({ result: resolve(value.prepared.state), materialChanges: [] as readonly Dnd5eReactionMaterialChange[] }), pause, {
       charactersByCombatantId: options.charactersByCombatantId ?? {}, succeeded: value => succeeded(value.result),
-    },hitPause), (value, materialChanges) => ({ ...value, materialChanges }))
+    },hitPause,options.replayEventBatchId), (value, materialChanges) => ({ ...value, materialChanges }))
 }
 
 /** Opt-in facade that can carry both combat and inventory changes in one map application. */
 export function resolveDnd5ePreparedWithMaterialDamageReactions<
   Input extends { prepared?: { state: Dnd5eHeadlessCombatState } & Dnd5ePreparedMaterialContext },
   Result extends { result?: { ok: boolean }; application?: Dnd5eMapResultPlan },
->(options: Dnd5eDamageReactionFlowOptions, input: Input, resolve: (input: Input) => Result): Promise<Result> {
+>(options: Dnd5eDamageReactionFlowOptions, input: Input, resolve: (input: Input) => Result, materialContext?:Dnd5ePreparedMaterialContext): Promise<Result> {
   if (!input.prepared) throw new Error('damage-reaction-prepared-state-required')
-  const charactersByCombatantId = prepareDnd5eDamageReactionMaterialCharacters(options.charactersByCombatantId ?? {}, input.prepared)
-  return driveDamageReactions(options, input.prepared.state, (pause,hitPause) => createDnd5ePreparedDamageCommitSession(input, resolve, pause, {
-    charactersByCombatantId, succeeded: result => result.result?.ok === true,
-  },hitPause), (result, changes) => {
+  const charactersByCombatantId = prepareDnd5eDamageReactionMaterialCharacters(options.charactersByCombatantId ?? {}, materialContext ?? input.prepared)
+  return driveDamageReactions(options, input.prepared.state, (pause,hitPause) => initializeTempestuousBeforeReactionSession(options,input,resolve,()=>createDnd5ePreparedDamageCommitSession(input, resolve, pause, {
+    charactersByCombatantId, succeeded: result => result.result?.ok === true, nativeLuckyTransportAvailable: typeof options.chooseAllyNaturalOne==='function',
+  },hitPause,options.replayEventBatchId,options.enableTempestuousBeforeSpell===true,false,options.enableTempestuousAfterSpell===true,furyRoomEnabled(options,resolve,input),undefined,options.enablePluginTempestuousFlight===true,options.pluginTempestuousEarlyBefore,options.pluginTempestuousOriginalReplay)), (result, changes) => {
     if (!result.result?.ok || !changes.length) return result
     if (!result.application) throw new Error('damage-reaction-material-application-required')
     return { ...result, application: mergeDnd5eReactionMaterialsIntoMapPlan(result.application, changes) }
-  })
+  },()=>captureOptionalStormFuryWeaponOriginalOrigin(input,resolve))
 }
+
+function furyRoomEnabled(options:Dnd5eDamageReactionFlowOptions,resolve:unknown,source:unknown){return options.enableStormFuryHit===true&&(resolve===furyRoomSpellResolver||resolve===furyRoomMonsterResolver||resolve===furyRoomEquipmentResolver||resolve===furyRoomOpportunityResolver||resolve===furyRoomMoveResolver&&stormFuryMoveSourceNeedsNativeReaction(source))}
 
 async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions, state:Dnd5eHeadlessCombatState,
   create:(pause:(checkpoint:Dnd5eDamageCommitCheckpoint,state?:Dnd5eHeadlessCombatState,characters?:Readonly<Record<string, Character>>)=>boolean,
     hitPause:(event:Dnd5eWeaponHitEvent,state:Dnd5eHeadlessCombatState)=>boolean)=>Dnd5eDamageReplaySession<Result>,
   finalizeMaterials?: (result: Result, changes: readonly Dnd5eReactionMaterialChange[]) => Result,
+  captureFuryOrigin?:()=>StormFuryWeaponOriginalOrigin|undefined,
 ):Promise<Result> {
+  let furyOrigin:StormFuryWeaponOriginalOrigin|undefined
+  const captureFuryOperation=(pending:object)=>{const operation=captureDnd5eStormFuryOriginalOperation(pending);furyOrigin??=captureFuryOrigin?.();if(furyOrigin)bindStormFuryWeaponOriginalOperation(operation,furyOrigin);return operation}
   let offered: {state:Dnd5eHeadlessCombatState; windows:readonly Dnd5eActivityTriggerWindowV1[]; characters:Readonly<Record<string, Character>>} | undefined
   const characters = structuredClone(input.charactersByCombatantId ?? {})
-  const hitBatchId = `weapon-hit:${globalThis.crypto.randomUUID()}`
+  const hitBatchId = input.replayEventBatchId ? `weapon-hit:${input.replayEventBatchId}` : `weapon-hit:${globalThis.crypto.randomUUID()}`
   const hitDefinitions = new Map<string, { packageId: string; activityId: string; version: string; signature: string }>()
   const session = create((checkpoint,state,stagedCharacters)=>{
     if(!state)return false
@@ -126,7 +195,101 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
   try {
     guard()
     let result=session.run(state)
-    for(let count=0;(result.status==='pending' || result.status==='pending-zero'||result.status==='pending-zero-start'||result.status==='pending-critical'||result.status==='pending-weapon-hit'||result.status==='pending-hit-push'||result.status==='pending-hit-follow') && count<128;count++) {
+    for(let count=0;(result.status==='pending-plugin-tempestuous-flight'||result.status==='pending-plugin-tempestuous-landing'||result.status==='pending-storm-fury-owner'||result.status==='pending-storm-fury-saving'||result.status==='pending-storm-fury-push'||result.status==='pending-tempestuous-landing-dice'||result.status==='pending-tempestuous-after-spell'||result.status==='pending-tempestuous-before-spell'||result.status==='pending-spell-selected-ability'||result.status==='pending-storm-cast'||result.status==='pending-damage-zero-saving-throw'||result.status==='pending-spell-healing-reroll'||result.status==='pending-failed-d20-bonus-damage'||result.status==='pending-failed-d20-bonus-defense'||result.status==='pending-failed-d20-bonus'||result.status==='pending-master-duelist'||result.status==='pending-master-duelist-damage'||result.status==='pending-master-duelist-defense'||result.status==='pending-failed-saving-throw' || result.status==='pending-post-d20-feature-use' || result.status==='pending-incoming-armor-class' || result.status==='pending-after-original-fall' || result.status==='pending-ally-natural-one' || result.status==='pending-automatic-hit' || result.status==='pending-incoming-critical-dice'||result.status==='pending-incoming-attack'||result.status==='pending-incoming-hit-negation'||result.status==='pending' || result.status==='pending-multipart-save' || result.status==='pending-zero'||result.status==='pending-relentless'||result.status==='pending-zero-start'||result.status==='pending-critical'||result.status==='pending-weapon-hit'||result.status==='pending-hit-push'||result.status==='pending-hit-follow') && count<128;count++) {
+      if(result.status==='pending-damage-zero-saving-throw'){if(!input.chooseDamageZeroSavingThrow)throw Error('damage-zero-saving-throw-choice-transport-required');const pending=result;guard();const choice=await input.chooseDamageZeroSavingThrow({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id,originalOperation:captureOptionalDnd5eDamageZeroOriginalOperation(pending),spellOriginalOperation:captureOptionalDnd5eSpellDamageZeroOriginalOperation(pending),monsterOriginalOperation:captureOptionalBountifulMonsterZeroFlowOperation(pending)});guard();result=session.resumeDamageZeroSavingThrow(state,pending.frame,choice);continue}
+      if(result.status==='pending-spell-selected-ability'){if(!input.chooseSpellSelectedAbilityBonus)throw Error('spell-selected-ability-choice-transport-required');const pending=result;guard();const choice=await input.chooseSpellSelectedAbilityBonus({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeSpellSelectedAbilityBonus(state,pending.frame,choice);continue}
+      if(result.status==='pending-spell-healing-reroll'){if(!input.chooseSpellHealingReroll)throw Error('spell-healing-reroll-choice-transport-required');const pending=result;guard();const choice=await input.chooseSpellHealingReroll({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeSpellHealingReroll(state,pending.frame,choice);continue}
+      if(result.status==='pending-failed-d20-bonus-damage'){if(!input.rollFailedD20BonusDamage)throw Error('failed-d20-bonus-damage-transport-required');const pending=result;guard();const values=await input.rollFailedD20BonusDamage(structuredClone(pending.request));guard();result=session.resumeFailedD20BonusDamage(state,pending.request,values);continue}
+      if(result.status==='pending-failed-d20-bonus-defense'){if(!input.chooseFailedD20BonusDefense)throw Error('failed-d20-bonus-defense-transport-required');const pending=result;guard();const choice=await input.chooseFailedD20BonusDefense({request:structuredClone(pending.request),state:structuredClone(pending.snapshot)});guard();result=session.resumeFailedD20BonusDefense(state,pending.request,choice);continue}
+      if(result.status==='pending-failed-d20-bonus'){if(!input.chooseFailedD20Bonus)throw Error('failed-d20-bonus-choice-transport-required');const pending=result;guard();const choice=await input.chooseFailedD20Bonus({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeFailedD20Bonus(state,pending.frame,choice);continue}
+      if(result.status==='pending-plugin-tempestuous-flight'){if(!input.choosePluginTempestuousFlight)throw Error('plugin-tempestuous-room:owner-transport-required');const pending=result;guard();const choice=await input.choosePluginTempestuousFlight({originalOperation:pending.operation,phase:pending.phase,state:structuredClone(pending.snapshot),effectTimestamp:pending.effectTimestamp,eventId:hitBatchId+':plugin-tempestuous:'+pending.phase});guard();result=session.resumePluginTempestuousFlight(state,pending.operation,choice);continue}
+      if(result.status==='pending-plugin-tempestuous-landing'){if(!input.resolvePluginTempestuousLanding)throw Error('plugin-tempestuous-room:landing-transport-required');const pending=result;guard();const values=await input.resolvePluginTempestuousLanding({originalOperation:pending.operation,state:structuredClone(pending.snapshot),effectTimestamp:pending.effectTimestamp,eventId:hitBatchId+':plugin-tempestuous-landing'});guard();result=session.resumePluginTempestuousLanding(state,pending.operation,values);continue}
+      if(result.status==='pending-storm-fury-owner'){if(!input.chooseStormFuryOwner)throw Error('storm-fury-room:owner-transport-required');const pending=result;guard();const choice=await input.chooseStormFuryOwner({originalOperation:captureFuryOperation(pending),frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot)});guard();result=session.resumeStormFuryOwner(state,pending.frame,choice);continue}
+      if(result.status==='pending-storm-fury-saving'){if(!input.rollStormFurySaving)throw Error('storm-fury-room:saving-transport-required');const pending=result;guard();const roll=await input.rollStormFurySaving({originalOperation:captureFuryOperation(pending),request:structuredClone(pending.request),state:structuredClone(pending.snapshot)});guard();result=session.resumeStormFurySaving(state,pending.request,roll);continue}
+      if(result.status==='pending-storm-fury-push'){if(!input.chooseStormFuryPush)throw Error('storm-fury-room:push-transport-required');const pending=result;guard();const movement=await input.chooseStormFuryPush({originalOperation:captureFuryOperation(pending),request:structuredClone(pending.request),state:structuredClone(pending.snapshot)});guard();result=session.resumeStormFuryPush(state,pending.request,movement);continue}
+      if(result.status==='pending-tempestuous-landing-dice'){if(!input.resolveTempestuousLandingDice)throw Error('tempestuous-landing-dice-transport-required');const pending=result;guard();const values=await input.resolveTempestuousLandingDice({originalOperation:captureDnd5eTempestuousLandingOriginalOperation(pending),frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeTempestuousLandingDice(state,pending.frame,values);continue}
+      if(result.status==='pending-tempestuous-after-spell'){if(!input.chooseTempestuousAfterSpell)throw Error('tempestuous-after-choice-transport-required');const pending=result;guard();const choice=await input.chooseTempestuousAfterSpell({originalOperation:captureDnd5eTempestuousAfterSpellOriginalOperation(pending),frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeTempestuousAfterSpell(state,pending.frame,choice);continue}
+      if(result.status==='pending-tempestuous-before-spell'){if(!input.chooseTempestuousBeforeSpell)throw Error('tempestuous-before-choice-transport-required');const pending=result;guard();const choice=await input.chooseTempestuousBeforeSpell({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeTempestuousBeforeSpell(state,pending.frame,choice);continue}
+      if(result.status==='pending-storm-cast'){if(!input.chooseStormCast)throw Error('storm-cast-choice-transport-required');const pending=result;guard();const choice=await input.chooseStormCast({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeStormCast(state,pending.frame,choice);continue}
+      if(result.status==='pending-master-duelist'){if(!input.chooseMasterDuelist)throw Error('master-duelist-choice-transport-required');const pending=result;guard();const choice=await input.chooseMasterDuelist({frame:structuredClone(pending.frame),state:structuredClone(pending.snapshot),eventId:pending.frame.id});guard();result=session.resumeMasterDuelist(state,pending.frame,choice);continue}
+      if(result.status==='pending-master-duelist-damage'){if(!input.rollMasterDuelistDamage)throw Error('master-duelist-damage-transport-required');const pending=result;guard();const values=await input.rollMasterDuelistDamage(structuredClone(pending.request));guard();result=session.resumeMasterDuelistDamage(state,pending.request,values);continue}
+      if(result.status==='pending-master-duelist-defense'){if(!input.chooseMasterDuelistDefense)throw Error('master-duelist-defense-transport-required');const pending=result;guard();const choice=await input.chooseMasterDuelistDefense({request:structuredClone(pending.request),state:structuredClone(pending.snapshot)});guard();result=session.resumeMasterDuelistDefense(state,pending.request,choice);continue}
+      if(result.status==='pending-multipart-save'){
+        const pending=result,eventId=`${hitBatchId}:multipart-save:${pending.occurrence}`
+        guard()
+        const choice=await input.confirm({eventId,packageId:'false-hydra-v1',actorId:pending.request.actorId,
+          targetIds:[pending.request.actorId],confirmation:'actor-choice',
+          activity:{schemaVersion:1,id:'multipart-resilience',name:'多头韧性',
+            description:`豁免结果 ${pending.request.total}，DC ${pending.request.dc}。是否承受25点心灵伤害，将本次失败改为成功？伤害累计断头阈值。`,
+            activation:{kind:'free'},automation:automationCapabilityFromLegacyStatus('full'),target:{kind:'self'},outcomes:[]},
+          triggerContext:{eventId,event:'after-save',source:{kind:'combat',id:state.combatId},
+            eligibleActorIds:[pending.request.actorId],eligibleTargetIds:[pending.request.actorId],actionEconomyAvailable:{reaction:true}}})
+        guard();result=session.resumeMultipartSave(state,pending.occurrence,choice.accepted);continue
+      }
+      if(result.status==='pending-after-original-fall'){
+        const pending=result
+        if(!input.chooseAfterOriginalFall)throw new Dnd5eAfterOriginalFallDecisionRequired(pending.request,pending.snapshot)
+        guard();const choice=await input.chooseAfterOriginalFall({request:structuredClone(pending.request),state:structuredClone(pending.snapshot),eventId:hitBatchId+':after-original-fall:'+pending.occurrence,occurrence:pending.occurrence});guard()
+        if(!choice)throw new Dnd5eAfterOriginalFallDecisionRequired(pending.request,pending.snapshot)
+        result=session.resumeAfterOriginalFall(state,pending.occurrence,pending.request,choice);continue
+      }
+      if(result.status==='pending-ally-natural-one'){
+        const pending=result
+        if(!input.chooseAllyNaturalOne)throw new AllyNaturalOneDecisionRequired(pending.request,pending.snapshot)
+        guard()
+        const decision=await input.chooseAllyNaturalOne({request:structuredClone(pending.request),state:structuredClone(pending.snapshot),eventId:hitBatchId+':ally-natural-one:'+pending.occurrence,...(hasActualDnd5eDamageZeroAllyBoundary(pending)?{actualDamageZeroOriginal:pending}:{}),...(hasActualDnd5eSpellDamageZeroAllyBoundary(pending)?{actualSpellDamageZeroOriginal:pending}:{}),...(hasActualDnd5eMonsterDamageZeroAllyBoundary(pending)?{actualMonsterDamageZeroOriginal:pending}:{})})
+        guard()
+        result=session.resumeAllyNaturalOne(state,pending.occurrence,pending.request,decision)
+        continue
+      }
+      if(result.status==='pending-automatic-hit'){
+        const pending=result,rolls:Record<string,{values:readonly number[]}>={}
+        for(const declaration of pending.request.rolls){guard();rolls[declaration.id]={values:await input.roll({...declaration,label:pending.request.activityName,kind:'formula',actorId:pending.request.actorId,rollerTokenId:pending.request.actorId,targetId:pending.request.targetId,targetName:pending.snapshot.combatants[pending.request.targetId].name})};guard()}
+        const activity=getRegisteredDnd5eActivity(pending.request.packageId,pending.request.activityId)
+        if(!activity)throw Error('automatic-hit-retaliation-definition-missing')
+        const selectedRolls=await collectDnd5eActivitySpellDamageDieChoices({state:pending.snapshot,actorId:pending.request.actorId,targetIds:[pending.request.targetId],packageId:pending.request.packageId,activity,rolls,transactionId:hitBatchId+':automatic:'+pending.occurrence,charactersByCombatantId:input.charactersByCombatantId,choose:input.chooseSpellDamageDice});guard()
+        result=session.resumeAutomaticHit(state,pending.occurrence,pending.request,selectedRolls);continue
+      }
+      if(result.status==='pending-incoming-critical-dice'){
+        if(!input.rollIncomingCriticalDice)throw Error('incoming-critical-dice-transport-required')
+        const pending=result;guard();const values=await input.rollIncomingCriticalDice(structuredClone(pending.request));guard();result=session.resumeIncomingCriticalDice(state,pending.request,values);continue
+      }
+      if(result.status==='pending-incoming-hit-negation'){
+        if(!input.chooseIncomingHitNegation)throw Error('incoming-hit-negation-choice-transport-required')
+        const pending=result;guard()
+        const choice=await input.chooseIncomingHitNegation({facts:structuredClone(pending.facts),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:incoming-hit-negation:${pending.occurrence}`,occurrence:pending.occurrence})
+        guard();result=session.resumeIncomingHitNegation(state,pending.occurrence,pending.facts,choice);continue
+      }
+      if(result.status==='pending-failed-saving-throw'){
+        if(!input.chooseFailedSavingThrow)throw Error('failed-saving-throw-transport-required')
+        const pending=result;guard();const choice=await input.chooseFailedSavingThrow({facts:structuredClone(pending.facts),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:failed-save:${pending.occurrence}`,occurrence:pending.occurrence});guard()
+        result=session.resumeFailedSavingThrow(state,pending.occurrence,pending.facts,choice);continue
+      }
+      if(result.status==='pending-post-d20-feature-use'){
+        if(!input.choosePostD20FeatureUse)throw Error('post-d20-feature-use-transport-required')
+        const pending=result;guard();const choice=await input.choosePostD20FeatureUse({request:structuredClone(pending.request),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:post-d20-use:${pending.occurrence}`,occurrence:pending.occurrence});guard()
+        result=session.resumePostD20FeatureUse(state,pending.occurrence,pending.request,choice);continue
+      }
+      if(result.status==='pending-incoming-armor-class'){
+
+        if(!input.chooseIncomingAttackArmorClass)throw Error('incoming-attack-armor-class-transport-required')
+        const pending=result;guard();const choice=await input.chooseIncomingAttackArmorClass({facts:structuredClone(pending.facts),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:incoming-ac:${pending.occurrence}`,occurrence:pending.occurrence});guard()
+        result=session.resumeIncomingArmorClass(state,pending.occurrence,pending.facts,choice);continue
+      }
+      if(result.status==='pending-incoming-attack'){
+        if(!input.chooseIncomingAttackReroll)throw Error('incoming-attack-reaction-choice-required')
+        const pending=result;guard();const choice=await input.chooseIncomingAttackReroll({facts:structuredClone(pending.facts),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:incoming:${pending.occurrence}`,occurrence:pending.occurrence});guard()
+        result=session.resumeIncomingAttack(state,pending.occurrence,pending.facts,choice);continue
+      }
+      if(result.status==='pending-relentless'){
+        if(!input.chooseRelentlessReaction)throw Error('relentless-reaction-selection-unavailable')
+        const pending=result
+        guard()
+        const choice=await input.chooseRelentlessReaction({request:structuredClone(pending.request),state:structuredClone(pending.snapshot),eventId:`${hitBatchId}:relentless:${pending.occurrence}`})
+        guard()
+        result=session.resumeRelentless(state,pending.occurrence,pending.request,choice)
+        continue
+      }
       if(result.status==='pending-zero-start'){
         if(!input.prepareZeroHitPointTurnStart)throw new Error('zero-hp-start-input-required')
         const start=await input.prepareZeroHitPointTurnStart(result.actorId,result.snapshot)
@@ -200,7 +363,7 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
         continue
       }
       if(result.status==='pending-weapon-hit') {
-        const hit=result, staged=structuredClone(hit.snapshot), batch=`${hitBatchId}:${hit.occurrence}`
+        const hit=result, staged=copyDnd5eOrdinaryWeaponScene(hit.snapshot,structuredClone(hit.snapshot)), batch=`${hitBatchId}:${hit.occurrence}`
         const offers=listDnd5eWeaponHitActivities({state:staged,event:hit.event,eventBatchId:batch,combatRevision:input.combatRevision})
         const decisions: Dnd5eWeaponHitDecision[]=[]
         const handled: {packageId:string;activityId:string}[]=[]
@@ -231,6 +394,15 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
               selectedSecondaryTargetIds=selected
             }
           }
+          let planarOrigin:'native'|'foreign'|undefined
+          if(entry.activity.outcomes.some(outcome=>outcome.operations.some(operation=>operation.kind==='weapon-hit-banishment'))){
+            if(!input.confirmPlanarOrigin)throw Error('weapon-hit-planar-origin-confirmation-unavailable')
+            planarOrigin=await input.confirmPlanarOrigin({eventId:triggerContext.eventId,occurrence:hit.occurrence,
+              actorId:hit.event.actorId,targetId:hit.event.targetId,packageId:entry.packageId,activityId:entry.activity.id,
+              targetName:staged.combatants[hit.event.targetId].name})
+            guard()
+            if(planarOrigin!=='native'&&planarOrigin!=='foreign')throw Error('weapon-hit-planar-origin-unconfirmed')
+          }
           const authoritativeRolls: Record<string, { values: readonly number[] }> = {}
           for (const roll of offer.rolls) {
             authoritativeRolls[roll.id] = { values: await input.roll({...roll,label:entry.activity.name,kind:roll.kind ?? 'formula',actorId:hit.event.actorId,
@@ -252,6 +424,10 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
             if(!selected.ok)throw new Error(`weapon-hit-${selected.reason}`)
             if(selected.pushSelectionRequired)throw new Error('weapon-hit-push-selection-required')
           }
+          if(selected.decision.planarBanishments?.length){
+            if(!planarOrigin)throw Error('weapon-hit-planar-origin-unconfirmed')
+            selected.decision={...selected.decision,planarBanishments:selected.decision.planarBanishments.map(rule=>({...rule,origin:planarOrigin}))}
+          }
           decisions.push(selected.decision)
           for (const grant of selected.decision.consumedGrants ?? []) consumeDnd5eSingleUseActivityGrant({
             before: staged, after: staged, actorId: hit.event.actorId, packageId: grant.packageId,
@@ -260,7 +436,7 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
           if (selected.decision.usageKeys?.length) {
             const actor = staged.combatants[hit.event.actorId]
             actor.classState.declarativeUsedTurnKeys = { ...actor.classState.declarativeUsedTurnKeys,
-              ...Object.fromEntries(selected.decision.usageKeys.map(key => [key, dnd5eHeadlessTurnKey(staged, actor.id)])) }
+              ...Object.fromEntries(selected.decision.usageKeys.map(key => [key, dnd5eWeaponActivityTurnKey(staged,dnd5eHeadlessTurnKey(staged, actor.id))])) }
           }
           for(const cost of selected.decision.resourceCosts)staged.combatants[hit.event.actorId].classResources[cost.resourceId].current-=cost.amount
         }
@@ -276,6 +452,7 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
           targetWeaponMultipliers:decisions.flatMap(decision=>decision.targetWeaponMultipliers??[]),
           targetSightLimits:decisions.flatMap(decision=>decision.targetSightLimits??[]),
           linkedEffectApplications:decisions.flatMap(decision=>decision.linkedEffectApplications??[]),
+          planarBanishments:decisions.flatMap(decision=>decision.planarBanishments??[]),
           secondaryDamageTargets:decisions.flatMap(decision=>decision.secondaryDamageTargets??[]),
           pushMovements:decisions.flatMap(decision=>decision.pushMovements??[]),
           followRequests:decisions.flatMap(decision=>decision.followRequests??[]),
@@ -307,7 +484,7 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
           const castLevel = spellPreparation?.ok ? decision.castLevel : undefined
           if (spellPreparation?.ok && (castLevel == null || !spellPreparation.availableCastLevels.includes(castLevel))) throw new Error('damage-reaction-invalid-slot-choice')
           const rollEntry = castLevel == null ? entry : { ...entry, activity: scaleDnd5eActivityDefinitionV1(entry.activity, { actor: candidates.state.combatants[actorId], castLevel }).activity }
-          const rolled=await rollDnd5eActivityTriggerDiceV1({state:candidates.state,available:rollEntry,triggerContext,actorId,targetIds:[actorId],roll:async request=>{
+          const rolled=await rollDnd5eActivityTriggerDiceV1({chooseSpellDamageDice:input.chooseSpellDamageDice,charactersByCombatantId:input.charactersByCombatantId,state:candidates.state,available:rollEntry,triggerContext,actorId,targetIds:[actorId],roll:async request=>{
             guard();const values=await input.roll(request);guard();return values
           }})
           guard()
@@ -332,4 +509,11 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
     if(result.status!=='resolved')throw new Error('damage-reaction-checkpoint-limit')
     return finalizeMaterials ? finalizeMaterials(result.result, result.materialChanges ?? []) : result.result
   } finally {session.cancel()}
+}
+
+/** Full prepared variant of the existing internal material boundary. The owning
+ * genuine async facade retains its complete application and material tail. */
+export function resolveDnd5ePreparedNativeBoundaryWithMaterials<Input extends{prepared:{state:Dnd5eHeadlessCombatState}&Dnd5ePreparedMaterialContext},Result>(options:Dnd5eDamageReactionFlowOptions,input:Input,resolve:(value:Input)=>Result,succeeded:(result:Result)=>boolean){
+ const charactersByCombatantId=prepareDnd5eDamageReactionMaterialCharacters(options.charactersByCombatantId??{},input.prepared)
+ return driveDamageReactions(options,input.prepared.state,(pause,hitPause)=>createDnd5ePreparedDamageCommitSession(input,value=>({result:resolve(value),materialChanges:[]as readonly Dnd5eReactionMaterialChange[]}),pause,{charactersByCombatantId,succeeded:value=>succeeded(value.result)},hitPause,options.replayEventBatchId),(value,materialChanges)=>({...value,materialChanges}))
 }

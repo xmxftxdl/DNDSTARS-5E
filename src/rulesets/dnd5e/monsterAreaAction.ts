@@ -1,4 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import { multipartActionOriginToken, multipartTokenHeadProjections } from './multipartMapGeometry'
+import { refreshDnd5eMapSpatialRelations } from './mapBridge'
 import {
   DND_FEET_PER_CELL,
   mapCellExtent,
@@ -350,7 +352,7 @@ export function dnd5eMonsterAreaActionTargetIds(input: {
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
 }): readonly string[] | undefined {
-  const actorToken = input.map.tokens.find((token) =>
+  let actorToken = input.map.tokens.find((token) =>
     token.id === input.actorTokenId && token.type === 'enemy')
   const monster = actorToken?.poolId
     ? getDnd5eSrdMonster(actorToken.poolId)
@@ -361,6 +363,20 @@ export function dnd5eMonsterAreaActionTargetIds(input: {
     ? dnd5eMonsterAreaSavingThrowEffect(action, input.variantId)
     : undefined
   if (!actorToken || !action || !variant || variant.actorLanding) return undefined
+  actorToken = multipartActionOriginToken(actorToken,input.map,action)
+  if (!actorToken) return undefined
+  if(monster?.multipartRule==='false-hydra-v1' && action.id==='many-headed-scream') {
+    const heads=multipartTokenHeadProjections(actorToken,input.map)
+    const origins=heads.length?heads:actorToken.dnd5eCombatState?.monsterMultipart?[]:[actorToken]
+    const units=input.map.gridSize/(input.map.feetPerCell??5),geometry=mapGeometryRuntimeForMap(input.map.id)
+    return input.map.tokens.filter(target=>target.id!==actorToken!.id && target.type!=='obstacle' &&
+      isPresentMonsterAreaCreature(target,input.characters) && monsterAreaTokensShareInteractionSpace(actorToken!,target,input.characters) &&
+      origins.some(head=>Math.hypot((target.x-head.x)/units,(target.y-head.y)/units,
+        mapGeometryTokenElevation(geometry,target)-mapGeometryTokenElevation(geometry,head))<=60 &&
+        !mapGeometryLineOfEffectBlocked({map:input.map,geometry,from:head,to:target,
+          fromElevationFeet:mapGeometryTokenElevation(geometry,head),toElevationFeet:mapGeometryTokenElevation(geometry,target)})))
+      .map(target=>target.id)
+  }
   const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken,
     combatId: `area-targets:${input.map.id}`,
     initiativeOrder: input.map.tokens.filter(token => token.type !== 'obstacle').map(token =>
@@ -454,7 +470,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
   ok: false
   reason: Dnd5eMonsterAreaActionRejectReason
 } {
-  const actorToken = input.map.tokens.find((token) =>
+  let actorToken = input.map.tokens.find((token) =>
     token.id === input.actorTokenId && token.type === 'enemy')
   if (!actorToken?.poolId) return { ok: false, reason: 'invalid-actor' }
   const monster = getDnd5eSrdMonster(actorToken.poolId)
@@ -467,6 +483,8 @@ export function prepareDnd5eMonsterAreaAction(input: {
     !monster || !action || dnd5eMonsterActionAutomation(action) !== 'headless' ||
     !variant
   ) return { ok: false, reason: 'invalid-action' }
+  actorToken = multipartActionOriginToken(actorToken,input.map,action)
+  if (!actorToken) return {ok:false,reason:'invalid-action'}
   if (
     !variant.allowRepeatedTargetSelections &&
     new Set(input.targetTokenIds).size !== input.targetTokenIds.length
@@ -692,6 +710,13 @@ export function prepareDnd5eMonsterAreaAction(input: {
     initiativeOrder: snapshotInitiativeOrder,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  if (action.multipartHeadId && snapshot.state.combatants[actorToken.id]) {
+    const actor = snapshot.state.combatants[actorToken.id]
+    actor.classState.monsterMultipart!.activeHeadId=action.multipartHeadId
+    actor.position={x:actorToken.x,y:actorToken.y}
+    actor.elevationFeet=actorToken.elevationFeet??0
+    refreshDnd5eMapSpatialRelations(snapshot.state,input.map,undefined,{geometry})
+  }
   if (
     actorIndex < 0 || !snapshot.state.combatants[actorToken.id] ||
     authoritativeTargets.some((target) => !snapshot.state.combatants[target.id])

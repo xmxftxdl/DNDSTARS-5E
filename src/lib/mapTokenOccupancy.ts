@@ -1,3 +1,4 @@
+import {isDnd5eTokenBanished} from './combatTokens'
 import type { BattleMap, Token } from '../store/maps'
 import { occupiedCells } from './gridCombat'
 import { mapGeometryTokenElevation, type MapGeometryState } from './mapGeometry'
@@ -15,7 +16,7 @@ export function mapTokenSweepBlocked(input: {
   const excluded=new Set([input.mover.id,...input.excludedIds??[]])
   const half=input.mover.size*input.map.gridSize/2,height=mapTokenBodyHeight(input.mover)
   return input.map.tokens.some(other=>{
-    if(excluded.has(other.id)||other.dnd5eSpellEffect||(other.type==='obstacle'&&other.obstacleKind==='marker'))return false
+    if(excluded.has(other.id)||isDnd5eTokenBanished(other,[])||other.dnd5eSpellEffect||(other.type==='obstacle'&&other.obstacleKind==='marker'))return false
     const otherHalf=other.size*input.map.gridSize/2,base=mapGeometryTokenElevation(input.geometry,other)
     let enter=0,exit=1
     const axis=(start:number,end:number,low:number,high:number)=>{
@@ -37,7 +38,7 @@ export function createMapTokenOccupancy(
   ignoreTokens = false, excludedIds: readonly string[] = [],
 ) {
   const excluded = new Set([mover.id, ...excludedIds])
-  const bodies = ignoreTokens ? [] : map.tokens.filter(token => !excluded.has(token.id) && !token.dnd5eSpellEffect && !(token.type === 'obstacle' && token.obstacleKind === 'marker'))
+  const bodies = ignoreTokens ? [] : map.tokens.filter(token => !excluded.has(token.id) && !isDnd5eTokenBanished(token,[]) && !token.dnd5eSpellEffect && !(token.type === 'obstacle' && token.obstacleKind === 'marker'))
     .map(token => ({ token, base: mapGeometryTokenElevation(geometry, token), height: mapTokenBodyHeight(token) }))
   const cache = new Map<string, Set<string>>()
   return (base: number, top = base + mapTokenBodyHeight(mover)): Set<string> => {

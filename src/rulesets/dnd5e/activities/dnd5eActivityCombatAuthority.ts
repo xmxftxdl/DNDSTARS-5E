@@ -1,3 +1,8 @@
+import{currentSoulOfDeceitReadingPolicy}from'../mastermindSoulOfDeceit'
+import {dnd5eWeaponActivityTurnKey} from '../ordinaryWeaponScene'
+import { dnd5eActivityWorldFactCommandAuthorized } from './dnd5eActivityWorldFacts'
+import {registeredDnd5eRulesPlugins} from '../plugins/pluginRuntimeIndex'
+import { dnd5eActiveMinimumAbilityCheckD20 } from '../activeEffects'
 import { dnd5eActivityRetainedSaveDiceHooks, type Dnd5eActivityRetainedSaveDice } from './dnd5eActivityRetainedSaveDice'
 import { dnd5eEquipmentHomingProjectileReached } from '../homingProjectilePath'
 import { dnd5eActorEtherealAccess } from '../etherealAccess'
@@ -71,6 +76,7 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
   const resurrectionPenalty = combatant.classState.resurrectionPenalty?.value ?? 0
   return {
     etherealAccess: dnd5eActorEtherealAccess(state, combatant.classState.activeEffects),
+    pluginFeatureIds:[...combatant.pluginFeatureIds],
     id: combatant.id,
     raging: combatant.classState.raging === true,
     criticalThresholdAgainstSource: dnd5eTargetCriticalThreshold(combatant.classState.activeEffects, activitySource?.id),
@@ -101,7 +107,7 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
       ? { ...combatant.classState.temporaryHitPointsSource } : undefined,
     maxHp: combatant.maxHp,
     speed: dnd5eEffectiveSpeed(combatant),
-    armorClass: combatant.armorClass + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'armorClass'),
+    armorClass: combatant.armorClass + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'armorClass', combatant.magicSuppressed),
     sizeRank: combatant.sizeRank,
     creatureType: combatant.creatureType,
     elevationFeet: combatant.elevationFeet,
@@ -127,7 +133,7 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     conditions: combatant.conditions.filter((condition): condition is Dnd5eStandardConditionId =>
       STANDARD_CONDITIONS.has(condition)),
     savingThrowModifiers: Object.fromEntries(Object.entries(combatant.savingThrowBonuses)
-      .map(([ability, modifier]) => [ability, modifier - resurrectionPenalty + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows') + dnd5eActiveSavingThrowProficiencyBonus(combatant.classState.activeEffects, ability as keyof typeof combatant.abilities, combatant)])),
+      .map(([ability, modifier]) => [ability, modifier - resurrectionPenalty + dnd5eConcentrationDefenseBonus(combatant.pluginFeatureIds, combatant.concentrating ? combatant.classState.concentrationSpellId : undefined, 'savingThrows', combatant.magicSuppressed) + dnd5eActiveSavingThrowProficiencyBonus(combatant.classState.activeEffects, ability as keyof typeof combatant.abilities, combatant)])),
     hitPointDice: combatant.hitPointDice?.map(pool => ({ ...pool })),
     hitPointDiceMaximum: combatant.statBlockId
       ? dnd5eMonsterHitDiceMaximum(getDnd5eSrdMonster(combatant.statBlockId)?.hitPoints.dice)
@@ -141,13 +147,15 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     ammunitionContainers:combatant.ammunitionContainers,
     maximizeHealingDice: dnd5eHeadlessMaximizeHealingDice(state, combatant),
     maximizeSpellHealingDiceAtZeroHp: dnd5eMaximizesSpellHealingAtZeroHp(combatant),
+    minimumAbilityCheckD20ByAbility: Object.fromEntries((['str','dex','con','int','wis','cha'] as const).map(ability =>
+      [ability, dnd5eActiveMinimumAbilityCheckD20(combatant.classState.activeEffects, ability)])),
     rollDiceEffects: structuredClone((combatant.classState.activeEffects ?? []).filter(effect => effect.modifiers?.rollDiceModifiers != null)),
     charmedByActorIds: dnd5eActiveCharmSourceIds(combatant.classState.activeEffects, combatant.magicSuppressed),
     activeEffectDefinitionIds: (combatant.classState.activeEffects ?? []).map((effect) => ({
       definitionId: effect.definitionId,
       stackingKey: effect.stackingKey,
       sourceActorId: effect.source.actorId,
-      sourceCharacterId: effect.source.characterId,
+      sourceCharacterId: effect.source.characterId, sourceRulesId: effect.source.rulesId, sourcePluginId: effect.source.pluginId, sourcePluginAvailable: registeredDnd5eRulesPlugins().some(plugin=>plugin.id===effect.source.pluginId),
       tags: effect.suspendedBy?.length ? [] : effect.tags,
       suspended: !!effect.suspendedBy?.length,
       spellLevel: effect.source.spellLevel,
@@ -174,6 +182,9 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     d20RollModifier: resurrectionPenalty || undefined,
     canHearActivitySource: activitySource
       ? dnd5eCombatantCanHearSource(combatant, activitySource, state?.mapId)
+      : undefined,
+    canSeeActivitySource: activitySource && state
+      ? dnd5eCombatantCanSee(state, combatant.id, activitySource.id)
       : undefined,
   }
 }
@@ -305,6 +316,8 @@ function resolveRegisteredDnd5eActivityInCombatInternal(
       },
     }
   }
+  if (!dnd5eActivityWorldFactCommandAuthorized(input.command, activity, {mapId:input.state.mapId,combatId:input.state.combatId,
+    actorId:actor.id,targetIds:input.command.targetIds})) return {phase:'resolve',result:{ok:false,reason:'unauthorized-actor',details:['authenticated current DM fact required']}}
   const spatialActivity = { ...activity, target: dnd5eActivityEffectiveTargetV1(activity,
     { actor, castLevel: input.command.castLevel }, input.command.choices) }
   const seenWithin = spatialActivity.target.kind === 'creature' ? spatialActivity.target.requiresSeenWithinSeconds : undefined
@@ -349,8 +362,9 @@ function resolveRegisteredDnd5eActivityInCombatInternal(
       : origin ? input.state.distanceFeetByCombatantPair?.[dnd5eCombatantPairKey(origin, target!.id)] ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY,
   ]))
   const turnKey = dnd5eHeadlessTurnKey(input.state, actor.id)
+  const activityTurnKey = dnd5eWeaponActivityTurnKey(input.state, turnKey)
   const usedTurnKeys = new Set(Object.entries(actor.classState.declarativeUsedTurnKeys ?? {})
-    .filter(([, appliedTurnKey]) => appliedTurnKey === turnKey)
+    .filter(([, appliedTurnKey]) => appliedTurnKey === activityTurnKey)
     .map(([key]) => key))
 
   return resolveAndCommitDnd5eActivityCommand(input.state, {
@@ -361,15 +375,19 @@ function resolveRegisteredDnd5eActivityInCombatInternal(
     activityTeleportInterruptions: input.activityTeleportInterruptions,
     sourceActionInterruptionReaction: input.sourceActionInterruptionReaction,
     counterspellReaction: input.counterspellReaction,
+    resolveSpellDamageFeatureIds:(targetId,attribution)=>{if(attribution!=='grant-source')return actor.pluginFeatureIds;const grant=grantedDamageSource(input.state,actor,input.command.packageId,input.command.activityId,targetId);return grant?.source.kind==='spell'?grant.actor.pluginFeatureIds:[]},
     resolveDamageRollBonus: (targetId, attribution) => dnd5eTargetDamageRollBonus(input.state.combatants[targetId]?.classState.activeEffects,
       attribution === 'grant-source' ? grantedDamageSource(input.state, actor, input.command.packageId, input.command.activityId, targetId)?.actor.id : actor.id),
     command: input.command,
     currentRevision: input.combatRevision,
     combatActive: input.state.active,
+    combatRound: input.state.round,
+    attackActionUsed: actor.classState.weaponAttackActionTurnKey === turnKey,
+    actionEconomyAvailable: {action:actor.turn.actionAvailable,'bonus-action':actor.turn.bonusActionAvailable,reaction:actor.turn.reactionAvailable},
     currentTurnActorId: input.state.active ? input.state.initiativeOrder[input.state.initiativeIndex] : undefined,
     actor: dnd5eActivityActorSnapshotFromCombatantV1(actor, actor, input.state),
     combatants: Object.values(input.state.combatants).map(combatant => dnd5eActivityActorSnapshotFromCombatantV1(combatant, actor, input.state)),
-    targets: targets.map((target) => ({ ...dnd5eActivityActorSnapshotFromCombatantV1(target!, actor, input.state), conditionImmunities: dnd5eActivityTargetImmunities(spatialActivity, target!, actor), attackArmorClasses: dnd5eActivityAttackDefenses(input.state, actor.id, target!.id) })),
+    targets: targets.map((target) => ({ ...dnd5eActivityActorSnapshotFromCombatantV1(target!, actor, input.state),soulThoughtPolicy:currentSoulOfDeceitReadingPolicy(input.state,{parentId:input.command.commandId,ownerId:target!.id,readerId:actor.id}), conditionImmunities: dnd5eActivityTargetImmunities(spatialActivity, target!, actor), attackArmorClasses: dnd5eActivityAttackDefenses(input.state, actor.id, target!.id) })),
     authoritativeRolls: input.authoritativeRolls,
     disadvantageNegationChoices: input.disadvantageNegationChoices,
     saveFactsByTargetId: input.saveFactsByTargetId,

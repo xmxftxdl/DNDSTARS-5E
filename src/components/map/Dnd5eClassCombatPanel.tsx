@@ -1,3 +1,4 @@
+import{dnd5eCharacterHelpTacticsRange}from'../../rulesets/dnd5e/helpTacticsProjection'
 import { useMemo, useState } from 'react'
 import { dnd5eCharacterWeaponAttackSlot } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
 import { migrateCharacterToDnd5e } from '../../rulesets/dnd5e/character'
@@ -33,6 +34,7 @@ import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 import { dnd5eCreatureFormEndControl } from './dnd5eCreatureFormEndControl'
 
 export interface Dnd5eFeatureTargetOption {
+  helpAttackEligible?:boolean
   removableEffects?: readonly { effectId: string; label: string; actionLabel: string; maxDistanceFeet: number }[]
   tokenId: string
   tokenType?: 'player' | 'enemy'
@@ -323,6 +325,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
       />
 
       <Dnd5eBasicActionsPanel
+        helpAsBonusAction={dnd5eCharacterHelpTacticsRange(storedCharacter)!==undefined}
         attackTeleportRangeFeet={dnd5eCharacterAttackTeleportRange(storedCharacter)}
         canAct={canAct}
         actionAvailable={turnEconomy.action.current > 0 || (canContinueAttackAction && !attackSlot?.weaponOnly)}

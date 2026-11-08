@@ -1,3 +1,5 @@
+import {readDnd5eMonsterZeroCharacterPublication,closeDnd5eMonsterZeroCharacterPublication,readDnd5eOpportunityCharacterPublication,closeDnd5eOpportunityCharacterPublication,type Dnd5eOpportunityCharacterPublicationScope} from '../rulesets/dnd5e/opportunityCharacterPublication'
+import type {SharedPlayerActionState} from '../lib/sharedCombatTypes'
 import { normalizeSubmergedBreathingEffectDeadlines } from '../../shared/submerged-breathing-state.mjs'
 import { reconcileDnd5eInventoryExchangeRitualActor } from '../rulesets/dnd5e/inventoryExchangeRitualState'
 import { normalizeDnd5eSourcedExhaustion, dnd5eSourcedExhaustionLevel } from '../rulesets/dnd5e/sourcedExhaustion'
@@ -8,7 +10,7 @@ import { normalizeDnd5eRestActivityWindow } from '../rulesets/dnd5e/restActivity
 import { normalizeDnd5eAwakeningEvents } from '../rulesets/dnd5e/awakeningEvents'
 import { normalizeDnd5eDreamContact, dnd5eDreamContactRosterKey } from '../rulesets/dnd5e/dreamContact'
 import { persist } from 'zustand/middleware'
-import { getSharedResourceRevisionWatermark, loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
+import { getSharedResourceRevisionWatermark, loadSharedResource, saveSharedResourceWithResult, saveSharedResourcesAtomically, type SharedResourceSaveResult } from '../composition/browserSharedRoomResources'
 import { isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { getAccountSession } from '../lib/accountSession'
@@ -103,6 +105,8 @@ let pendingLocalCharacterClassResourceEditsHydrated = false
 const AUTHORITY_CHARACTER_PATCH_TTL_MS = 30000
 type PendingAuthorityCharacterPatch = {
   patch: Partial<Character>
+  combatStatePatch?: Partial<NonNullable<Character['dnd5eCombatState']>>
+  activeEffectPatch?: Record<string, NonNullable<NonNullable<Character['dnd5eCombatState']>['activeEffects']>[number] | undefined>
   updatedAt: number
 }
 const pendingAuthorityCharacterPatches = new Map<string, PendingAuthorityCharacterPatch>()
@@ -128,14 +132,38 @@ function markPendingAuthorityCharacterPatch(
   current: Character,
   patch: Partial<Character>,
   now: number = Date.now(),
+  registry:Map<string,PendingAuthorityCharacterPatch>=pendingAuthorityCharacterPatches,
 ): void {
-  gcPendingAuthorityCharacterPatches(now)
+  if(registry===pendingAuthorityCharacterPatches)gcPendingAuthorityCharacterPatches(now)
   const changedEntries = Object.entries(patch).filter(([key, value]) =>
     characterFieldSnapshot(current[key as keyof Character]) !== characterFieldSnapshot(value))
   if (changedEntries.length === 0) return
-  const previous = pendingAuthorityCharacterPatches.get(id)?.patch ?? {}
-  pendingAuthorityCharacterPatches.set(id, {
-    patch: { ...previous, ...Object.fromEntries(changedEntries) } as Partial<Character>,
+  const prior = registry.get(id)
+  const previous = prior?.patch ?? {}
+  let combatStatePatch = prior?.combatStatePatch
+  let activeEffectPatch = prior?.activeEffectPatch
+  let fields = changedEntries
+  if (patch.dnd5eCombatState) {
+    const before = current.dnd5eCombatState ?? {}
+    const after = patch.dnd5eCombatState
+    const stateFields = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      // Sighting labels are a server-derived projection, not a protected action result.
+      .filter(key => key !== 'recentCreatureSightings' && key !== 'activeEffects')
+      .filter(key => characterFieldSnapshot(before[key as keyof typeof before]) !== characterFieldSnapshot(after[key as keyof typeof after]))
+      .map(key => [key, after[key as keyof typeof after]])
+    combatStatePatch = { ...combatStatePatch, ...Object.fromEntries(stateFields) }
+    const oldEffects = new Map(current.dnd5eCombatState?.activeEffects?.map(effect => [effect.id,effect]))
+    const nextEffects = new Map(after.activeEffects?.map(effect => [effect.id,effect]))
+    const effectChanges = [...new Set([...oldEffects.keys(),...nextEffects.keys()])]
+      .filter(id => characterFieldSnapshot(oldEffects.get(id)) !== characterFieldSnapshot(nextEffects.get(id)))
+      .map(id => [id,nextEffects.get(id)])
+    activeEffectPatch = { ...activeEffectPatch, ...Object.fromEntries(effectChanges) }
+    fields = changedEntries.filter(([key]) => key !== 'dnd5eCombatState')
+  }
+  registry.set(id, {
+    patch: { ...previous, ...Object.fromEntries(fields) } as Partial<Character>,
+    combatStatePatch,
+    activeEffectPatch,
     updatedAt: now,
   })
 }
@@ -144,29 +172,137 @@ export function clearPendingAuthorityCharacterPatchesForTest(): void {
   pendingAuthorityCharacterPatches.clear()
 }
 
-export function mergePendingAuthorityCharacterPatches(
+function mergeAuthorityCharacterPatchRegistry(
   sharedCharacters: Character[],
+  registry:Map<string,PendingAuthorityCharacterPatch>,
+  expire:boolean=true,
   now: number = Date.now(),
 ): Character[] {
-  gcPendingAuthorityCharacterPatches(now)
-  if (pendingAuthorityCharacterPatches.size === 0) return sharedCharacters
+  if(expire)gcPendingAuthorityCharacterPatches(now)
+  if (registry.size === 0) return sharedCharacters
   return sharedCharacters.map((character) => {
-    const pending = pendingAuthorityCharacterPatches.get(character.id)
+    const pending = registry.get(character.id)
     if (!pending) return character
     const unacknowledgedEntries = Object.entries(pending.patch).filter(([key, value]) =>
       characterFieldSnapshot(character[key as keyof Character]) !== characterFieldSnapshot(value))
-    if (unacknowledgedEntries.length === 0) {
-      pendingAuthorityCharacterPatches.delete(character.id)
+    const pendingState = Object.entries(pending.combatStatePatch ?? {}).filter(([key,value]) =>
+      characterFieldSnapshot(character.dnd5eCombatState?.[key as keyof NonNullable<Character['dnd5eCombatState']>]) !== characterFieldSnapshot(value))
+    const currentEffects = character.dnd5eCombatState?.activeEffects ?? []
+    const currentEffectsById = new Map(currentEffects.map(effect => [effect.id,effect]))
+    const pendingEffects = Object.entries(pending.activeEffectPatch ?? {}).filter(([id,effect]) =>
+      characterFieldSnapshot(currentEffectsById.get(id)) !== characterFieldSnapshot(effect))
+    if (unacknowledgedEntries.length === 0 && pendingState.length === 0 && pendingEffects.length === 0) {
+      registry.delete(character.id)
       return character
     }
     const unacknowledgedPatch = Object.fromEntries(unacknowledgedEntries) as Partial<Character>
-    pendingAuthorityCharacterPatches.set(character.id, {
+    const combatStatePatch = Object.fromEntries(pendingState)
+    registry.set(character.id, {
       patch: unacknowledgedPatch,
+      combatStatePatch,
+      activeEffectPatch: Object.fromEntries(pendingEffects),
       updatedAt: pending.updatedAt,
     })
-    return { ...character, ...unacknowledgedPatch }
+    return { ...character, ...unacknowledgedPatch,
+      ...(pendingState.length || pendingEffects.length ? { dnd5eCombatState: {
+        schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, ...character.dnd5eCombatState, ...combatStatePatch,
+        ...(pendingEffects.length ? { activeEffects: [...currentEffects.filter(effect => !pendingEffects.some(([id]) => id === effect.id)),...pendingEffects.flatMap(([,effect]) => effect ? [effect] : [])] } : {}),
+      } } : {}) }
+
   })
 }
+
+export function mergePendingAuthorityCharacterPatches(sharedCharacters:Character[],now:number=Date.now()):Character[]{return mergeAuthorityCharacterPatchRegistry(sharedCharacters,pendingAuthorityCharacterPatches,true,now)}
+
+const provisionalAuthorityCharacterPatches=new Map<Dnd5eOpportunityCharacterPublicationScope,Map<string,PendingAuthorityCharacterPatch>>()
+function currentProvisionalAuthorityCharacterPatches(){
+ for(const [scope,patches]of provisionalAuthorityCharacterPatches){
+  try{readDnd5eOpportunityCharacterPublication(scope);if(patches.size)continue}catch{/* A different room/Host never inherits this runtime overlay. */}
+  provisionalAuthorityCharacterPatches.delete(scope)
+ }
+ return provisionalAuthorityCharacterPatches
+}
+function markProvisionalAuthorityCharacterPatch(scope:Dnd5eOpportunityCharacterPublicationScope,id:string,current:Character,patch:Partial<Character>){
+ readDnd5eOpportunityCharacterPublication(scope)
+ const registry=provisionalAuthorityCharacterPatches.get(scope)??new Map<string,PendingAuthorityCharacterPatch>()
+ markPendingAuthorityCharacterPatch(id,current,patch,Date.now(),registry)
+ provisionalAuthorityCharacterPatches.set(scope,registry)
+}
+function mergeProvisionalAuthorityCharacterPatches(characters:Character[]){
+ let merged=characters
+ const local=new Map(useCharacterStore.getState().characters.map(character=>[character.id,character]))
+ for(const [scope,patches]of currentProvisionalAuthorityCharacterPatches()){
+  const before=new Map(readDnd5eOpportunityCharacterPublication(scope).beforeCharacters.map(character=>[character.id,character])),incoming=new Map(merged.map(character=>[character.id,character]))
+  merged=mergeAuthorityCharacterPatchRegistry(merged,patches,false).map(character=>{
+   const pending=patches.get(character.id),original=before.get(character.id),server=incoming.get(character.id),current=local.get(character.id)
+   if(!pending||!original||!server||!current)return character
+   const next=structuredClone(character)
+   const value=(object:object|undefined,key:string):unknown=>object?Object.getOwnPropertyDescriptor(object,key)?.value:undefined
+   const choose=(after:unknown,previous:unknown,authority:unknown,live:unknown)=>{
+    if(characterFieldSnapshot(live)!==characterFieldSnapshot(after)&&characterFieldSnapshot(live)!==characterFieldSnapshot(previous))return {preserve:true,value:live}
+    if(characterFieldSnapshot(authority)!==characterFieldSnapshot(previous)&&characterFieldSnapshot(authority)!==characterFieldSnapshot(after))return {preserve:true,value:authority}
+    return {preserve:false,value:undefined}
+   }
+   const put=(object:object,key:string,row:unknown)=>{if(row===undefined)Reflect.deleteProperty(object,key);else Object.defineProperty(object,key,{value:structuredClone(row),enumerable:true,configurable:true,writable:true})}
+   for(const [key,after]of Object.entries(pending.patch)){const selected=choose(after,value(original,key),value(server,key),value(current,key));if(selected.preserve)put(next,key,selected.value)}
+   const state={...next.dnd5eCombatState}
+   for(const [key,after]of Object.entries(pending.combatStatePatch??{})){const selected=choose(after,value(original.dnd5eCombatState,key),value(server.dnd5eCombatState,key),value(current.dnd5eCombatState,key));if(selected.preserve)put(state,key,selected.value)}
+   let effects=[...(state.activeEffects??[])]
+   for(const [id,after]of Object.entries(pending.activeEffectPatch??{})){const selected=choose(after,original.dnd5eCombatState?.activeEffects?.find(effect=>effect.id===id),server.dnd5eCombatState?.activeEffects?.find(effect=>effect.id===id),current.dnd5eCombatState?.activeEffects?.find(effect=>effect.id===id));if(selected.preserve){effects=effects.filter(effect=>effect.id!==id);const effect=selected.value;if(effect&&typeof effect==='object'&&'id'in effect&&effect.id===id){const live=current.dnd5eCombatState?.activeEffects?.find(row=>row.id===id),saved=server.dnd5eCombatState?.activeEffects?.find(row=>row.id===id);if(live&&characterFieldSnapshot(live)===characterFieldSnapshot(effect))effects.push(structuredClone(live));else if(saved&&characterFieldSnapshot(saved)===characterFieldSnapshot(effect))effects.push(structuredClone(saved))}}}
+   if(pending.activeEffectPatch&&Object.keys(pending.activeEffectPatch).length){if(effects.length||server.dnd5eCombatState?.activeEffects!==undefined)state.activeEffects=effects;else delete state.activeEffects}
+   if(characterFieldSnapshot(state)===characterFieldSnapshot(server.dnd5eCombatState??{})){if(server.dnd5eCombatState)next.dnd5eCombatState=structuredClone(server.dnd5eCombatState);else delete next.dnd5eCombatState}
+   else next.dnd5eCombatState={...state,schemaVersion:DND5E_COMBAT_STATE_SCHEMA_VERSION}
+   return next
+  })
+ }
+ return merged
+}
+
+function restoreProvisionalAuthorityCharacterFields(current:Character,shared:Character,pending:PendingAuthorityCharacterPatch,strict:boolean):Character{
+ const next=structuredClone(current)
+ const restore=(target:object,authority:object,key:string,after:unknown)=>{
+  const value:unknown=Object.getOwnPropertyDescriptor(target,key)?.value,server:unknown=Object.getOwnPropertyDescriptor(authority,key)?.value
+  if(characterFieldSnapshot(value)===characterFieldSnapshot(server))return
+  if(characterFieldSnapshot(value)!==characterFieldSnapshot(after)){
+   if(strict)throw Error('characters-provisional:independent-field-conflict')
+   return // A real user edit is preserved when this exact parent ends.
+  }
+  if(Object.hasOwn(authority,key))Object.defineProperty(target,key,{value:structuredClone(server),enumerable:true,configurable:true,writable:true})
+  else Reflect.deleteProperty(target,key)
+ }
+ // Character fields are ordinary data records; these copies are never an
+ // authority certificate and cannot issue or alter a parent transaction.
+ for(const [key,after]of Object.entries(pending.patch))restore(next,shared,key,after)
+ if(pending.combatStatePatch||pending.activeEffectPatch){
+  const state={...next.dnd5eCombatState},authority={...shared.dnd5eCombatState}
+  for(const [key,after]of Object.entries(pending.combatStatePatch??{}))restore(state,authority,key,after)
+  const effects=[...(state.activeEffects??[])],serverEffects=new Map(authority.activeEffects?.map(row=>[row.id,row]))
+  for(const [id,after]of Object.entries(pending.activeEffectPatch??{})){
+   const index=effects.findIndex(row=>row.id===id),value=index<0?undefined:effects[index],server=serverEffects.get(id)
+   if(characterFieldSnapshot(value)===characterFieldSnapshot(server))continue
+   if(characterFieldSnapshot(value)!==characterFieldSnapshot(after)){if(strict)throw Error('characters-provisional:independent-effect-conflict');continue}
+   if(index>=0)effects.splice(index,1)
+   if(server)effects.push(structuredClone(server))
+  }
+  if(pending.activeEffectPatch&&Object.keys(pending.activeEffectPatch).length){if(effects.length||authority.activeEffects!==undefined)state.activeEffects=effects;else delete state.activeEffects}
+  if(characterFieldSnapshot(state)===characterFieldSnapshot(shared.dnd5eCombatState??{})){if(shared.dnd5eCombatState)next.dnd5eCombatState=structuredClone(shared.dnd5eCombatState);else delete next.dnd5eCombatState}
+  else next.dnd5eCombatState={...state,schemaVersion:DND5E_COMBAT_STATE_SCHEMA_VERSION}
+ }
+ return next
+}
+/** Ordinary snapshot saves cannot carry this parent's provisional fields.
+ * Other characters and other fields retain the existing save/repair behavior. */
+export function excludeProvisionalAuthorityCharactersFromSharedSave(local:Character[],shared:readonly Character[]|undefined):Character[]{
+ const authority=new Map(shared?.map(row=>[row.id,row]));let next=local
+ for(const registry of currentProvisionalAuthorityCharacterPatches().values())next=next.map(character=>{
+  const pending=registry.get(character.id),server=authority.get(character.id)
+  if(!pending)return character
+  if(!server)throw Error('characters-provisional:existing-parent-character-required')
+  return restoreProvisionalAuthorityCharacterFields(character,server,pending,true)
+ })
+ return next
+}
+export function clearProvisionalAuthorityCharactersForTest(){provisionalAuthorityCharacterPatches.clear()}
 
 export function pendingAuthorityCharacterPatchesNeedRepublish(
   incomingCharacters: readonly Character[],
@@ -1211,6 +1347,13 @@ interface SharedCharactersState {
   }
 }
 
+export async function publishCharactersAtSnapshotRevision(payload: SharedCharactersState, expectedRevision: number): Promise<SharedResourceSaveResult> {
+  // Atomic authority writes are DM-only; retain the existing restricted player profile route.
+  if (isPlayerPort()) return saveSharedResourceWithResult('characters', payload)
+  const result = await saveSharedResourcesAtomically([{ name: 'characters', data: payload, expectedRevision }])
+  return { status: 'saved', revision: result.revisions.characters }
+}
+
 function sharedCharactersRoomKey(): string {
   return getRoomSession()?.roomId ?? '__local__'
 }
@@ -1531,6 +1674,12 @@ function finalizeCharacter(input: LegacyCharacterSave): Character {
   return { ...withHitPoints, ac: dnd5eArmorClass(withHitPoints) }
 }
 
+/** The same pure finalization used by an authority Store patch. No Store write
+ * or transaction authority is issued by computing the resulting character. */
+export function projectDnd5eAuthorityCharacterPatch(current:Character,patch:Partial<Character>):Character {
+  return finalizeCharacter({ ...current, ...patch })
+}
+
 /** 运行时类型不含旧字段；共享快照只复制 V24 核心结构。 */
 export function serializeDnd5eCharacterSnapshot(character: Character): Character {
   return structuredClone(character)
@@ -1560,6 +1709,8 @@ interface CharacterState {
   selectedId: string | null
   loadShared: (options?: { force?: boolean }) => Promise<void>
   saveSharedNow: (updatedAt?: number) => Promise<number>
+  finishMonsterZeroPublication:(scope:Dnd5eOpportunityCharacterPublicationScope,operation:object)=>Promise<void>
+  finishOpportunityPublication:(scope:Dnd5eOpportunityCharacterPublicationScope,action:SharedPlayerActionState)=>Promise<void>
   select: (id: string | null) => void
   add: (name?: string) => string
   importCharacter: (character: Partial<Character>) => string
@@ -1577,6 +1728,7 @@ interface CharacterState {
       protectClassResourcesUntilAcknowledged?: boolean
       protectClassChoicesUntilAcknowledged?: boolean
       protectPatchUntilAcknowledged?: boolean
+      deferSharedPublicationUntilAck?:Dnd5eOpportunityCharacterPublicationScope
     },
   ) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
@@ -1629,11 +1781,11 @@ export const useCharacterStore = create<CharacterState>()(
           ? get().selectedId
           : (characters[0]?.id ?? null)
         const payload: SharedCharactersState = {
-          characters: serializeDnd5eCharacterSnapshots(characters),
+          characters: serializeDnd5eCharacterSnapshots(excludeProvisionalAuthorityCharactersFromSharedSave(characters,shared?.characters)),
           selectedId,
           updatedAt,
         }
-        const result = await saveSharedResourceWithResult('characters', payload)
+        const result = await publishCharactersAtSnapshotRevision(payload, shared?._sync?.revision ?? 0)
         if (result.status !== 'saved') {
           throw new Error(`characters-save-rejected:${result.status}`)
         }
@@ -1688,12 +1840,12 @@ export const useCharacterStore = create<CharacterState>()(
             ? get().selectedId
             : (characters[0]?.id ?? null)
           const payload: SharedCharactersState = {
-            characters: serializeDnd5eCharacterSnapshots(characters),
+            characters: serializeDnd5eCharacterSnapshots(excludeProvisionalAuthorityCharactersFromSharedSave(characters,shared?.characters)),
             selectedId,
             updatedAt: Date.now(),
           }
           if (seq !== characterSaveSeq) return
-          const result = await saveSharedResourceWithResult('characters', payload)
+          const result = await publishCharactersAtSnapshotRevision(payload, shared?._sync?.revision ?? 0)
           if (result.status === 'saved' && seq === characterSaveSeq) {
             lastSharedCharactersSnapshot = JSON.stringify(payload)
             if (Number.isInteger(result.revision)) {
@@ -1701,7 +1853,9 @@ export const useCharacterStore = create<CharacterState>()(
             }
           }
         }
-        void save()
+        // A rejected CAS is not permission to retry the same stale full array.
+        // Reload authority; the existing local intent guards preserve unacknowledged edits.
+        void save().catch(() => get().loadShared({ force: true }))
       }
 
       const updateChar = (id: string, fn: (c: Character) => Character) =>
@@ -1769,10 +1923,11 @@ export const useCharacterStore = create<CharacterState>()(
             sharedCharactersWithPendingClassResources,
             Date.now(),
           )
-          const sharedCharactersWithPendingAuthority = mergePendingAuthorityCharacterPatches(
+          const sharedCharactersWithCommittedAuthority = mergePendingAuthorityCharacterPatches(
             sharedCharactersWithPendingAdvancements,
             Date.now(),
           )
+          const sharedCharactersWithPendingAuthority=mergeProvisionalAuthorityCharacterPatches(sharedCharactersWithCommittedAuthority)
           // A room-authority combat patch can race an older full-array save
           // from another client. Keeping the patch only in memory makes the UI
           // look correct for the 30-second protection window, then allows HP,
@@ -1781,7 +1936,7 @@ export const useCharacterStore = create<CharacterState>()(
           // acknowledges every changed field.
           const pendingAuthorityMustBeRepublished = pendingAuthorityCharacterPatchesNeedRepublish(
             sharedCharactersWithPendingAdvancements,
-            sharedCharactersWithPendingAuthority,
+            sharedCharactersWithCommittedAuthority,
           )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
             (character, index) => character.level !== filteredSharedCharacters[index]?.level,
@@ -1865,7 +2020,8 @@ export const useCharacterStore = create<CharacterState>()(
             }
             return character
           })
-          const dnd5eHitPointsMustBeRepublished = !isPlayerPort() && sharedCharacters.some((character, index) => {
+          // A provisional parent overlay is not a durable HP repair intent.
+          const dnd5eHitPointsMustBeRepublished = !isPlayerPort() && sharedCharactersWithCommittedAuthority.map(finalizeCharacter).some((character, index) => {
             const incoming = sharedCharactersWithAllPendingChoices[index]
             if (character.rulesetId !== 'dnd5e-2014-srd-5.1' || !incoming) return false
             return character.maxHp !== incoming.maxHp ||
@@ -1907,6 +2063,27 @@ export const useCharacterStore = create<CharacterState>()(
           ) {
             saveCharacters()
           }
+        },
+        finishMonsterZeroPublication:async(scope,operation)=>{
+          await readDnd5eMonsterZeroCharacterPublication(scope,operation)
+          const shared=await loadSharedResource<SharedCharactersState>('characters')
+          await readDnd5eMonsterZeroCharacterPublication(scope,operation)
+          const patches=provisionalAuthorityCharacterPatches.get(scope),authority=new Map(shared?.characters.map(row=>[row.id,row]))
+          if(patches&&shared)set(state=>({characters:state.characters.map(current=>{const pending=patches.get(current.id),server=authority.get(current.id);return pending&&server?restoreProvisionalAuthorityCharacterFields(current,server,pending,false):current})}))
+          await closeDnd5eMonsterZeroCharacterPublication(scope,operation)
+          provisionalAuthorityCharacterPatches.delete(scope)
+          if(shared&&characterFieldSnapshot(get().characters)!==characterFieldSnapshot(shared.characters))saveCharacters()
+        },
+        finishOpportunityPublication:async(scope,action)=>{
+          const publication=readDnd5eOpportunityCharacterPublication(scope)
+          if(publication.monsterZero||publication.parentId!==action.id||publication.mapId!==action.mapId||publication.actionSignature!==JSON.stringify(action))throw Error('opportunity-publication:exact-original-completion-required')
+          const shared=await loadSharedResource<SharedCharactersState>('characters')
+          readDnd5eOpportunityCharacterPublication(scope)
+          const patches=provisionalAuthorityCharacterPatches.get(scope),authority=new Map(shared?.characters.map(row=>[row.id,row]))
+          if(patches&&shared)set(state=>({characters:state.characters.map(current=>{const pending=patches.get(current.id),server=authority.get(current.id);return pending&&server?restoreProvisionalAuthorityCharacterFields(current,server,pending,false):current})}))
+          closeDnd5eOpportunityCharacterPublication(scope,action)
+          provisionalAuthorityCharacterPatches.delete(scope)
+          if(shared&&characterFieldSnapshot(get().characters)!==characterFieldSnapshot(shared.characters))saveCharacters()
         },
         saveSharedNow: publishCharactersSnapshot,
         select: (id) => set({ selectedId: id }),
@@ -2032,8 +2209,14 @@ export const useCharacterStore = create<CharacterState>()(
         applyAuthorityUpdate: (id, patch, options) => {
           const current = get().characters.find((character) => character.id === id)
           authorityCharacterMutationEpoch += 1
+          // The provisional registry must match the same finalized character
+          // actually applied below. Native defaults (such as false duration
+          // flags) may be omitted by normal Store normalization; that is not
+          // an independent edit that may escape a failed parent publication.
+          const provisionalCharacter = current && options?.protectPatchUntilAcknowledged && options.deferSharedPublicationUntilAck
+            ? projectDnd5eAuthorityCharacterPatch(current, patch) : undefined
           if (current && options?.protectPatchUntilAcknowledged) {
-            markPendingAuthorityCharacterPatch(id, current, patch)
+            options.deferSharedPublicationUntilAck?markProvisionalAuthorityCharacterPatch(options.deferSharedPublicationUntilAck,id,current,provisionalCharacter??patch):markPendingAuthorityCharacterPatch(id, current, patch)
           }
           if (options?.protectClassChoicesUntilAcknowledged) {
             if (patch.dnd5eClassChoices?.fighter) {
@@ -2060,7 +2243,7 @@ export const useCharacterStore = create<CharacterState>()(
           return set((state) => ({
             characters: state.characters.map((character) =>
               character.id === id
-                ? finalizeCharacter({ ...character, ...patch })
+                ? provisionalCharacter ?? projectDnd5eAuthorityCharacterPatch(character, patch)
                 : character,
             ),
           }))

@@ -1,9 +1,35 @@
 // 用 IndexedDB 存储地图图片 Blob（图片可能很大，不适合放 localStorage）
 
 import { deleteSharedImage, getSharedImage, putSharedImage } from './sharedApi'
+import { modeFromPort } from './appMode'
+import { getRoomSession } from './roomSession'
 
 const DB_NAME = 'stars-images'
 const STORE = 'maps'
+const imageReadRequests = new Map<string, Promise<Blob | undefined>>()
+const mapImageReadRequests = new Map<string, Promise<Blob | undefined>>()
+
+function imageReadKey(id: string): string {
+  const session = getRoomSession()
+  return JSON.stringify([
+    session?.roomId ?? import.meta.env.VITE_STARS_ROOM_ID ?? '',
+    session?.memberId ?? '', session?.role ?? modeFromPort(), id,
+  ])
+}
+
+function coalesceImageRead(
+  requests: Map<string, Promise<Blob | undefined>>,
+  key: string,
+  read: () => Promise<Blob | undefined>,
+): Promise<Blob | undefined> {
+  const pending = requests.get(key)
+  if (pending) return pending
+  const request = read().finally(() => {
+    if (requests.get(key) === request) requests.delete(key)
+  })
+  requests.set(key, request)
+  return request
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -45,7 +71,11 @@ export async function putImage(id: string, blob: Blob): Promise<boolean> {
   return shared
 }
 
-export async function getImage(id: string): Promise<Blob | undefined> {
+export function getImage(id: string): Promise<Blob | undefined> {
+  return coalesceImageRead(imageReadRequests, imageReadKey(id), () => readImage(id))
+}
+
+async function readImage(id: string): Promise<Blob | undefined> {
   const shared = await getSharedImage(id)
   if (shared) {
     // Keep a local copy so a DM can reuse the same map in another room. A
@@ -63,6 +93,25 @@ export async function getImage(id: string): Promise<Blob | undefined> {
   // local blob into shared storage.
   await putSharedImage(id, local)
   return local
+}
+
+/** Map IDs identify immutable base images. A DM may already own a local copy
+ * from uploading or using the map in another room. Display it immediately;
+ * keep the normal shared read/restore running so players can still obtain it.
+ * Player and spectator reads retain the normal server-first path.
+ */
+export function getMapImage(id: string): Promise<Blob | undefined> {
+  if ((getRoomSession()?.role ?? modeFromPort()) !== 'dm') return getImage(id)
+  return coalesceImageRead(mapImageReadRequests, imageReadKey(id), async () => {
+    const shared = getImage(id)
+    const available = async (read: Promise<Blob | undefined>) => {
+      const blob = await read
+      if (!blob) throw new Error('map-image-unavailable')
+      return blob
+    }
+    // A blocked IndexedDB must not delay a successful network read, either.
+    return Promise.any([available(getLocalImage(id)), available(shared)]).catch(() => undefined)
+  })
 }
 
 export async function deleteImage(id: string): Promise<void> {

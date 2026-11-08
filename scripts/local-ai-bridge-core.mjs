@@ -407,7 +407,7 @@ async function fetchOllamaChat(url, init = {}, timeoutMs = 900_000, externalSign
 function modelCapabilities(name) {
   const normalized = name.toLowerCase()
   const vision = /(^|[-_:])(vl|vision|llava|minicpm-v|moondream)([-_:]|$)/.test(normalized) ||
-    /gpt-(?:4o|4\.1|5(?:\.\d+)?)(?:[-_:]|$)/.test(normalized) ||
+    /gpt-(?:4o|4\.1|5(?:\.\d+)?|6\.1-sol)(?:[-_:]|$)/.test(normalized) ||
     /(^|[-_:])(gemini|claude-(?:3|4)|qwen[^:]*vl)([-_:]|$)/.test(normalized)
   const chinese = /(qwen|deepseek|internlm|yi[-_:]|glm)/.test(normalized)
   return [
@@ -933,6 +933,17 @@ export async function startLocalAiBridge(options = {}) {
       contextWindowTokens: options.externalModelContextWindow,
     }),
   ].filter(Boolean)
+  // Older web/desktop clients pin Luna IDs. Keep their request IDs usable
+  // while forwarding to the configured replacement and reporting its real name.
+  for (const model of [...externalModels]) {
+    if (model.modelId !== 'gpt-6.1-sol' || !['general', 'extraction'].includes(model.role)) continue
+    const legacyId = model.role === 'general'
+      ? 'external:gpt-5.6-luna'
+      : 'external:extraction:gpt-5.6-luna'
+    if (!externalModels.some((entry) => entry.bridgeModelId === legacyId)) {
+      externalModels.push({ ...model, bridgeModelId: legacyId })
+    }
+  }
   const externalModelsById = new Map()
   for (const model of externalModels) {
     if (externalModelsById.has(model.bridgeModelId)) throw new Error('duplicate-external-model-id')
@@ -945,7 +956,9 @@ export async function startLocalAiBridge(options = {}) {
     const reservation = await usageAudit.begin({
       task: request.task,
       providerId: generationInput.engine === 'external' ? 'external-account' : 'local-bridge',
-      modelId: generationInput.modelId,
+      modelId: generationInput.upstreamModelId
+        ? [...generationInput.modelId.split(':').slice(0, -1), generationInput.upstreamModelId].join(':')
+        : generationInput.modelId,
       jobId: request.jobId,
       estimatedInputTokens: estimatedStructuredInputTokens(request),
       estimatedOutputTokens: structuredOutputTokenBudget(request.task, request.maxOutputTokens, generationInput.engine),

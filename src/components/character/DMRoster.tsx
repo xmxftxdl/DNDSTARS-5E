@@ -14,6 +14,7 @@ import { pruneInitiativeForValidTokens } from '../../lib/initiativeRoster'
 import type { SharedMapsState } from '../../store/maps'
 import { browserRuntime } from '../../adapters/browser/browserRuntime'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
+import CharacterExportButton from './CharacterExportButton'
 const CharacterSheet = lazy(() => import('./CharacterSheet'))
 
 export default function DMRoster() {
@@ -316,7 +317,7 @@ export default function DMRoster() {
       {unassignedRoomCharacters.length > 0 && (
         <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-500/[0.05] p-3">
           <p className="text-xs font-semibold text-amber-100">待分配角色</p>
-          <p className="mt-1 text-[11px] text-slate-500">由 DM 导入或原玩家已离开的角色。可先检视，再分配或删除。</p>
+          <p className="mt-1 text-[11px] text-slate-500">由 DM 导入或原玩家已离开的角色。可检视、导出 JSON，再分配或删除。</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {unassignedRoomCharacters.map((character) => (
               <div key={character.id} className="flex items-center gap-2 rounded-lg border border-white/8 bg-black/15 p-2">
@@ -328,6 +329,7 @@ export default function DMRoster() {
                   <Eye className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{character.name}</span>
                 </button>
+                <CharacterExportButton character={character} />
                 <button
                   type="button"
                   onClick={() => void deleteRoomCharacter(null, character.id)}
@@ -431,6 +433,7 @@ export default function DMRoster() {
                             <Eye className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">{character.name}</span>
                           </button>
+                          <CharacterExportButton character={character} />
                           <button
                             type="button"
                             onClick={() => void deleteRoomCharacter(player, character.id)}
@@ -475,6 +478,7 @@ function DmCharacterInspector({
   characterName: string
   onClose: () => void
 }) {
+  const character = useCharacterStore((state) => state.characters.find((entry) => entry.id === characterId))
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -499,14 +503,17 @@ function DmCharacterInspector({
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">DM 角色检视 · 升级可修订</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-100">{characterName}</h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭角色卡详情"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/5 hover:text-white"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {character && <CharacterExportButton character={character} />}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="关闭角色卡详情"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/5 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
         <div className="p-4 sm:p-6">
           <Suspense fallback={<p className="p-4 text-sm text-slate-400" role="status">正在加载角色卡…</p>}>

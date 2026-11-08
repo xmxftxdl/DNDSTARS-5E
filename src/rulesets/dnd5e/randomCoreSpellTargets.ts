@@ -8,7 +8,12 @@ type Preparation = ReturnType<typeof prepareDnd5eSpellCast>
 export function prepareDnd5eRandomTargetCoreSpellCast(input: Input & {
   chooseRandomTarget: (occurrence: number, candidates: readonly string[]) => string
 }): Preparation | { ok: false; reason: 'random-target-unavailable' | 'random-target-pool-changed' } {
-  const original = prepareDnd5eSpellCast(input)
+  // This selector is a local Host producer port, not canonical spell data.
+  // Preserve every other own descriptor, including unknown fields for the
+  // canonical recovery boundary to reject rather than silently discarding.
+  const chooseRandomTarget=input.chooseRandomTarget,nativeInput=Object.create(Object.getPrototypeOf(input)) as Input
+  for(const key of Reflect.ownKeys(input))if(key!=='chooseRandomTarget')Object.defineProperty(nativeInput,key,Object.getOwnPropertyDescriptor(input,key)!)
+  const original = prepareDnd5eSpellCast(nativeInput)
   if (!original.ok) return original
   const cast = original.prepared
   if (!dnd5eActiveRandomizesVisibleCreatureTargets(cast.state.combatants[cast.actorToken.id]?.classState.activeEffects) ||
@@ -20,7 +25,7 @@ export function prepareDnd5eRandomTargetCoreSpellCast(input: Input & {
     // The native ray authority requires the exact full projectile count even for a candidate trial.
     const fullIds = cast.projectileTargetIds ? [...ids, ...occurrences.slice(ids.length)] : ids
     const uniqueIds = [...new Set(fullIds)]
-    return prepareDnd5eSpellCast({ ...input, action: { ...input.action,
+    return prepareDnd5eSpellCast({ ...nativeInput, action: { ...input.action,
       targetTokenId: fullIds[0], targetTokenIds: uniqueIds,
       dnd5eSpellCast: { ...input.action.dnd5eSpellCast!, targetTokenId: fullIds[0], targetTokenIds: uniqueIds,
         projectileTargetIds: cast.projectileTargetIds ? fullIds : undefined },
@@ -37,7 +42,7 @@ export function prepareDnd5eRandomTargetCoreSpellCast(input: Input & {
     })
     if (!candidates.length) return { ok: false, reason: 'random-target-unavailable' }
     let chosen: string
-    try { chosen = input.chooseRandomTarget(occurrence, candidates) }
+    try { chosen = chooseRandomTarget(occurrence, candidates) }
     catch { return { ok: false, reason: 'random-target-pool-changed' } }
     if (!candidates.includes(chosen)) return { ok: false, reason: 'random-target-unavailable' }
     selected.push(chosen)

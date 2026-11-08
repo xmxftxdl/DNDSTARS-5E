@@ -22,6 +22,7 @@ const BREAK_LABELS = {
   'attacked-by-source-or-ally': '遭来源或其盟友攻击后解除',
   'damaged-by-source-or-ally': '受到来源或其盟友伤害后解除',
   'forced-save-by-source-or-ally': '被来源或其盟友迫使豁免后解除',
+  'affected-by-source-ally-spell': '受到来源的其他盟友法术影响后解除',
   'attacked-by-source-ally': '遭来源的其他盟友攻击后解除',
   'attacked-by-condition-entity': '被选定状态对象攻击后解除',
     'damaged-by-condition-entity': '被选定状态对象伤害后解除',

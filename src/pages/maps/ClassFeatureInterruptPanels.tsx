@@ -118,7 +118,7 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
                   type="button"
                   data-testid={`shared-plugin-choice-${option.id}`}
                   disabled={fields.length > 0 && option.id !== sharedPluginChoicePrompt.payload.defaultOptionId && !checkedFields}
-                  onClick={() => void handleSharedPluginChoice(option.id, checkedFields)}
+                  onClick={() => void handleSharedPluginChoice(option.id, fields.length > 0 ? checkedFields : undefined)}
                   className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:border-violet-400/35 hover:bg-violet-500/10"
                 >
                   <span className="block text-sm font-semibold text-slate-100">{option.label}</span>

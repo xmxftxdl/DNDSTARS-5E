@@ -1,9 +1,10 @@
+import {runtimeDnd5ePluginFeatures} from './plugins/pluginContentCatalog'
 import type {BattleMap,Token} from '../../store/maps'
 import type {Character} from '../../types/character'
 import type {Dnd5eCombatEvent,Dnd5eHeadlessCombatState} from './headlessCombatEngine'
 import {mapGeometryRuntimeForMap,mapGeometryTokenElevation} from '../../lib/mapGeometry'
 import {dnd5eMapTokenDistanceFeet} from './verticalCombatGeometry'
-import {dnd5eCharacterHasPluginFeature,registeredDnd5ePluginFeatures} from './pluginApi'
+import {dnd5eCharacterHasPluginFeature} from './pluginApi'
 import {dnd5eWeaponAttackProfile} from './equipment'
 import {advanceDnd5eWithinReachMovement} from './withinReachMovementProgress'
 
@@ -21,7 +22,7 @@ export function recordDnd5eWithinReachMapMovement(input:{
   const positions=new Map(map.tokens.map(token=>[token.id,{...token,elevationFeet:mapGeometryTokenElevation(geometry,token)}]))
   const guards=map.tokens.flatMap(token=>{
     const character=input.characters.find(c=>c.id===token.characterId)
-    if(!character||!registeredDnd5ePluginFeatures().some(feature=>feature.automation!=='manual'&&
+    if(!character||!runtimeDnd5ePluginFeatures().some(feature=>feature.automation!=='manual'&&
       feature.staticModifiers?.opportunityAttacksOnMoveWithinReach===true&&dnd5eCharacterHasPluginFeature(character,feature.id)))return []
     const weapon=dnd5eWeaponAttackProfile(character)
     return weapon?.mode==='melee'?[{tokenId:token.id,reachFeet:weapon.reachFeet??5}]:[]

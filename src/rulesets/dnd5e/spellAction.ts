@@ -1,3 +1,20 @@
+import{readDnd5eSpellWardRetargetCharacterMapping,hasDnd5eSpellWardRetargetChain}from'./spellWardRetargetChain'
+import{assertTempestuousBeforePreparedOriginalReplaySource,readTempestuousBeforePreparedOriginalMovement,tempestuousBeforePreparedOriginalInput,withTempestuousBeforePreparedOriginalReplay}from'./tempestuousBeforePreparedOriginalReplay'
+import{dnd5eCoverAttackRedirectChainTargetId}from'./coverAttackRedirectChain'
+import{tempestuousCastFlightCheckpointActive}from'./tempestuousCastCheckpoint'
+import{tempestuousBeforeSpellOfferActive}from'./tempestuousBeforeSpellOffer'
+import{cloneDnd5eHostTransactionInput,registerDnd5eHostReceipt,registerDnd5eHostReceiptSlot}from'./hostTransactionClone'
+import{dnd5ePluginFeatureDefinition}from'./pluginApi'
+import{dnd5eAvailableTempestuousSpellFlight}from'./headlessCombatEngine'
+import {withTempestuousCastGeometry} from './tempestuousCastGeometry'
+import {rebaseTempestuousSpellApplication} from './tempestuousApplicationDelta'
+import {readDnd5eActualTempestuousBeforeSpellMovement} from './headlessCombatEngine'
+import{withDnd5eSpellAttackTargetObserver}from'./spellAttackTargetCheckpointPort'
+import{createDnd5eParentEffectClock}from'./activeEffects'
+import{dnd5ePluginSpellDefinition}from'./plugins/pluginContentCatalog'
+import{restoreDnd5ePreparedOrdinaryWeaponScene}from'./ordinaryWeaponScene'
+import{dnd5eAttackableMapObject}from'./mapObjectCombatProfile'
+import type {Dnd5eSpellDamageDieRerollUse} from './spellDamageDieRerolls'
 import { dnd5eSpellInterrupted } from './spellInterruption'
 import { dnd5eAreaAttackAdvantageCandidates } from './headlessCombatEngine'
 import { settleDnd5eEtherealReturns } from './etherealReturnSettlement'
@@ -75,7 +92,6 @@ import {
   type Dnd5eCombatant,
   type Dnd5eOptionalBonusDieUse,
   type Dnd5ePostD20AdjustmentUse,
-  type Dnd5eSpellTargetAttackRoll,
   type Dnd5eSpellTargetSavingThrowRoll,
   type Dnd5eTargetTranquilitySaveRoll,
   type Dnd5eTranquilitySaveRoll,
@@ -84,6 +100,8 @@ import {
   type Dnd5eUnsupportedAirborneFallPreview,
   type Dnd5eDamageMitigationInterruptUse,
   type Dnd5eMountedAttackRedirectUse,
+  dnd5eCoverAttackRedirectEligible,
+  type Dnd5eCoverAttackRedirectUse,
 } from './headlessCombatEngine'
 import { applyDnd5eAttackCoverOverride, createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, prepareDnd5eExplorationActor, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eCharmPersonEligibleCreatureType, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAreaAtSlot, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellAttackDelivery, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSrdSpellIsRitual, dnd5eSustainedSpellAttackDiceCount, type Dnd5eSrdSpellDefinition } from './spells'
@@ -191,6 +209,9 @@ export type Dnd5eSpellCastRejectReason =
   | 'combatant-missing'
 
 export interface PreparedDnd5eSpellCast {
+  geometry?: MapGeometryState|null
+  /** Mechanical target preview; a Room choice still requires its original private issuer. */
+  coverAttackRedirectPreview?: Dnd5eCoverAttackRedirectUse
   /** Host-approved pre-roll choice; never inferred from player payload. */
   areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
   damagePathOrigin?: {x:number;y:number;elevationFeet:number}
@@ -462,7 +483,82 @@ export function dnd5eForcedMovementFall(input: {
   }
 }
 
+const actualPreparedSpellSources=new WeakMap<object,string>()
+const actualPreparedSpellInputs=new WeakMap<object,{input:Parameters<typeof prepareDnd5eSpellCast>[0];hostReactionState:Dnd5eHeadlessCombatState|undefined;preparedSignature:string;inputSignature:string;reactionSignature:string}>()
+const actualPreparedSpellWindowPreludes=new WeakMap<object,{token:object;signature:string;effectTimestamp:number}>()
+/** A true prepared object and the separate real Temp replay are both required.
+ * This associates mechanical Native capture only; it grants no Room/raw/World. */
+export function bindDnd5ePreparedSpellWindowTempestuousPrelude(prepared:PreparedDnd5eSpellCast,token:object):void{
+ const signature=actualPreparedSpellSources.get(prepared)
+ if(!signature||JSON.stringify(prepared)!==signature)throw Error('spell-window-prelude:actual-prepared-required')
+ assertTempestuousBeforePreparedOriginalReplaySource({prepared,effectRolls:[],transactionId:prepared.action.id,opportunityAttackSpell:false},token)
+ const source=tempestuousBeforePreparedOriginalInput({prepared,effectRolls:[],transactionId:prepared.action.id,opportunityAttackSpell:false},token);const effectTimestamp=source.hostOriginalD20Replay?.effectTimestamp;if(!Number.isSafeInteger(effectTimestamp)||!effectTimestamp||effectTimestamp<=0)throw Error('spell-window-prelude:actual-original-clock-required');actualPreparedSpellWindowPreludes.set(prepared,{token,signature,effectTimestamp})
+}
+
+type ActualTempestuousPreparedOrigin={input:Parameters<typeof prepareDnd5eSpellCast>[0];signature:string;inputSignature:string;features:readonly{featureId:string;definition:string}[]}
+const actualTempestuousOriginalInputs=new WeakMap<object,ActualTempestuousPreparedOrigin>()
+const actualTempestuousPreparedSlot=Symbol('actual-tempestuous-prepared-continuity'),actualTempestuousPreparedReceipts=new WeakMap<object,ActualTempestuousPreparedOrigin>();registerDnd5eHostReceiptSlot(actualTempestuousPreparedSlot)
+let activeActualTempestuousPreparedReplay:ActualTempestuousPreparedOrigin|undefined
+function currentActualTempestuousPreparedOrigin(prepared:object):ActualTempestuousPreparedOrigin|undefined{
+ const receipt=Object.getOwnPropertyDescriptor(prepared,actualTempestuousPreparedSlot)?.value as object|undefined,row=actualTempestuousOriginalInputs.get(prepared)??(receipt&&actualTempestuousPreparedReceipts.get(receipt))??(activeActualTempestuousPreparedReplay?.signature===JSON.stringify(prepared)?activeActualTempestuousPreparedReplay:undefined)
+ if(!row)return
+ if(row.signature!==JSON.stringify(prepared)||row.inputSignature!==JSON.stringify(row.input)||row.features.some(feature=>JSON.stringify(dnd5ePluginFeatureDefinition(feature.featureId))!==feature.definition))throw Error('tempestuous-prepare:actual-unchanged-original-required')
+ const actual=prepared as PreparedDnd5eSpellCast,available=dnd5eAvailableTempestuousSpellFlight(actual.state,actual.actorToken.id)
+ if(!row.features.length||row.features.some(feature=>!available.some(option=>option.featureId===feature.featureId)))throw Error('tempestuous-prepare:current-original-source-required')
+ return row
+}
+/** Mechanical cloning of a real preparation only. Ordinary prepared objects get
+ * no slot. An explicit native Session may preserve this exact issuer receipt;
+ * neither JSON nor changed input/prepared facts can obtain continuity. */
+export function captureDnd5eActualTempestuousPreparedForReplay<T extends object>(prepared:T):T{
+ const ownReceipt=Object.getOwnPropertyDescriptor(prepared,actualTempestuousPreparedSlot)?.value as object|undefined
+ if(!actualTempestuousOriginalInputs.has(prepared)&&!(ownReceipt&&actualTempestuousPreparedReceipts.has(ownReceipt)))throw Error('tempestuous-prepare:actual-original-preparation-required')
+ const row=currentActualTempestuousPreparedOrigin(prepared);if(!row)throw Error('tempestuous-prepare:actual-original-preparation-required')
+ const copied=cloneDnd5eHostTransactionInput(prepared),receipt=registerDnd5eHostReceipt(Object.freeze({kind:'actual-tempestuous-prepared-continuity'}));actualTempestuousPreparedReceipts.set(receipt,row)
+ Object.defineProperty(copied,actualTempestuousPreparedSlot,{value:receipt,enumerable:false,configurable:true,writable:false});return copied
+}
+/** A real canonical preparation may supply its own immutable mechanical origin
+ * only during this synchronous native replay. Plain sources acquire no slot. */
+export function withDnd5eActualTempestuousPreparedReplay<T>(actual:object,run:()=>T):T{
+ const row=currentActualTempestuousPreparedOrigin(actual);if(!row)throw Error('tempestuous-replay:actual-canonical-preparation-required')
+ const previous=activeActualTempestuousPreparedReplay;activeActualTempestuousPreparedReplay=row
+ try{const result=run();currentActualTempestuousPreparedOrigin(actual);return result}finally{activeActualTempestuousPreparedReplay=previous}
+}
+const actualTempestuousNativeActions=new WeakMap<PreparedDnd5eSpellCast,{operation:object;action:Dnd5eAction;signature:string}>()
+function rememberActualPreparedSpell(value:{ok:true;prepared:PreparedDnd5eSpellCast}):{ok:true;prepared:PreparedDnd5eSpellCast}{actualPreparedSpellSources.set(value.prepared,JSON.stringify(value.prepared));return value}
+
+type TempestuousSpellPreparationInput=Parameters<typeof prepareDnd5eSpellCast>[0]
+let activeTempestuousSpellPreparation:{input:TempestuousSpellPreparationInput;operation:object}|undefined
+const actualTempestuousPreparedSpells=new WeakMap<PreparedDnd5eSpellCast,{operation:object;signature:string;originalInput:TempestuousSpellPreparationInput;originalSignature:string}>()
+/** Pure preparation after a genuine paused native movement. No caller snapshot
+ * is registered, and this operation cannot authorize a raw roll or world write. */
+/** Pure continuation of this exact canonical prepared source after a genuine
+ * actual native movement. It does not register a raw or world capability. */
+export function prepareDnd5eSpellCastAfterActualTempestuousPreparedPrefix(prepared:object,operation:object){const row=currentActualTempestuousPreparedOrigin(prepared);if(!row)throw Error('tempestuous-prepare:actual-original-preparation-required');return prepareDnd5eSpellCastAfterTempestuousPrefix(row.input,operation)}
+export function prepareDnd5eSpellCastAfterTempestuousPrefix(input:TempestuousSpellPreparationInput,operation:object):ReturnType<typeof prepareDnd5eSpellCast>{
+ readDnd5eActualTempestuousBeforeSpellMovement(operation)
+ const previous=activeTempestuousSpellPreparation;activeTempestuousSpellPreparation={input,operation}
+ try{const prepared=prepareDnd5eSpellCast(input);readDnd5eActualTempestuousBeforeSpellMovement(operation);if(prepared.ok)actualTempestuousPreparedSpells.set(prepared.prepared,{operation,signature:JSON.stringify(prepared.prepared),originalInput:input,originalSignature:JSON.stringify(input)});return prepared}finally{activeTempestuousSpellPreparation=previous}
+}
+/** Mechanical provenance only; it does not reconstruct a genuine operation
+ * from JSON and does not expose a registration or publishing endpoint. */
+export function readDnd5eActualTempestuousPreparedSpell(prepared:PreparedDnd5eSpellCast,operation?:object){
+ const row=actualTempestuousPreparedSpells.get(prepared);if(!row||operation&&row.operation!==operation||row.signature!==JSON.stringify(prepared)||row.originalSignature!==JSON.stringify(row.originalInput))throw Error('tempestuous-prepare:actual-unchanged-preparation-required')
+ const prefix=readDnd5eActualTempestuousBeforeSpellMovement(row.operation)
+ return{prefix,originalAction:structuredClone(row.originalInput.action)}
+}
+
+
+/** Only the actual concrete facade callback writes this native-action map. */
+export function readDnd5eActualTempestuousNativeSpellAction(prepared:PreparedDnd5eSpellCast,operation:object){
+ readDnd5eActualTempestuousPreparedSpell(prepared,operation)
+ const row=actualTempestuousNativeActions.get(prepared);if(!row||row.operation!==operation||row.signature!==JSON.stringify(row.action))throw Error('tempestuous-cast:actual-concrete-native-action-required')
+ return row.action
+}
+
 export function prepareDnd5eSpellCast(input: {
+  geometry?: MapGeometryState|null
+  coverAttackRedirectPreview?: Dnd5eCoverAttackRedirectUse
   /** Host-created magical-effect adapter; Dispel Magic does not require sight of that effect. */
   dispelEffectTargetId?: string
   worldMinute?: number
@@ -474,11 +570,24 @@ export function prepareDnd5eSpellCast(input: {
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
   effectiveRules?: Dnd5eEffectiveRulesContextV1 | null
 }, hostReactionState?: Dnd5eHeadlessCombatState): { ok: true; prepared: PreparedDnd5eSpellCast } | { ok: false; reason: Dnd5eSpellCastRejectReason } {
+  const originalCanonicalInput=input,originalCanonicalReactionState=hostReactionState
+  if(input.geometry&&input.geometry.mapId!==input.map.id)return{ok:false,reason:'invalid-action'}
   // Host-only continuation for movement-triggered reaction spells. Never read
   // this state from the request: rebuilding a snapshot would restore resources
   // already consumed inside the enclosing attack/movement transaction.
   let continuationSnapshot: ReturnType<typeof createDnd5eMapCombatSnapshot> | undefined
-  if (hostReactionState) {
+  const actualTempestuous=activeTempestuousSpellPreparation?.input===input?activeTempestuousSpellPreparation:undefined
+  if(actualTempestuous){
+    const prefix=readDnd5eActualTempestuousBeforeSpellMovement(actualTempestuous.operation),frame=prefix.frame,payload=input.action.dnd5eSpellCast,intent=payload?.tempestuousMovement??(prefix.implicitBeforeChoice?prefix.action.tempestuousMovement:undefined)
+    const canonical=(value:unknown):string=>value===undefined?'undefined':value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?'['+value.map(canonical).join(',')+']':'{'+Object.entries(value as Record<string,unknown>).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([key,v])=>JSON.stringify(key)+':'+canonical(v)).join(',')+'}'
+    const capturedGeometry=prefix.state.companionScene?.geometry,capturedWorldMinute=prefix.state.companionScene?.worldMinute??prefix.state.mapMagicDetection?.worldMinute
+    if(input.effectiveRules===null||input.effectiveRules!==undefined&&canonical(input.effectiveRules)!==canonical(prefix.state.effectiveRules)||input.geometry!==undefined&&canonical(input.geometry??null)!==canonical(capturedGeometry??null)||input.worldMinute!==undefined&&input.worldMinute!==capturedWorldMinute)return{ok:false,reason:'invalid-action'}
+    if(hostReactionState||!intent||intent.timing!=='before'||Object.keys(intent).some(key=>!['timing','featureId','to','elevationFeet'].includes(key))||!intent.to||Object.keys(intent.to).some(key=>!['x','y'].includes(key))||intent.featureId!==prefix.action.tempestuousMovement?.featureId||intent.to.x!==prefix.action.tempestuousMovement?.to.x||intent.to.y!==prefix.action.tempestuousMovement?.to.y||intent.elevationFeet!==prefix.action.tempestuousMovement?.elevationFeet||payload?.castingClassId!==undefined&&payload.castingClassId!==prefix.action.castingClassId||frame.parentId!==input.action.id||frame.actorId!==input.action.actorTokenId||frame.spellId!==payload?.spellId||frame.slotLevel!==payload.slotLevel||frame.featureId!==intent.featureId||prefix.state.mapId!==input.map.id||prefix.state.combatId!==input.action.combatId||prefix.state.round!==input.action.round||prefix.state.initiativeIndex!==input.action.initiativeIndex||!input.map.tokens.some(token=>token.id===frame.actorId&&token.characterId===input.action.characterId)||!input.characters.some(character=>character.id===input.action.characterId))return{ok:false,reason:'invalid-action'}
+    const state=structuredClone(prefix.state),characterIdByCombatantId=Object.fromEntries(input.map.tokens.flatMap(token=>token.characterId&&!token.dnd5eSimulacrum?[[token.id,token.characterId]]:[]))
+    if(Object.keys(state.combatants).some(id=>!input.map.tokens.some(token=>token.id===id)))return{ok:false,reason:'combatant-missing'}
+    const projected=planDnd5eMapResultApplication({state,map:structuredClone(input.map),characters:structuredClone([...input.characters]),characterIdByCombatantId,events:[...prefix.events]})
+    input={...input,map:projected.map,characters:projected.characters,geometry:capturedGeometry??undefined,worldMinute:capturedWorldMinute,effectiveRules:state.effectiveRules,turnEconomy:undefined,turnEconomyByToken:undefined};continuationSnapshot={state,characterIdByCombatantId}
+  }else if (hostReactionState) {
     if (input.action.dnd5eSpellCast?.opportunityAttackSpell !== true ||
       hostReactionState.mapId !== input.map.id || hostReactionState.combatId !== input.action.combatId ||
       hostReactionState.round !== input.action.round || hostReactionState.initiativeIndex !== input.action.initiativeIndex) {
@@ -625,7 +734,7 @@ export function prepareDnd5eSpellCast(input: {
   const sustainedAreaMovement = sustainedAttack?.origin === 'effect-token' && sustainedArea && payload.areaTargetCell
     ? moveDnd5eCoreSpellArea({
         map: input.map,
-        geometry: mapGeometryRuntimeForMap(input.map.id),
+        geometry: input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry??undefined,
         areaId: sustainedArea.id,
         sourceTokenId: actorToken.id,
         targetCell: payload.areaTargetCell,
@@ -979,13 +1088,13 @@ export function prepareDnd5eSpellCast(input: {
     (draconicResistance && !draconicResistanceType) ||
     (totalSorceryPointCost > 0 && (!sorceryPoints || sorceryPoints.current < totalSorceryPointCost))
   ) return { ok: false, reason: 'invalid-action' }
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const geometry = input.geometry===undefined?mapGeometryRuntimeForMap(input.map.id):input.geometry??undefined
   let perceivedRelationSnapshot: ReturnType<typeof createDnd5eMapCombatSnapshot> | undefined = continuationSnapshot
   const perceivesHostile = (target: Token): boolean => {
     if (target.id === actorToken.id) return false
     if (areOpposedCombatTokens(actorToken, target)) return true
     if (!dnd5eActivePerceivesVisibleCreaturesAsHostile(actor.dnd5eCombatState?.activeEffects ?? actorToken.dnd5eCombatState?.activeEffects)) return false
-    perceivedRelationSnapshot ??= createDnd5eMapCombatSnapshot({ combatId: input.action.combatId ?? `map-${input.map.id}`,
+    perceivedRelationSnapshot ??= createDnd5eMapCombatSnapshot({ geometry:input.geometry, combatId: input.action.combatId ?? `map-${input.map.id}`,
       round: input.action.round, map: input.map, characters: input.characters, initiativeOrder: input.initiativeOrder,
       additionalCreatureTokenIds: input.map.tokens.filter(token => token.type !== 'obstacle').map(token => token.id) })
     return dnd5eCombatantCanSee(perceivedRelationSnapshot.state, actorToken.id, target.id)
@@ -1223,13 +1332,15 @@ export function prepareDnd5eSpellCast(input: {
   ) {
     return { ok: false, reason: 'spell-target-count-invalid' }
   }
+  // Fire Bolt explicitly permits physical objects; unknown profiles remain invalid.
+  const spellObjectTargetIds = new Set(spell.id === 'fire-bolt' ? requestedTargetIds.filter(id => {const token=input.map.tokens.find(t=>t.id===id);return token && dnd5eAttackableMapObject(token)!=null}) : [])
   const targetTokens = requestedTargetIds.map((id) => input.map.tokens.find((token) => token.id === id))
   if (racialGrant?.targetRestriction === 'self' && [
     ...requestedTargetIds, payload.targetTokenId, ...(payload.targetTokenIds ?? []),
     ...(payload.projectileTargetIds ?? []), input.action.targetTokenId, ...(input.action.targetTokenIds ?? []),
   ].some(id => id != null && id !== actorToken.id)) return { ok: false, reason: 'invalid-target' }
   if (targetTokens.some((token) =>
-    !token || token.type === 'obstacle' || isDefeatedAreaToken(token) ||
+    !token || (token.type === 'obstacle' && !spellObjectTargetIds.has(token.id)) || isDefeatedAreaToken(token) ||
     (token.id === actorToken.id && (
       spell.target === 'hostile' ||
       (sustainedAttack != null && sustainedAttack.relation !== 'any')
@@ -1707,7 +1818,7 @@ export function prepareDnd5eSpellCast(input: {
     const opposed = perceivesHostile(target)
     if (
       (sustainedAttack && sustainedAttack.relation !== 'any' && !opposed) ||
-      (!sustainedAttack && ((spell.target === 'hostile' && !opposed) || (spell.target === 'ally' && opposed)))
+      (!sustainedAttack && !spellObjectTargetIds.has(target.id) && ((spell.target === 'hostile' && !opposed) || (spell.target === 'ally' && opposed)))
     ) return { ok: false, reason: 'invalid-target' }
     if (spell.secondaryTargetsWithinFeetOfFirst != null && targetIndex > 0) continue
     if (sustainedUsesArea) continue
@@ -1770,6 +1881,9 @@ export function prepareDnd5eSpellCast(input: {
       ]
     : input.initiativeOrder
   const snapshot = continuationSnapshot ?? createDnd5eMapCombatSnapshot({
+    effectiveRules:input.effectiveRules??undefined,
+    geometry:input.geometry,
+    objectAttackTargetIds: [...spellObjectTargetIds],
     worldMinute: input.worldMinute,
     combatId: input.action.combatId ?? `map-${input.map.id}`,
     round: input.action.round,
@@ -1779,10 +1893,23 @@ export function prepareDnd5eSpellCast(input: {
     initiativeOrder: snapshotInitiativeOrder,
     additionalCreatureTokenIds: [
       ...validTargetTokens.map(token => token.id),
+      ...(input.coverAttackRedirectPreview?[input.coverAttackRedirectPreview.replacementTargetId]:[]),
       ...snapshotMap.tokens.filter(token => token.dnd5eSummon?.sourceTokenId === actorToken.id &&
         (token.dnd5eSummon.shareSelfSpellsRangeFeet ?? 0) >= 5).map(token => token.id),
     ],
   })
+  const redirectPreview=input.coverAttackRedirectPreview
+  if(redirectPreview){
+    const attackSpell=spell.effect==='spell-attack'||sustainedAttack?.resolution==='spell-attack'||(sustainedAttack!=null&&sustainedAttack.resolution==null)
+    if(!attackSpell||blindTargetMiss||validTargetTokens.length!==1||dnd5eSpellUsesSequencedAttacks(spell)||metamagic?.kind==='twinned'||redirectPreview.originalTargetId!==validTargetTokens[0].id||!dnd5eCoverAttackRedirectEligible(snapshot.state,actorToken.id,redirectPreview.originalTargetId,redirectPreview.replacementTargetId,redirectPreview.featureId))return{ok:false,reason:'invalid-target'}
+    const replacement=input.map.tokens.find(token=>token.id===redirectPreview.replacementTargetId&&token.type!=='obstacle')
+    if(!replacement)return{ok:false,reason:'invalid-target'}
+    const actualRange=dnd5eMapTokenDistanceFeet({map:input.map,geometry,left:spellOriginToken,right:replacement})
+    const invocationRange=sustainedAttack?sustainedAttack.rangeFeet:spell.id==='eldritch-blast'&&invocations.includes('eldritch-spear')?300:spell.rangeFeet
+    const multiplier=!sustainedAttack&&spell.effect==='spell-attack'?dnd5eSpellAttackRangeMultiplierForCharacter(actor):1
+    if(actualRange>invocationRange*multiplier*(metamagic?.kind==='distant'?2:1))return{ok:false,reason:'target-out-of-range'}
+    validTargetTokens=[replacement]
+  }
   if (spell.requiresTargetCanHearSource) {
     const sourceCombatant = snapshot.state.combatants[actorToken.id]
     if (
@@ -2284,6 +2411,7 @@ export function prepareDnd5eSpellCast(input: {
         effectVisible: true,
         sourceCreatureType: actorCombatant.creatureType,
         sourceIsSpell: true,
+        sourceActorId: actorToken.id,
         sourceDistanceFeet,
       }),
       heightenedTargetId === targetId || hiddenSpellSaveDisadvantage,
@@ -2357,10 +2485,12 @@ export function prepareDnd5eSpellCast(input: {
         return ward ? [{ targetToken: currentTargetToken, ward }] : []
       })
     : undefined
-  return {
+  const actualPreparation=rememberActualPreparedSpell({
     ok: true,
     prepared: {
       action: input.action,
+      geometry: input.geometry,
+      coverAttackRedirectPreview: redirectPreview,
       damagePathOrigin: {x:effectOrigin.x,y:effectOrigin.y,elevationFeet:effectOriginElevation + (spell.area?.origin === 'point' ? 0 : dnd5eTokenHeightFeet(spellOriginToken)/2)},
       map: sustainedAreaMovement?.ok ? sustainedAreaMovement.map : input.map,
       characters: input.characters,
@@ -2455,7 +2585,10 @@ export function prepareDnd5eSpellCast(input: {
             )
           : undefined,
     },
-  }
+  })
+  if(!actualTempestuous&&actualPreparation.prepared.spell.level>=1&&!actualPreparation.prepared.sustainedEffectAttack&&dnd5eAvailableTempestuousSpellFlight(actualPreparation.prepared.state,actualPreparation.prepared.actorToken.id).length>0)actualTempestuousOriginalInputs.set(actualPreparation.prepared,{input,signature:JSON.stringify(actualPreparation.prepared),inputSignature:JSON.stringify(input),features:dnd5eAvailableTempestuousSpellFlight(actualPreparation.prepared.state,actualPreparation.prepared.actorToken.id).map(option=>({featureId:option.featureId,definition:JSON.stringify(dnd5ePluginFeatureDefinition(option.featureId))}))})
+  actualPreparedSpellInputs.set(actualPreparation.prepared,{input:originalCanonicalInput,hostReactionState:originalCanonicalReactionState,preparedSignature:JSON.stringify(actualPreparation.prepared),inputSignature:JSON.stringify(originalCanonicalInput),reactionSignature:String(JSON.stringify(originalCanonicalReactionState))})
+  return actualPreparation
 }
 
 export function dnd5eSpellAttackModeWithProtection(
@@ -2620,7 +2753,23 @@ export function previewDnd5eSpellTargetSavingThrow(
     : resolved
 }
 
+const actualSpellFacadeResults=new WeakMap<object,{input:Parameters<typeof resolvePreparedDnd5eSpellCast>[0];options:Parameters<typeof resolvePreparedDnd5eSpellCast>[1];preparedSignature:string;resultSignature:string;applicationSignature:string}>()
+const spellFacadeSignature=(value:unknown)=>JSON.stringify(value)
+function rememberActualSpellFacade(input:Parameters<typeof resolvePreparedDnd5eSpellCast>[0],options:Parameters<typeof resolvePreparedDnd5eSpellCast>[1],native:ReturnType<typeof resolvePreparedDnd5eSpellCast>){
+ if(native.result.ok&&native.application)actualSpellFacadeResults.set(native.result,{input:JSON.parse(JSON.stringify(input)),options:JSON.parse(JSON.stringify(options??{})),preparedSignature:spellFacadeSignature(input.prepared),resultSignature:spellFacadeSignature(native.result),applicationSignature:spellFacadeSignature(native.application)})
+ return native
+}
+/** Mechanical provenance only. This cannot issue an owner answer or a Room original. */
+export function readDnd5eActualSpellFacadeResult(prepared:PreparedDnd5eSpellCast,native:ReturnType<typeof resolvePreparedDnd5eSpellCast>){
+ const found=actualSpellFacadeResults.get(native.result)
+ if(!found||found.preparedSignature!==spellFacadeSignature(prepared)||found.resultSignature!==spellFacadeSignature(native.result)||found.applicationSignature!==spellFacadeSignature(native.application))throw Error('spell-facade:actual-unchanged-result-required')
+ return{input:JSON.parse(JSON.stringify(found.input))as Parameters<typeof resolvePreparedDnd5eSpellCast>[0],options:{...found.options}}
+}
+
 export function resolvePreparedDnd5eSpellCast(input: {
+  transactionId?:string
+  tempestuousMovementRolls?:Dnd5eAction['tempestuousMovementRolls']
+  coverAttackRedirect?: import('./headlessCombatEngine').Dnd5eCoverAttackRedirectUse
   savingThrowDisadvantageNegation?: { rollId: string; transactionId: string }
   disadvantageNegation?: { rollId: string; transactionId: string }
   shieldSpellcastingSavingThrows?: import('./headlessCombatEngine').Dnd5eAction['shieldSpellcastingSavingThrows']
@@ -2648,8 +2797,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
   savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse
   targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]
   forcedMovements?: readonly Dnd5eSpellForcedMovement[]
-  targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]
+  targetAttacks?: readonly import('./headlessCombatEngine').Dnd5eSpellTargetAttackInput[]
   empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]
+  spellDamageDieRerolls?: readonly Dnd5eSpellDamageDieRerollUse[]
   spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse
   bestowCurseDamageRolls?: readonly { targetId: string; rolls: readonly number[] }[]
   targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]
@@ -2680,14 +2830,25 @@ export function resolvePreparedDnd5eSpellCast(input: {
   delayedEffectRolls?: readonly number[]
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
   attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
-}): {
+}, transactionOptions: Parameters<typeof resolveDnd5eHeadlessAction>[2] = {}): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
   airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
 } {
-  const { prepared } = input
-  const action = {
+  let prepared = input.prepared
+ let actualTempestuousContinued=false
+ const originalPrepared=prepared,originalTempestuous=(prepared.action.dnd5eSpellCast?.tempestuousMovement?.timing==='before'||tempestuousBeforeSpellOfferActive(prepared.action.id)||Object.hasOwn(prepared,actualTempestuousPreparedSlot))?currentActualTempestuousPreparedOrigin(prepared):undefined
+ if(originalTempestuous&&originalTempestuous.signature!==JSON.stringify(prepared))throw Error('tempestuous-cast:actual-original-preparation-required')
+  const buildActualSpellAction=(prepared:PreparedDnd5eSpellCast):Dnd5eAction=>{
+const redirect=input.coverAttackRedirect
+  const preview=prepared.coverAttackRedirectPreview
+  if(redirect&&(!preview||redirect.featureId!==preview.featureId||redirect.originalTargetId!==preview.originalTargetId||redirect.replacementTargetId!==preview.replacementTargetId||prepared.action.targetTokenId!==preview.originalTargetId||prepared.targetToken.id!==preview.replacementTargetId||input.targetAttacks?.length||!prepared.attackMode||prepared.targetTokens.length!==1)||preview&&!redirect)throw Error('spell-cover-redirect:same-original-preview-required')
+  restoreDnd5ePreparedOrdinaryWeaponScene(prepared)
+  return {
     type: 'cast-spell',
+    castInstanceId: prepared.action.id,
+    tempestuousMovement:actualTempestuousPreparedSpells.has(prepared)?undefined:prepared.action.dnd5eSpellCast?.tempestuousMovement,
+    tempestuousMovementRolls:input.tempestuousMovementRolls,
     damagePathOrigin: prepared.damagePathOrigin,
     shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows,
     spellcastingSavingThrows: input.spellcastingSavingThrows,
@@ -2706,12 +2867,13 @@ export function resolvePreparedDnd5eSpellCast(input: {
     opportunityAttackSpell: input.opportunityAttackSpell,
     ritual: prepared.ritual,
     mountedAttackRedirect: input.mountedAttackRedirect,
+    coverAttackRedirect: input.coverAttackRedirect,
     alternateResourceSpell: prepared.alternateResourceSpell ? {
       featureId: prepared.alternateResourceSpell.featureId,
       grantId: prepared.alternateResourceSpell.grantId,
     } : undefined,
-    targetId: prepared.targetToken.id,
-    targetIds: prepared.targetTokens.map((target) => target.id),
+    targetId: redirect?.replacementTargetId??prepared.targetToken.id,
+    targetIds: redirect?[redirect.replacementTargetId]:prepared.targetTokens.map((target) => target.id),
     blindTargetMiss: prepared.blindTargetMiss || undefined,
     environmentalFireTarget: prepared.webIgnitionCell != null || undefined,
     projectileTargetIds: prepared.projectileTargetIds,
@@ -2719,6 +2881,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     metamagic: prepared.metamagic,
     empowered: prepared.empowered,
     empoweredRerolls: input.empoweredRerolls,
+    spellDamageDieRerolls: input.spellDamageDieRerolls,
     spellDamageMaxDieBonus: input.spellDamageMaxDieBonus,
     bestowCurseDamageRolls: input.bestowCurseDamageRolls,
     draconicResistance: prepared.draconicResistance,
@@ -2790,19 +2953,31 @@ export function resolvePreparedDnd5eSpellCast(input: {
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
     attackDecoyRolls: input.attackDecoyRolls,
   } as Dnd5eAction
+ }
+ const action=buildActualSpellAction(prepared)
+  transactionOptions={...transactionOptions,transactionId:transactionOptions.transactionId??input.transactionId}
   const resolutionState = prepared.state
   const returnOptions = {
+    prepareActualTempestuousSpell:originalTempestuous?(operation:object)=>{
+      const next=prepareDnd5eSpellCastAfterTempestuousPrefix(originalTempestuous.input,operation);if(!next.ok)return undefined
+      const nativeAction=buildActualSpellAction(next.prepared)
+      actualTempestuousNativeActions.set(next.prepared,{operation,action:nativeAction,signature:JSON.stringify(nativeAction)})
+      actualTempestuousContinued=true
+      prepared=next.prepared
+      return next.prepared
+    }:undefined,
     beforeAirborneFalls: (result: ReturnType<typeof resolveDnd5eHeadlessAction>) =>
       settleDnd5eEtherealReturns({
         before: resolutionState, result, map: prepared.map,
-        geometry: mapGeometryRuntimeForMap(prepared.map.id),
+        geometry: prepared.geometry===undefined?mapGeometryRuntimeForMap(prepared.map.id):prepared.geometry??undefined,
       }),
   }
+  const inActualCastGeometry=<T>(run:()=>T):T=>originalTempestuous||tempestuousCastFlightCheckpointActive(originalPrepared.action.id)?withTempestuousCastGeometry({parentId:originalPrepared.action.id,actorId:originalPrepared.actorToken.id,map:originalPrepared.map,geometry:originalPrepared.geometry},run):run()
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
-    ? previewDnd5eUnsupportedAirborneFalls(resolutionState, action, {}, returnOptions)
+    ? inActualCastGeometry(()=>previewDnd5eUnsupportedAirborneFalls(resolutionState, action, transactionOptions, returnOptions))
     : undefined
   const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
-  let result = resolveDnd5eHeadlessAction(resolutionState, action, {}, returnOptions)
+  let result = inActualCastGeometry(()=>resolveDnd5eHeadlessAction(resolutionState, action, transactionOptions, returnOptions))
   if (!result.ok) return { result, airborneFalls }
   let settlementCharacters = prepared.characters
   if (prepared.itemSpellSource) {
@@ -2865,11 +3040,12 @@ export function resolvePreparedDnd5eSpellCast(input: {
       map: prepared.map,
       characters: settlementCharacters,
       baselineCharacters: prepared.characters,
-      characterIdByCombatantId: prepared.characterIdByCombatantId,
+      characterIdByCombatantId: {...prepared.characterIdByCombatantId,...readDnd5eSpellWardRetargetCharacterMapping(result.state)},
       events: [...result.events],
     })
   if (result.events.some(event => event.type === 'spellcasting-prevented' && event.actorId === prepared.actorToken.id)) {
-    return { result, application, airborneFalls }
+    if(actualTempestuousContinued)application=rebaseTempestuousSpellApplication({map:originalPrepared.map,characters:originalPrepared.characters,application})
+    return rememberActualSpellFacade(input,transactionOptions,{ result, application, airborneFalls })
   }
   const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
   const counterspelled = dnd5eSpellInterrupted(result.events, prepared.actorToken.id, prepared.spell.id)
@@ -2909,7 +3085,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
         { size: 1 },
         application.map,
       )
-      const coreAreaGeometry = mapGeometryRuntimeForMap(application.map.id)
+      const coreAreaGeometry = prepared.geometry===undefined?mapGeometryRuntimeForMap(application.map.id):prepared.geometry??undefined
       const coreAreaBaseElevationFeet = declaration.anchorMode === 'source-token'
         ? mapGeometryTokenElevation(coreAreaGeometry, prepared.actorToken)
         : prepared.action.targetElevationFeet ??
@@ -2954,6 +3130,10 @@ export function resolvePreparedDnd5eSpellCast(input: {
         dancingLightsForm: prepared.dancingLightsForm,
         excludedTargetIds: declaration.spellId === 'spirit-guardians' ? prepared.excludedAreaTargetIds : undefined,
       })
+      if (prepared.spell.id === 'darkness' && area.lighting?.kind === 'magical-darkness' &&
+        prepared.alternateResourceSpell?.sourceCanSeeThroughDarkness === true) {
+        area.lighting = {...area.lighting, sourceCanSeeThrough:true}
+      }
       if (prepared.spell.id === 'wall-of-force' && prepared.action.dnd5eSpellCast?.stoneWall) {
         area.forceWall = prepared.action.dnd5eSpellCast.stoneWall
         area.cells = stoneWallCells(stoneWallPanels(area.forceWall, application.map))
@@ -3030,7 +3210,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
           map: prepared.map,
           characters: settlementCharacters,
           baselineCharacters: prepared.characters,
-          characterIdByCombatantId: prepared.characterIdByCombatantId,
+          characterIdByCombatantId: {...prepared.characterIdByCombatantId,...readDnd5eSpellWardRetargetCharacterMapping(result.state)},
           events: [...result.events],
         })
       }
@@ -3062,7 +3242,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
           map: prepared.map,
           characters: settlementCharacters,
           baselineCharacters: prepared.characters,
-          characterIdByCombatantId: prepared.characterIdByCombatantId,
+          characterIdByCombatantId: {...prepared.characterIdByCombatantId,...readDnd5eSpellWardRetargetCharacterMapping(result.state)},
           events: [...result.events],
         })
       }
@@ -3112,10 +3292,198 @@ export function resolvePreparedDnd5eSpellCast(input: {
     application.changedCharacterIds = [...new Set([...application.changedCharacterIds, ...dispel.changedCharacterIds])]
     application.changedTokenIds = [...new Set([...application.changedTokenIds, ...dispel.changedTokenIds])]
   }
-  return {
-    result,
-    application,
-    airborneFalls,
-  }
+  if(actualTempestuousContinued)application=rebaseTempestuousSpellApplication({map:originalPrepared.map,characters:originalPrepared.characters,application})
+  return rememberActualSpellFacade(input,transactionOptions,{result,application,airborneFalls})
 }
 
+
+
+/** A native mechanical window, never an owner answer or a publication plan. */
+export interface Dnd5ePreparedSpellAttackWindow{readonly preparedSpellAttackWindow:unique symbol}
+type SpellWindowRoll=import('./headlessCombatEngine').Dnd5eSpellTargetAttackInput
+type SpellWindowChoices=Omit<import('./headlessCombatEngine').Dnd5eSpellTargetAttackRoll,'targetId'|'d20'|'d20Second'|'effectRolls'>
+type SpellWindowRecord={prepared:PreparedDnd5eSpellCast;signature:string;parentId:string;attackIndex:number;retargetStep?:number;currentTargetId?:string;stage:'target'|'ward'|'ward-result'|'raw';now:number;preceding:readonly SpellWindowRoll[];state:import('./headlessCombatEngine').Dnd5eHeadlessCombatState;events:readonly import('./headlessCombatEngine').Dnd5eCombatEvent[];originalTargetId:string;wardTargetId?:string;wardAllowed?:boolean;raw?:Readonly<{targetId:string;mode:'normal'|'advantage'|'disadvantage';count:number;sides:20}>}
+const preparedSpellAttackWindows=new WeakMap<object,SpellWindowRecord>()
+const nativeSpellWindowRollKeys=new Set(['wardFailureChoice','attackAttemptWardSaves','disadvantageNegation','targetId','attackDecoyRoll','coverAttackRedirect','mountedAttackRedirect','d20','d20Second','halflingLuckyD20','halflingLuckyD20Second','attackBlessRoll','attackBaneRoll','bardicInspirationRoll','cuttingWords','cuttingWordsDamage','mode','areaAttackAdvantageReaction','protectionReactionActorId','shieldSpellReaction','uncannyDodge','hurlThroughHellDamageRolls','repellingBlastPushTo','repellingBlastPushDistanceFeet','repellingBlastPushToElevationFeet','repellingBlastPushToGroundElevationFeet','repellingBlastFallingDamageRolls','effectRolls','standAgainstTide','openingAttackSavingThrow','postD20Adjustment'])
+
+/** This factory executes its own concrete facade. It accepts no run callback,
+ * result, state, snapshot, or serialized prepared authority. Room consumers
+ * must additionally authenticate current source/controllers and every prefix
+ * raw/adoption before this purely mechanical checkpoint can inform a choice. */
+export function captureDnd5ePreparedSpellAttackWindow(input:{prepared:PreparedDnd5eSpellCast;attackIndex:number;preceding:readonly SpellWindowRoll[];retargetStep?:number;stage?:'target'|'ward'|'ward-result'|'raw';currentChoices?:SpellWindowChoices;now:number}):Dnd5ePreparedSpellAttackWindow{
+ if(!input||Object.keys(input).some(k=>!['prepared','attackIndex','preceding','retargetStep','stage','currentChoices','now'].includes(k)))throw Error('spell-attack-window:closed-input-required')
+ if(input.retargetStep!==undefined&&(!Number.isSafeInteger(input.retargetStep)||input.retargetStep<0||input.retargetStep>128))throw Error('spell-attack-window:actual-retarget-step-required')
+ const p=input.prepared,signature=actualPreparedSpellSources.get(p),stage=input.stage??'target'
+ const actualPrelude=actualPreparedSpellWindowPreludes.get(p);if(actualPrelude&&actualPrelude.effectTimestamp!==input.now)throw Error('spell-window-prelude:same-original-clock-required')
+ if(!signature||signature!==JSON.stringify(p))throw Error('spell-attack-window:actual-prepared-required')
+ if(!p.targetSpellAttacks?.length||p.spell.effect!=='spell-attack'||p.blindTargetMiss||dnd5ePluginSpellDefinition(p.spell.id)||!Number.isSafeInteger(input.attackIndex)||input.attackIndex<0||input.attackIndex>=p.targetSpellAttacks.length||!Array.isArray(input.preceding)||input.preceding.length!==input.attackIndex||!['target','ward','ward-result','raw'].includes(stage)||!Number.isSafeInteger(input.now)||input.now<=0)throw Error('spell-attack-window:actual-sequence-required')
+ if(input.preceding.some(roll=>!roll||Object.keys(roll).some(k=>!nativeSpellWindowRollKeys.has(k)))||input.currentChoices&&((!['ward','ward-result','raw'].includes(stage)&&!(stage==='target'&&(input.retargetStep??0)>0&&hasDnd5eSpellWardRetargetChain(p.action.id,input.attackIndex)))||Object.keys(input.currentChoices).some(k=>!nativeSpellWindowRollKeys.has(k)||['targetId','d20','d20Second','effectRolls'].includes(k))))throw Error('spell-attack-window:typed-original-input-required')
+ const preceding=structuredClone(input.preceding),rows:SpellWindowRoll[]=p.targetSpellAttacks.map((target,index)=>index<preceding.length?preceding[index]:{targetId:index===input.attackIndex?dnd5eCoverAttackRedirectChainTargetId(input.currentChoices?.coverAttackRedirect)??target.targetToken.id:target.targetToken.id,d20:1,effectRolls:[],...(index===input.attackIndex?input.currentChoices:{})})
+ let issued:Dnd5ePreparedSpellAttackWindow|undefined
+ class CapturedActualSpellWindow extends Error{}
+ try{const runNative=()=>createDnd5eParentEffectClock({parentId:p.action.id,sourceKey:signature,timestamp:input.now}).run(()=>withDnd5eSpellAttackTargetObserver(visit=>{
+  if(visit.actorId!==p.actorToken.id||visit.state.mapId!==p.map.id||visit.state.combatId!==p.state.combatId||visit.attackIndex!==input.attackIndex||visit.stage!==stage||(visit.retargetStep??0)!==(input.retargetStep??0))return
+  if(visit.originalTargetId!==p.targetSpellAttacks![input.attackIndex].targetToken.id)throw Error('spell-attack-window:actual-original-target-required')
+  const cap=Object.freeze({})as Dnd5ePreparedSpellAttackWindow;preparedSpellAttackWindows.set(cap,{prepared:p,signature,parentId:p.action.id,attackIndex:input.attackIndex,...(visit.retargetStep?{retargetStep:visit.retargetStep}:{}),...(visit.currentTargetId?{currentTargetId:visit.currentTargetId}:{}),stage,now:input.now,preceding,state:structuredClone(visit.state),events:structuredClone(visit.events),originalTargetId:visit.originalTargetId,...(visit.wardTargetId?{wardTargetId:visit.wardTargetId}:{}),...(typeof visit.wardAllowed==='boolean'?{wardAllowed:visit.wardAllowed}:{}),...(visit.raw?{raw:{...visit.raw,count:visit.raw.mode==='normal'?1:2,sides:20 as const}}:{})});issued=cap;throw new CapturedActualSpellWindow()
+ },()=>resolvePreparedDnd5eSpellCast({prepared:p,transactionId:p.action.id,effectRolls:[],targetAttacks:rows,...(actualPreparedSpellWindowPreludes.has(p)?{opportunityAttackSpell:false}:{})},{transactionId:p.action.id,now:input.now})));const prelude=actualPreparedSpellWindowPreludes.get(p);if(prelude){if(prelude.signature!==signature)throw Error('spell-window-prelude:same-prepared-required');withTempestuousBeforePreparedOriginalReplay(tempestuousBeforePreparedOriginalInput({prepared:p,transactionId:p.action.id,effectRolls:[],targetAttacks:rows,opportunityAttackSpell:false},prelude.token),prelude.token,runNative)}else runNative()}catch(error){if(!(error instanceof CapturedActualSpellWindow))throw error}
+ if(!issued)throw Error('spell-attack-window:actual-window-not-reached')
+ return issued
+}
+export function readCapturedDnd5ePreparedSpellAttackWindow(cap:Dnd5ePreparedSpellAttackWindow){
+ const fact=preparedSpellAttackWindows.get(cap)
+ if(!fact||actualPreparedSpellSources.get(fact.prepared)!==fact.signature||JSON.stringify(fact.prepared)!==fact.signature)throw Error('spell-attack-window:actual-issued-window-required')
+ return Object.freeze({prepared:fact.prepared,parentId:fact.parentId,attackIndex:fact.attackIndex,...(fact.retargetStep?{retargetStep:fact.retargetStep}:{}),...(fact.currentTargetId?{currentTargetId:fact.currentTargetId}:{}),stage:fact.stage,now:fact.now,originalTargetId:fact.originalTargetId,...(fact.wardTargetId?{wardTargetId:fact.wardTargetId}:{}),...(typeof fact.wardAllowed==='boolean'?{wardAllowed:fact.wardAllowed}:{}),preceding:structuredClone(fact.preceding),state:structuredClone(fact.state),events:structuredClone(fact.events),raw:fact.raw?{...fact.raw}:undefined})
+}
+
+export interface Dnd5eTempestuousPreparedRecoveryFacts{schemaVersion:1;input:Parameters<typeof prepareDnd5eSpellCast>[0];preparedSignature:string;features:readonly{featureId:string;definition:string}[]}
+const tempestuousRecoveryInputKeys=["action","characters","coverAttackRedirectPreview","dispelEffectTargetId","effectiveRules","geometry","initiativeOrder","map","turnEconomy","turnEconomyByToken","worldMinute"]
+// Eligibility records only nodes produced by the restore clone and its two
+// verified preparer literals. It never records a successful authority check.
+type TempestuousRecoveryCloneGraph=WeakMap<object,object|null>
+const tempestuousRecoveryCloneGraphs=new WeakMap<object,TempestuousRecoveryCloneGraph>()
+function tempestuousRecoveryCloneGraph(input:object):TempestuousRecoveryCloneGraph|undefined{
+ try{
+  const graph:TempestuousRecoveryCloneGraph=new WeakMap(),pending:unknown[]=[input]
+  while(pending.length){
+   const value=pending.pop();if(value===null||typeof value!=='object'){if(typeof value==='function'||typeof value==='symbol')return;continue}
+   if(graph.has(value))continue
+   const prototype=Object.getPrototypeOf(value)
+   if(prototype!==Object.prototype&&prototype!==Array.prototype&&prototype!==null)return
+   graph.set(value,prototype)
+   for(const key of Object.keys(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||!('value'in descriptor))return;pending.push(descriptor.value)}
+  }
+  return graph
+ }catch{return}
+}
+function currentTempestuousRecoveryCloneGraph(input:object,graph:TempestuousRecoveryCloneGraph):boolean{
+ try{
+  const seen=new Set<object>(),pending:unknown[]=[input]
+  while(pending.length){
+   const value=pending.pop();if(value===null||typeof value!=='object'){if(typeof value==='function'||typeof value==='symbol')return false;continue}
+   // Reject replacements before any prototype, key or descriptor operation.
+   if(!graph.has(value))return false
+   if(seen.has(value))continue
+   if(Object.getPrototypeOf(value)!==graph.get(value))return false
+   seen.add(value)
+   for(const key of Object.keys(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||!('value'in descriptor))return false;pending.push(descriptor.value)}
+  }
+  return true
+ }catch{return false}
+}
+function rememberTempestuousRecoveryCloneGraph(original:Parameters<typeof prepareDnd5eSpellCast>[0],input:Parameters<typeof prepareDnd5eSpellCast>[0],graph:TempestuousRecoveryCloneGraph|undefined):void{
+ try{
+  if(!graph||!currentTempestuousRecoveryCloneGraph(original,graph)||input===original||input.action===original.action)return
+  const action=original.action,elevation=action.targetElevationFeet??action.dnd5eSpellCast?.targetElevationFeet
+  const exactLiteral=(actual:object,source:object,changes:Record<string,unknown>)=>{
+   if(Object.getPrototypeOf(actual)!==Object.prototype)return false
+   const expected=new Map(Object.keys(source).map(key=>[key,Object.getOwnPropertyDescriptor(source,key)!.value]))
+   for(const[key,value]of Object.entries(changes))expected.set(key,value)
+   const keys=Object.keys(actual);if(keys.length!==expected.size)return false
+   return keys.every(key=>{const descriptor=Object.getOwnPropertyDescriptor(actual,key);return expected.has(key)&&!!descriptor&&'value'in descriptor&&Object.is(descriptor.value,expected.get(key))})
+  }
+  if(!exactLiteral(input,original,{action:input.action})||!exactLiteral(input.action,action,{targetElevationFeet:elevation}))return
+  graph.set(input,Object.prototype);graph.set(input.action,Object.prototype)
+  tempestuousRecoveryCloneGraphs.set(input,graph)
+ }catch{/* Optional clone eligibility cannot change native recovery errors. */}
+}
+/** Same current-source assertion as the data getter, without discarded input
+ * copies only when every currently enumerable node is still clone-safe. */
+export function hasDnd5eTempestuousPreparedRecoveryFacts(input:unknown):boolean{
+ if(!input||typeof input!=='object')return false
+ const prepared=(input as {prepared?:unknown}).prepared;if(!prepared||typeof prepared!=='object'||!Object.hasOwn(prepared,actualTempestuousPreparedSlot))return false
+ const row=currentActualTempestuousPreparedOrigin(prepared);if(!row)throw Error('tempestuous-recovery:actual-original-required')
+ if(Object.keys(row.input).some(key=>!tempestuousRecoveryInputKeys.includes(key)))throw Error('tempestuous-recovery:closed-canonical-input-required')
+ const graph=tempestuousRecoveryCloneGraphs.get(row.input)
+ if(!graph||!currentTempestuousRecoveryCloneGraph(row.input,graph))structuredClone(row.input)
+ structuredClone(row.features)
+ return true
+}
+/** Data only, and only for this module's genuine explicit continuity slot. */
+export function dnd5eTempestuousPreparedRecoveryFacts(input:unknown):Dnd5eTempestuousPreparedRecoveryFacts|undefined{
+ if(!input||typeof input!=='object')return
+ const prepared=(input as {prepared?:unknown}).prepared;if(!prepared||typeof prepared!=='object'||!Object.hasOwn(prepared,actualTempestuousPreparedSlot))return
+ const row=currentActualTempestuousPreparedOrigin(prepared);if(!row)throw Error('tempestuous-recovery:actual-original-required')
+ if(Object.keys(row.input).some(key=>!tempestuousRecoveryInputKeys.includes(key)))throw Error('tempestuous-recovery:closed-canonical-input-required')
+ return{schemaVersion:1,input:structuredClone(row.input),preparedSignature:row.signature,features:structuredClone(row.features)}
+}
+/** Remove just the verified issuer slot from a data copy before the ordinary
+ * codec runs. This cannot remove or authorize unrelated capabilities. */
+export function stripDnd5eTempestuousPreparedContinuity(input:unknown){
+ const facts=dnd5eTempestuousPreparedRecoveryFacts(input);if(!facts)return false
+ const prepared=(input as {prepared:object}).prepared;if(!Reflect.deleteProperty(prepared,actualTempestuousPreparedSlot))throw Error('tempestuous-recovery:immutable-continuity-slot');return true
+}
+/** Re-run the real canonical preparer and compare its complete output. No
+ * caller-prepared object, snapshot, result or expected signature is registered. */
+export function restoreDnd5eTempestuousPreparedRecovery<T extends{prepared:object}>(input:T,facts:Dnd5eTempestuousPreparedRecoveryFacts):T{
+ if(!facts||facts.schemaVersion!==1||Object.keys(facts).some(k=>!['schemaVersion','input','preparedSignature','features'].includes(k))||!facts.input||typeof facts.input!=='object'||Object.keys(facts.input).some(k=>!tempestuousRecoveryInputKeys.includes(k))||typeof facts.preparedSignature!=='string'||!Array.isArray(facts.features)||!facts.features.length||new Set(facts.features.map(f=>f.featureId)).size!==facts.features.length||facts.features.some(f=>!f||Object.keys(f).some(k=>!['featureId','definition'].includes(k))||typeof f.featureId!=='string'||!f.featureId||typeof f.definition!=='string'))throw Error('tempestuous-recovery:closed-native-facts-required')
+ if(facts.preparedSignature!==JSON.stringify(input.prepared))throw Error('tempestuous-recovery:exact-original-data-required')
+ if(facts.features.some(f=>JSON.stringify(dnd5ePluginFeatureDefinition(f.featureId))!==f.definition))throw Error('tempestuous-recovery:current-original-definition-required')
+ const canonicalInput=structuredClone(facts.input),cloneGraph=tempestuousRecoveryCloneGraph(canonicalInput)
+ const native=prepareDnd5eSpellCast(canonicalInput);if(!native.ok||JSON.stringify(native.prepared)!==facts.preparedSignature)throw Error('tempestuous-recovery:exact-canonical-repreparation-required')
+ const origin=currentActualTempestuousPreparedOrigin(native.prepared);if(!origin||JSON.stringify(origin.features)!==JSON.stringify(facts.features))throw Error('tempestuous-recovery:current-canonical-source-required')
+ rememberTempestuousRecoveryCloneGraph(canonicalInput,origin.input,cloneGraph)
+ const restored=cloneDnd5eHostTransactionInput(input);restored.prepared=captureDnd5eActualTempestuousPreparedForReplay(native.prepared)
+ if(JSON.stringify(restored)!==JSON.stringify(input))throw Error('tempestuous-recovery:unchanged-original-data-required');return restored
+}
+
+/** Re-enter the existing native target checkpoint from an actual Temp issuer
+ * receipt. No caller snapshot or expected signature is registered. */
+export function captureDnd5eActualTempestuousPreparedSpellAttackWindow(prepared:PreparedDnd5eSpellCast,token:object,now:number):Dnd5ePreparedSpellAttackWindow{
+ const origin=currentActualTempestuousPreparedOrigin(prepared);if(!origin)throw Error('tempestuous-window:actual-original-preparation-required')
+ const actual=prepareDnd5eSpellCast(structuredClone(origin.input))
+ if(!actual.ok||JSON.stringify(actual.prepared)!==JSON.stringify(prepared))throw Error('tempestuous-window:exact-canonical-repreparation-required')
+ bindDnd5ePreparedSpellWindowTempestuousPrelude(actual.prepared,token)
+ return captureDnd5ePreparedSpellAttackWindow({prepared:actual.prepared,attackIndex:0,preceding:[],stage:'target',now})
+}
+
+/** Read-only canonical preparation witness. No source, raw or publication
+ * capability is registered from caller data by this assertion. */
+export function assertDnd5eActualTempestuousSpellWindowPreparationCurrent(prepared:PreparedDnd5eSpellCast):void{
+ const signature=actualPreparedSpellSources.get(prepared)
+ if(!signature||signature!==JSON.stringify(prepared)||!currentActualTempestuousPreparedOrigin(prepared))throw Error('tempestuous-spell-window:actual-current-canonical-preparation-required')
+}
+
+
+/** Pure canonical target legality. This token grants no actor/Room/World permission. */
+export interface Dnd5eSpellWardRetargetCanonicalCandidate{readonly spellWardRetargetCanonicalCandidate:unique symbol}
+type CanonicalWardDestination={frame:Dnd5ePreparedSpellAttackWindow;prepared:PreparedDnd5eSpellCast;targetId:string;frameSignature:string;preparedSignature:string;inputSignature:string;reactionSignature:string;prelude?:{token:object;signature:string;effectTimestamp:number};movement?:object}
+const canonicalWardDestinations=new WeakMap<object,CanonicalWardDestination>()
+export function prepareDnd5eSpellWardRetargetCanonicalCandidate(frame:Dnd5ePreparedSpellAttackWindow,targetTokenId:string):Dnd5eSpellWardRetargetCanonicalCandidate{
+ const view=readCapturedDnd5ePreparedSpellAttackWindow(frame),p=view.prepared,source=actualPreparedSpellInputs.get(p)
+ if(view.stage!=='ward-result'||view.wardAllowed!==false||!view.wardTargetId||view.raw||!source||source.preparedSignature!==JSON.stringify(p)||source.inputSignature!==JSON.stringify(source.input)||source.reactionSignature!==String(JSON.stringify(source.hostReactionState)))throw Error('spell-ward-destination:actual-current-failed-source-required')
+ if(typeof targetTokenId!=='string'||!targetTokenId||targetTokenId===view.wardTargetId)throw Error('spell-ward-destination:new-target-required')
+ const payload=source.input.action.dnd5eSpellCast,targets=p.projectileTargetIds?.length?[...p.projectileTargetIds]:p.targetSpellAttacks?.map(value=>value.targetToken.id)
+ if(!payload||!targets||view.attackIndex<0||view.attackIndex>=targets.length)throw Error('spell-ward-destination:actual-canonical-spell-command-required')
+ targets[view.attackIndex]=targetTokenId
+ const selected=[...new Set(targets)],nextPayload={...payload,...(payload.targetTokenId!==undefined?{targetTokenId:targets[0]}:{}),...(payload.targetTokenIds!==undefined?{targetTokenIds:selected}:{}),...(p.projectileTargetIds?.length?{projectileTargetIds:targets}:{})},action={...source.input.action,...(source.input.action.targetTokenId!==undefined?{targetTokenId:targets[0]}:{}),...(source.input.action.targetTokenIds!==undefined?{targetTokenIds:selected}:{}),dnd5eSpellCast:nextPayload}
+ const prelude=actualPreparedSpellWindowPreludes.get(p),movement=prelude?readTempestuousBeforePreparedOriginalMovement({prepared:p,effectRolls:[],transactionId:p.action.id,opportunityAttackSpell:false},prelude.token):undefined
+ if(prelude&&(prelude.signature!==JSON.stringify(p)||prelude.effectTimestamp!==view.now))throw Error('spell-ward-destination:same-current-native-prefix-required')
+ const canonical=movement?prepareDnd5eSpellCastAfterTempestuousPrefix({...source.input,action},movement):prepareDnd5eSpellCast({...source.input,action},source.hostReactionState)
+ if(!canonical.ok)throw Error('spell-ward-destination:canonical-'+canonical.reason)
+ if(canonical.prepared.action.id!==p.action.id||canonical.prepared.spell.id!==p.spell.id||canonical.prepared.slotLevel!==p.slotLevel||canonical.prepared.actorToken.id!==p.actorToken.id||canonical.prepared.targetSpellAttacks?.[view.attackIndex]?.targetToken.id!==targetTokenId)throw Error('spell-ward-destination:same-cast-source-required')
+ const actor=view.state.combatants[p.actorToken.id],canonicalActor=canonical.prepared.state.combatants[p.actorToken.id],canonicalTarget=canonical.prepared.state.combatants[targetTokenId],target=view.state.combatants[targetTokenId]??canonicalTarget
+ if(!actor||!target||!canonicalActor||!canonicalTarget||JSON.stringify([actor.position,actor.elevationFeet,target.position,target.elevationFeet])!==JSON.stringify([canonicalActor.position,canonicalActor.elevationFeet,canonicalTarget.position,canonicalTarget.elevationFeet]))throw Error('spell-ward-destination:unchanged-live-native-geometry-required')
+ const cap=Object.freeze({})as Dnd5eSpellWardRetargetCanonicalCandidate
+ canonicalWardDestinations.set(cap,{frame,prepared:canonical.prepared,targetId:targetTokenId,frameSignature:JSON.stringify([view.state,view.events]),preparedSignature:JSON.stringify(canonical.prepared),inputSignature:source.inputSignature,reactionSignature:source.reactionSignature,...(prelude?{prelude,movement}:{})})
+ return cap
+}
+export function readDnd5eSpellWardRetargetCanonicalCandidate(cap:Dnd5eSpellWardRetargetCanonicalCandidate){
+ const row=canonicalWardDestinations.get(cap);if(!row)throw Error('spell-ward-destination:actual-canonical-candidate-required')
+ const view=readCapturedDnd5ePreparedSpellAttackWindow(row.frame),source=actualPreparedSpellInputs.get(view.prepared)
+ if(row.prelude&&(actualPreparedSpellWindowPreludes.get(view.prepared)!==row.prelude||readTempestuousBeforePreparedOriginalMovement({prepared:view.prepared,effectRolls:[],transactionId:view.prepared.action.id,opportunityAttackSpell:false},row.prelude.token)!==row.movement||row.prelude.effectTimestamp!==view.now))throw Error('spell-ward-destination:unchanged-actual-native-prefix-required')
+ if(!source||source.inputSignature!==row.inputSignature||source.inputSignature!==JSON.stringify(source.input)||source.reactionSignature!==row.reactionSignature||source.reactionSignature!==String(JSON.stringify(source.hostReactionState))||row.preparedSignature!==JSON.stringify(row.prepared)||row.frameSignature!==JSON.stringify([view.state,view.events]))throw Error('spell-ward-destination:actual-unchanged-candidate-required')
+ return Object.freeze({parentId:view.parentId,attackIndex:view.attackIndex,now:view.now,originalTargetId:view.originalTargetId,failedTargetId:view.wardTargetId!,targetId:row.targetId,prepared:row.prepared,frame:row.frame})
+}
+
+/** Read-only continuity for an actual later Ward frontier on this original
+ * prepared cast. This does not mint or rebind a token, result or Room cap. */
+export function assertDnd5ePreparedSpellWindowTempestuousPreludeCurrent(prepared:PreparedDnd5eSpellCast,token:object,timestamp:number):void{
+ const prelude=actualPreparedSpellWindowPreludes.get(prepared),source=actualPreparedSpellInputs.get(prepared)
+ if(!prelude||prelude.token!==token||prelude.signature!==JSON.stringify(prepared)||prelude.effectTimestamp!==timestamp||!Number.isSafeInteger(timestamp)||timestamp<=0||!source||source.preparedSignature!==JSON.stringify(prepared)||source.inputSignature!==JSON.stringify(source.input)||source.reactionSignature!==String(JSON.stringify(source.hostReactionState)))throw Error('spell-window-prelude:actual-current-same-prefix-required')
+ assertDnd5eActualTempestuousSpellWindowPreparationCurrent(prepared)
+ const original={prepared,effectRolls:[]as number[],transactionId:prepared.action.id,opportunityAttackSpell:false}
+ assertTempestuousBeforePreparedOriginalReplaySource(original,token)
+ const input=tempestuousBeforePreparedOriginalInput(original,token)
+ if(input.hostOriginalD20Replay?.effectTimestamp!==timestamp)throw Error('spell-window-prelude:actual-original-clock-required')
+ readTempestuousBeforePreparedOriginalMovement(original,token)
+}

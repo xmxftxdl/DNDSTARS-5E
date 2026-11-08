@@ -1,0 +1,76 @@
+import type{Dnd5eDamageReactionFlowOptions}from'../../rulesets/dnd5e/damageReactionFlow'
+import{secondChanceCanonicalControllerMemberId}from'../../../shared/second-chance-controller.mjs'
+import type{SharedRoomGatewayPort,SharedResourceTransactionWrite}from'../../ports/sharedRoomGateway'
+import{getRoomSession}from'../../lib/roomSession'
+import{encodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
+import{listRegisteredDnd5eActivityPackages}from'../../rulesets/dnd5e/activities/dnd5eActivityRegistry'
+import{settleDnd5eActivityTriggerWindowsV1}from'../../rulesets/dnd5e/activities/dnd5eActivityTriggerSettlement'
+import{listDnd5eActivityTriggerWindowsV1}from'../../rulesets/dnd5e/activities/dnd5eActivityTriggerWindows'
+import{settleDnd5eConcentrationChecks}from'./settleDnd5eCombatResult'
+import{readArcaneNativeCheckpointContext}from'./arcaneNativeRoomIssuer'
+import{readPostNativeActivityStage}from'./postNativeActivityParent'
+import{sameArcaneNativeData}from'./arcaneNativeIdentity'
+import{readArcaneNativeIssuedParent,restoreArcaneNativeIssuedParent,resumeArcaneNativeIssuedParent,type ArcaneNativeIssuedParent}from'./arcaneNativeRoomIssuer'
+type Gateway=Pick<SharedRoomGatewayPort,'loadResource'|'saveResourcesAtomically'>
+interface Header{schemaVersion:1;roomId:string;hostMemberId:string;parentTransactionId:string;mapId:string;combatId:string;arcaneParentSignature:string;nativeResultSignature:string;activityDefinitionsSignature:string;dependencies:Record<string,number>}
+interface Roll{id:string;ordinal:number;rollerTokenId:string;rollerCharacterId:string;controllerMemberId:string;count:number;sides:number;kind:'d20'|'dice';raw?:{values:number[];authenticatedSubmitterMemberId:string;transport:string};confirmed?:{values:number[];originalValues:number[];authenticatedHostMemberId:string;transport:string}}
+interface BaseCheckpoint{id:string;arcaneParentId:string;eventId:string;occurrence:number;targetId:string;targetCharacterId:string;controllerMemberId:string;featureId:string;stateSignature:string;facts:unknown;rollRequestIds:string[];phase:'arcane'|'shroud';arcaneChoice?:{decision:'use'|'decline'};shroudChoice?:{decision:'use'|'decline';targetIds?:string[]}}
+export class ArcaneBaseChoicePending extends Error{readonly status='pending-owner-choice' as const;readonly parentId:string;readonly checkpointId:string;readonly phase:'arcane'|'shroud';constructor(parentId:string,checkpointId:string,phase:'arcane'|'shroud'){super('arcane-prefix:owner-choice-pending');this.parentId=parentId;this.checkpointId=checkpointId;this.phase=phase}}
+interface Parent extends Header{checkpoints?:BaseCheckpoint[];id:string;phase:'waiting'|'consumed';issuedAt:number;requests:Record<string,Roll>}
+interface Journal{schemaVersion:1;parents:Record<string,Parent>;_sync?:{revision:number}}
+type Payload=Omit<Header,'schemaVersion'|'roomId'|'hostMemberId'>
+export interface ArcaneBasePrefixTransport{begin:(input:Payload)=>Promise<{parentId:string}>;issue:(input:Payload&{ordinal:number;rollerTokenId:string;rollerCharacterId:string;count:number;sides:number;kind:'d20'|'dice'})=>Promise<{parentId:string;requestId:string}>}
+export interface ArcaneBasePrefixUi{roll:(owner:{durableRollRequestId:string;rollerTokenId:string;rollerCharacterId:string})=>Promise<readonly number[]>;confirmStored:(values:readonly number[],owner:{durableRollRequestId:string;rollerTokenId:string;rollerCharacterId:string})=>Promise<readonly number[]>}
+const canonical=(v:unknown):unknown=>v===undefined?{$undefined:true}:Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical((v as Record<string,unknown>)[k])])):v
+async function hash(v:unknown){const bytes=new TextEncoder().encode(JSON.stringify(canonical(v))),result=await crypto.subtle.digest('SHA-256',bytes);return[...new Uint8Array(result)].map(n=>n.toString(16).padStart(2,'0')).join('')}
+function guard(parent:ArcaneNativeIssuedParent){const context=readArcaneNativeIssuedParent(parent),session=getRoomSession();if(session?.role!=='dm'||session.roomId!==context.record.roomId||session.memberId!==context.record.hostMemberId)throw Error('arcane-prefix:original-host-required');return context}
+export interface ArcaneBasePrefixReady{readonly arcaneBasePrefixReady:unique symbol}
+type Settlement=Awaited<ReturnType<typeof settleDnd5eConcentrationChecks>>
+const readyPlans=new WeakMap<ArcaneBasePrefixReady,{parent:ArcaneNativeIssuedParent;header:Header;settlement:Settlement;write:SharedResourceTransactionWrite}>()
+/** Every fresh call replays actual Base from its genuine native facade. Only
+ * authenticated original pools are reused; UI return values grant no facts. */
+export async function settleArcaneBasePrefix(parent:ArcaneNativeIssuedParent,gateway:Gateway,transport:ArcaneBasePrefixTransport,ui:ArcaneBasePrefixUi):Promise<ArcaneBasePrefixReady>{
+ const context=guard(parent),base=readArcaneNativeCheckpointContext(parent).context,native=await resumeArcaneNativeIssuedParent(await restoreArcaneNativeIssuedParent(context.record.id as string,gateway),gateway);guard(parent)
+ if(native.status!=='resolved'||!native.result.result.ok||!native.result.application)throw Error('arcane-prefix:resolved-native-parent-required')
+ if(native.result.result.events.some(e=>e.type==='creature-died'))throw Error('arcane-prefix:death-joint-required')
+ const saved=await gateway.loadResource<{parents:Record<string,Record<string,unknown>>}>('arcane-native-parents'),record=saved?.parents[context.record.id as string]
+ if(!record||record.phase==='consumed')throw Error('arcane-prefix:waiting-original-parent-required')
+ const header:Header={schemaVersion:1,roomId:record.roomId as string,hostMemberId:record.hostMemberId as string,parentTransactionId:record.parentTransactionId as string,mapId:record.mapId as string,combatId:record.combatId as string,arcaneParentSignature:await hash(record),nativeResultSignature:await hash(encodeSecondChanceParentWire(native.result)),activityDefinitionsSignature:await hash(listRegisteredDnd5eActivityPackages()),dependencies:record.dependencies as Record<string,number>},payload:Payload={parentTransactionId:header.parentTransactionId,mapId:header.mapId,combatId:header.combatId,arcaneParentSignature:header.arcaneParentSignature,nativeResultSignature:header.nativeResultSignature,activityDefinitionsSignature:header.activityDefinitionsSignature,dependencies:header.dependencies}
+ const issued=await transport.begin(payload);guard(parent)
+ const load=async()=>{guard(parent);if(await hash(listRegisteredDnd5eActivityPackages())!==header.activityDefinitionsSignature)throw Error('arcane-prefix:source-definitions-changed');const journal=await gateway.loadResource<Journal>('arcane-base-prefix-rolls'),row=journal?.parents[issued.parentId];if(!row||row.phase!=='waiting'||!sameArcaneNativeData({...row,id:undefined,phase:undefined,issuedAt:undefined,requests:undefined,checkpoints:undefined},{...header,id:undefined,phase:undefined,issuedAt:undefined,requests:undefined,checkpoints:undefined}))throw Error('arcane-prefix:original-issued-prefix-required');return{journal:journal!,row}}
+ const first=await load();let ordinal=0
+ const pool=async(count:number,sides:number,_label:string,_targetName:string,owner?:{rollerTokenId?:string})=>{
+  if(!owner?.rollerTokenId)throw Error('arcane-prefix:actual-base-roller-required');const rollerTokenId=owner.rollerTokenId,rollerCharacterId=context.frame&&base.characterIdByCombatantId[rollerTokenId]
+  if(!rollerCharacterId||!native.result.result.state.combatants[rollerTokenId])throw Error('arcane-prefix:actual-base-character-required')
+  const issuedRoll=await transport.issue({...payload,ordinal,rollerTokenId,rollerCharacterId,count,sides,kind:sides===20&&count===1?'d20':'dice'}),read=async()=>{const{row}=await load(),r=row.requests[issuedRoll.requestId];if(!r||r.ordinal!==ordinal||r.rollerTokenId!==rollerTokenId||r.rollerCharacterId!==rollerCharacterId||r.count!==count||r.sides!==sides)throw Error('arcane-prefix:original-roll-slot-required');return r}
+  let roll=await read();const who={durableRollRequestId:roll.id,rollerTokenId,rollerCharacterId}
+  if(!roll.confirmed){if(roll.raw)await ui.confirmStored(roll.raw.values,who);else await ui.roll(who);roll=await read()}
+  if(!roll.raw||!roll.confirmed)throw Error('arcane-prefix:original-confirmation-pending')
+  if(roll.raw.authenticatedSubmitterMemberId!==roll.controllerMemberId||roll.raw.transport!=='authenticated-room-member'||roll.confirmed.authenticatedHostMemberId!==header.hostMemberId||roll.confirmed.transport!=='authenticated-room-host'||!sameArcaneNativeData(roll.confirmed.originalValues,roll.raw.values))throw Error('arcane-prefix:authenticated-original-pool-required')
+  ordinal++;return[...roll.confirmed.values]
+ }
+
+ const visited=new Set<string>();let activeCheckpoint:string|undefined
+ const persistCheckpoint=async(next:BaseCheckpoint)=>{const{journal,row}=await load();if(!Number.isSafeInteger(journal._sync?.revision))throw Error('arcane-prefix:journal-revision-required');const previous=row.checkpoints??[],index=previous.findIndex(c=>c.id===next.id),checkpoints=index<0?[...previous,next]:previous.map((c,i)=>i===index?next:c);await gateway.saveResourcesAtomically([{name:'arcane-base-prefix-rolls',expectedRevision:journal._sync!.revision,data:{...journal,parents:{...journal.parents,[row.id]:{...row,checkpoints}}}}],{transactionId:'arcane-base-checkpoint:'+next.id+':'+next.phase,readRevisions:context.dependencies});guard(parent)}
+ const chooseFailed:NonNullable<Dnd5eDamageReactionFlowOptions['chooseFailedSavingThrow']>=async request=>{
+  const{row}=await load(),targetId=request.facts.affectedId,targetCharacterId=base.characterIdByCombatantId[targetId],character=base.characters.find(c=>c.id===targetCharacterId),controllerMemberId=secondChanceCanonicalControllerMemberId(character,{roomId:header.roomId,hostMemberId:header.hostMemberId}),option=request.facts.options.find(o=>o.amount===4)
+  if(!targetCharacterId||!controllerMemberId||!option||request.facts.sourceActorId!==targetId)throw Error('arcane-prefix:genuine-own-con-save-required')
+  const stateSignature=await hash(encodeSecondChanceParentWire(request.state)),facts=JSON.parse(JSON.stringify(request.facts))as typeof request.facts,id=(await hash([row.id,request.eventId,request.occurrence,facts,stateSignature])).slice(0,32),descriptor:BaseCheckpoint={id,arcaneParentId:context.record.id as string,eventId:request.eventId,occurrence:request.occurrence,targetId,targetCharacterId,controllerMemberId,featureId:option.featureId,stateSignature,facts,rollRequestIds:Object.values(row.requests).sort((a,b)=>a.ordinal-b.ordinal).slice(0,ordinal).map(r=>r.id),phase:'arcane'}
+  if(!descriptor.rollRequestIds.length)throw Error('arcane-prefix:authenticated-con-pool-required')
+  const existing=row.checkpoints?.find(c=>c.id===id);if(!existing){await persistCheckpoint(descriptor);throw new ArcaneBaseChoicePending(descriptor.arcaneParentId,id,'arcane')}
+  for(const[key,value]of Object.entries(descriptor))if(key!=='phase'&&!sameArcaneNativeData(existing[key as keyof BaseCheckpoint],value))throw Error('arcane-prefix:issued-con-checkpoint-mismatch:'+key)
+  visited.add(id);activeCheckpoint=id;if(!existing.arcaneChoice)throw new ArcaneBaseChoicePending(descriptor.arcaneParentId,id,'arcane')
+  return existing.arcaneChoice.decision==='use'?{featureId:existing.featureId}:undefined
+ }
+ const chooseShroud:NonNullable<Dnd5eDamageReactionFlowOptions['choosePostD20FeatureUse']>=async request=>{
+  const entry=request.request.windows.flatMap(w=>w.available).find(e=>e.confirmation==='actor-choice');if(!entry)return undefined
+  const{row}=await load(),checkpoint=row.checkpoints?.find(c=>c.id===activeCheckpoint);if(!checkpoint||checkpoint.arcaneChoice?.decision!=='use')throw Error('arcane-prefix:genuine-own-save-use-required')
+  if(!checkpoint.shroudChoice){if(checkpoint.phase!=='shroud')await persistCheckpoint({...checkpoint,phase:'shroud'});throw new ArcaneBaseChoicePending(checkpoint.arcaneParentId,checkpoint.id,'shroud')}
+  return checkpoint.shroudChoice.decision==='use'?{packageId:entry.packageId,activityId:entry.activity.id,targetIds:checkpoint.shroudChoice.targetIds??[]}:undefined
+ }
+ const originalDefinitions=JSON.stringify(listRegisteredDnd5eActivityPackages())
+ const settlement=await settleDnd5eConcentrationChecks({damageReactions:{combatRevision:context.dependencies.combat,movementMap:base.map,authorityUnchanged:()=>{guard(parent);return JSON.stringify(listRegisteredDnd5eActivityPackages())===originalDefinitions},confirm:async()=>{throw Error('arcane-prefix:other-damage-reaction-joint-required')},roll:async()=>{throw Error('arcane-prefix:other-damage-pool-joint-required')},replayEventBatchId:header.parentTransactionId+':arcane-base-prefix',chooseFailedSavingThrow:chooseFailed,choosePostD20FeatureUse:chooseShroud},result:native.result.result,map:base.map,characters:base.characters,characterIdByCombatantId:base.characterIdByCombatantId,priorApplication:native.result.application,hostParentTransactionId:header.parentTransactionId,followupTransactionNow:()=>first.row.issuedAt,rollD20:async(label,name,owner)=>(await pool(1,20,label,name,owner))[0],rollD4:async(label,name,owner)=>(await pool(1,4,label,name,owner))[0],rollDice:pool,settleActivityTriggers:async request=>{if(!request.stage)throw Error('actual-stage-required');const stage=readPostNativeActivityStage(request.stage);if(stage.parentTransactionId!==header.parentTransactionId)throw Error('arcane-prefix:actual-stage-required');if(listDnd5eActivityTriggerWindowsV1({state:request.state,events:request.events,eventBatchId:header.parentTransactionId}).some(w=>w.available.length))throw Error('arcane-prefix:activity-authority-required');const result=await settleDnd5eActivityTriggerWindowsV1({state:request.state,events:request.events,eventBatchId:header.parentTransactionId,combatRevision:context.dependencies.combat,confirm:async()=>{throw Error('arcane-prefix:unexpected-choice')},roll:async()=>{throw Error('arcane-prefix:unexpected-pool')}});return{state:result.state,events:result.events,map:request.map}}})
+ const{journal,row}=await load();if((row.checkpoints??[]).some(c=>!visited.has(c.id)||!c.arcaneChoice||c.phase==='shroud'&&!c.shroudChoice)||Object.keys(row.requests).length!==ordinal||Object.values(row.requests).some(r=>!r.raw||!r.confirmed)||!Number.isSafeInteger(journal._sync?.revision))throw Error('arcane-prefix:complete-original-prefix-required')
+ const ready=Object.freeze({})as ArcaneBasePrefixReady;readyPlans.set(ready,{parent,header,settlement,write:{name:'arcane-base-prefix-rolls',expectedRevision:journal._sync!.revision,data:{...journal,parents:{...journal.parents,[row.id]:{...row,phase:'consumed'}}}}});return ready
+}
+export async function readArcaneBasePrefixReady(parent:ArcaneNativeIssuedParent,ready:ArcaneBasePrefixReady){guard(parent);const value=readyPlans.get(ready);if(!value||value.parent!==parent||await hash(listRegisteredDnd5eActivityPackages())!==value.header.activityDefinitionsSignature)throw Error('arcane-prefix:original-ready-required');return{settlement:value.settlement,write:structuredClone(value.write),readRevisions:{...value.header.dependencies}}}

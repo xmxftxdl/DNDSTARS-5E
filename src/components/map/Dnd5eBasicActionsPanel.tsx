@@ -6,6 +6,7 @@ import { dnd5eBasicActionEconomyAvailable } from './dnd5eBasicActionEconomy'
 import type { Dnd5eDismountDirection } from '../../rulesets/dnd5e/mountedPlacement'
 
 export interface Dnd5eBasicActionTarget {
+  helpAttackEligible?:boolean
   removableEffects?: readonly { effectId: string; label: string; actionLabel: string; maxDistanceFeet: number }[]
   tokenId: string
   label: string
@@ -58,6 +59,7 @@ export default function Dnd5eBasicActionsPanel({
   allowedBasicActions,
   effectsOnly = false,
   attackTeleportRangeFeet,
+  helpAsBonusAction=false,
   onAction,
 }: {
   canAct: boolean
@@ -72,6 +74,7 @@ export default function Dnd5eBasicActionsPanel({
   allowedBasicActions?: readonly ('dash' | 'dismiss-effect')[]
   effectsOnly?: boolean
   attackTeleportRangeFeet?: number
+  helpAsBonusAction?:boolean
   onAction: (payload: Dnd5eBasicActionPayload) => void
 }) {
   const [kind, setKind] = useState<BasicActionKind>(effectsOnly ? 'dismiss-effect' : 'help')
@@ -82,6 +85,8 @@ export default function Dnd5eBasicActionsPanel({
   const [targetTokenId, setTargetTokenId] = useState('')
   const [dismountDirection, setDismountDirection] = useState<Dnd5eDismountDirection>('east')
   const [helpKind, setHelpKind] = useState<'ability-check' | 'attack'>('attack')
+  const [helpEconomy,setHelpEconomy]=useState<'action'|'bonusAction'>('action')
+  const activeHelpEconomy=helpAsBonusAction&&helpEconomy==='bonusAction'?'bonusAction':undefined
   const [shoveOutcome, setShoveOutcome] = useState<'prone' | 'push'>('prone')
   const [readyTrigger, setReadyTrigger] = useState('')
   const [readyKind, setReadyKind] = useState<'attack' | 'move' | 'interact-object' | 'other'>('attack')
@@ -116,13 +121,14 @@ export default function Dnd5eBasicActionsPanel({
   const targetOptions = useMemo(() => targets.filter((target) => {
     if (target.currentHp <= 0) return false
     if (targetRelation === 'ally') return target.opposed === false
+    if(kind==='help'&&helpKind==='attack'&&target.helpAttackEligible!==undefined)return target.helpAttackEligible
     if (targetRelation === 'enemy') return target.opposed === true && target.distanceFeet <=
       (5 + ((kind === 'grapple' || kind === 'shove') && !selectedGrantId ? attackTeleportRangeFeet ?? 0 : 0))
     if (targetRelation === 'grappler') return grappleEscapeTargetIds.has(target.tokenId)
     if (targetRelation === 'sleeping') return target.awakenable === true && target.distanceFeet <= 5
     if (targetRelation === 'mount') return target.distanceFeet <= 5
     return true
-  }), [grappleEscapeTargetIds, targetRelation, targets, kind, selectedGrantId, attackTeleportRangeFeet])
+  }), [grappleEscapeTargetIds, targetRelation, targets, kind, selectedGrantId, attackTeleportRangeFeet,helpKind])
   const selectedTarget = targetOptions.some((target) => target.tokenId === targetTokenId)
     ? targetTokenId
     : targetOptions[0]?.tokenId ?? ''
@@ -136,7 +142,7 @@ export default function Dnd5eBasicActionsPanel({
     kind,
     actionAvailable,
     bonusActionAvailable,
-    usesBonusActionGrant: !!activeBasicActionGrantId,
+    usesBonusActionGrant: !!activeBasicActionGrantId||(kind==='help'&&activeHelpEconomy==='bonusAction'),
   })
   const actionAllowedByRestriction = allowedBasicActions == null ||
     (kind === 'dismiss-effect' && allowedBasicActions.includes('dismiss-effect'))
@@ -164,7 +170,7 @@ export default function Dnd5eBasicActionsPanel({
       const effect = dismissibleEffects.find(entry => effectChoiceKey(entry) === activeDismissEffectId)
       return effect ? { kind, effectId: effect.effectId, ...(effect.targetTokenId ? { targetTokenId: effect.targetTokenId } : {}) } : undefined
     }
-    if (kind === 'help') return selectedTarget ? { kind, helpKind, targetTokenId: selectedTarget } : undefined
+    if (kind === 'help') return selectedTarget ? { kind, helpKind, targetTokenId: selectedTarget,...(activeHelpEconomy?{economy:activeHelpEconomy}:{}) } : undefined
     // The defending creature chooses Athletics or Acrobatics. The authority
     // engine selects its stronger legal option; the attacker never controls it.
     if (kind === 'grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', ...(activeBasicActionGrantId ? { activityBasicActionGrantId: activeBasicActionGrantId } : {}) } : undefined
@@ -248,6 +254,7 @@ export default function Dnd5eBasicActionsPanel({
         </select>
       </label>
       {kind === 'help' ? <label className="mt-2 block text-xs text-slate-400">协助类型<select value={helpKind} onChange={(event) => setHelpKind(event.target.value as typeof helpKind)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="attack">协助下一次攻击</option><option value="ability-check">协助能力检定</option></select></label> : null}
+      {kind==='help'&&helpAsBonusAction&&<label className="mt-2 block text-xs text-slate-400">协助消耗<select aria-label="协助消耗" value={activeHelpEconomy??'action'} onChange={event=>setHelpEconomy(event.target.value as 'action'|'bonusAction')} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="action">动作</option><option value="bonusAction">附赠动作（战术大师）</option></select></label>}
       {targetRelation !== 'none' ? <label className="mt-2 block text-xs text-slate-400">目标<select value={selectedTarget} onChange={(event) => setTargetTokenId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">选择目标…</option>{targetOptions.map((target) => <option key={target.tokenId} value={target.tokenId}>{target.label} · {target.distanceFeet}尺</option>)}</select></label> : null}
       {(kind === 'grapple' || kind === 'shove') && attackTeleportRangeFeet != null && !selectedGrantId &&
         <p className="mt-2 text-xs text-cyan-200">可先选择目标，再选择 {attackTeleportRangeFeet} 尺内能触及该目标的传送落点。仅在提交攻击后移动。</p>}

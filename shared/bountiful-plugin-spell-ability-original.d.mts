@@ -1,0 +1,2 @@
+export function validBountifulPluginSpellAbilityOriginalRequest(value:unknown):boolean;
+export function bountifulPluginSpellAbilityOriginalSourceFacts(value:unknown):null|{base:unknown;action:unknown;map:unknown;characters:unknown;actorToken:unknown;headlessAction:unknown;rolls:Record<string,unknown>;combatId:string;round:number;initiativeIndex:number;initiativeOrder:unknown;initiativeSlotIds:unknown;turns:unknown};

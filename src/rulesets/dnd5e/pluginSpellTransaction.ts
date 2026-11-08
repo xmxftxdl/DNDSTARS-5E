@@ -1,3 +1,16 @@
+import{readDnd5eActualConcentrationResolution,completeDnd5eActualPluginTempestuousPhaseFlightWithConcentration}from'./headlessCombatEngine'
+import{dnd5eAvailableTempestuousSpellFlight}from'./headlessCombatEngine'
+import{dnd5eRulesPluginRegistrySnapshot}from'./pluginApi'
+import{completeDnd5eActualPluginTempestuousPhaseFlight,type Dnd5eActualPluginTempestuousFlightContinuation}from'./headlessCombatEngine'
+import{encodeSecondChanceParentWire}from'../../lib/secondChanceParentWire'
+import{captureDnd5eActualPluginTempestuousLanding,readDnd5eActualPluginTempestuousLanding,resolveDnd5eActualPluginTempestuousLanding,type Dnd5eActualPluginTempestuousLanding}from'./headlessCombatEngine'
+import{withTempestuousCastGeometry}from'./tempestuousCastGeometry'
+import{resolveDnd5eActualPluginTempestuousFlight}from'./headlessCombatEngine'
+import type{TempestuousSpellFlightIntent}from'./tempestuousSpellFlight'
+import{createDnd5eParentEffectClock}from'./activeEffects'
+import{readDnd5eActualPluginTempestuousPhase,disposeDnd5eActualPluginTempestuousPhase,type Dnd5eActualPluginTempestuousPhase}from'./headlessCombatEngine'
+import{wrapDnd5eMagicTruthPreparedFactory}from'./mastermindMagicTruthParent'
+import {applyDnd5eSpellDamageDieRerolls,type Dnd5eSpellDamageDieRerollUse} from './spellDamageDieRerolls'
 import { previewDnd5eSourceActionInterruption } from './headlessCombatEngine'
 import { previewDnd5eSpellcastingSaves } from './headlessCombatEngine'
 import { dnd5eActorEtherealAccess } from './etherealAccess'
@@ -255,6 +268,7 @@ export function dnd5ePluginSpellElapsedCastingMinutes(input: {
 }
 
 export interface Dnd5ePluginSpellResolutionRolls {
+  spellDamageDieRerolls?:readonly Dnd5eSpellDamageDieRerollUse[]
   sourceSlotSpellHealingTargets?: readonly { areaId: string; targetIds: readonly string[] }[]
   sourceActionInterruptionReaction?: import('./headlessCombatEngine').Dnd5eSourceActionInterruptionReaction
   activityTeleportInterruptions?: readonly import('./headlessCombatEngine').Dnd5eActivityTeleportInterruptionUse[]
@@ -393,7 +407,20 @@ export function dnd5ePluginSpellHasFullHeadlessAutomation(
   return activity == null || (activity.automation.level === 'full' && dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full')
 }
 
-export function prepareDnd5ePluginSpellCast(input: {
+/** Only an explicit selected-Activity declaration overrides an already-concentrating spell. */
+export function dnd5ePluginSpellConcentrationRounds(input: {
+  activity?: Pick<Dnd5eActivityDefinitionV1,'concentrationCastLevelProfiles'>
+  slotLevel: number
+  baseRounds?: number
+}): number | undefined {
+  if (input.baseRounds == null) return undefined
+  const profile = [...(input.activity?.concentrationCastLevelProfiles ?? [])]
+    .filter(candidate => candidate.minimumCastLevel <= input.slotLevel)
+    .sort((left,right) => right.minimumCastLevel-left.minimumCastLevel)[0]
+  return profile?.maximumRounds ?? input.baseRounds
+}
+
+function prepareDnd5ePluginSpellCastInternal(input: {
   worldMinute?: number
   action: SharedPlayerActionState
   /** Host-authoritative current round. Exploration clients may submit a stale synthetic round. */
@@ -1381,13 +1408,15 @@ export function prepareDnd5ePluginSpellCast(input: {
   })
   const targets = affectedTargets.filter((target) => !sculptedTargetIdSet.has(target.token.id))
   const firstTarget = targets[0] ?? affectedTargets[0]
-  const concentrationRounds = spell.duration.concentration &&
+  const concentrationRounds = dnd5ePluginSpellConcentrationRounds({ activity: scaledActivity, slotLevel, baseRounds:
+spell.duration.concentration &&
     !(spell.id === 'bestow-curse' && slotLevel >= 5) &&
     !(spell.id === 'major-image' && slotLevel >= 6)
     ? spell.id === 'bestow-curse' && slotLevel === 4
       ? 100
       : Math.min(14_400, spellDurationRounds(spell) + upcast.durationRounds)
     : undefined
+  })
   const now = input.now ?? Date.now()
   const castingBinding = dnd5ePluginSpellCastingProximityBinding({ action: input.action, spell,
     map: input.map, actorToken, targetTokens, activityTargetCell, payload, activity })
@@ -1825,6 +1854,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
       },
       input.airborneFallDamageRollsByCombatantId,
       { transaction: prepared.transaction, now },
+      pluginTempestuousObserverFor(input)?{observeActualPluginTempestuousCast:pluginTempestuousObserverFor(input)}:undefined,
     )
     let { result } = activityResolution
     const { airborneFalls } = activityResolution
@@ -1928,13 +1958,25 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   if (interruptionPreview == null || (!castingAllowed && supplied.sourceActionInterruptionReaction)) return invalidDice(prepared, transaction, now)
   const castingPrevented = castingAllowed === false || interruptionPreview
   const sourceCombatant = prepared.state.combatants[prepared.actorToken.id]
+  const rerollAudits:Array<Extract<import('./headlessCombatEngine').Dnd5eCombatEvent,{type:'spell-damage-dice-rerolled'}>>=[]
+  const consumedRerollGroups=new Set<string>()
+  const rerollDamageGroup=(id:string,values:readonly number[])=>{
+    const uses=supplied.spellDamageDieRerolls?.filter(use=>use.rollId===id)??[]
+    if(!uses.length)return values
+    if(prepared.overchannel||!mechanics.damage)throw Error('invalid spell damage reroll')
+    const group={id,sides:prepared.damageDice.sides,damageType:mechanics.damage.type,rolls:values}
+    const next=applyDnd5eSpellDamageDieRerolls(sourceCombatant,[group],uses).get(id)!
+    consumedRerollGroups.add(id)
+    rerollAudits.push({type:'spell-damage-dice-rerolled',actorId:sourceCombatant.id,spellId:prepared.spell.id,rollId:id,originalValues:[...values],values:[...next],selections:structuredClone(uses)})
+    return next
+  }
   const sharedAreaDamage = !castingPrevented && !!prepared.area && mechanics.resolution !== 'spell-attack'
   const suppliedOverchannelSelfDamageRolls = castingPrevented ? [] : supplied.overchannelSelfDamageRolls ?? []
   if (
     suppliedOverchannelSelfDamageRolls.length !== (castingPrevented ? 0 : prepared.overchannelSelfDamageDiceCount) ||
     suppliedOverchannelSelfDamageRolls.some((value) => !validDie(value, 12))
   ) return invalidDice(prepared, transaction, now)
-  const sharedDamageValues = prepared.overchannel && sharedAreaDamage && mechanics.damage
+  let sharedDamageValues = prepared.overchannel && sharedAreaDamage && mechanics.damage
     ? Array.from({ length: prepared.damageDice.count }, () => prepared.damageDice.sides)
     : supplied.damageRolls ?? []
   if (!castingPrevented && prepared.overchannel && (supplied.damageRolls?.length ?? 0) > 0) {
@@ -1944,6 +1986,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     sharedDamageValues.length !== prepared.damageDice.count ||
     sharedDamageValues.some((value) => !validDie(value, prepared.damageDice.sides))
   )) return invalidDice(prepared, transaction, now)
+  if(sharedAreaDamage){try{sharedDamageValues=[...rerollDamageGroup('plugin-shared',sharedDamageValues)]}catch{return invalidDice(prepared,transaction,now)}}
   if (sharedAreaDamage && mechanics.damage) {
     transaction = appendRollLedgerEntry(transaction, {
       id: `${prepared.action.id}:damage:shared`, kind: 'damage', label: `${prepared.spell.name}·范围伤害`,
@@ -1989,7 +2032,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     const shouldDealDamage = !!mechanics.damage && (mechanics.resolution !== 'spell-attack' || attackHit)
     if (shouldDealDamage) {
       const count = prepared.damageDice.count * (critical ? 2 : 1)
-      const values = sharedAreaDamage
+      let values = sharedAreaDamage
         ? sharedDamageValues
         : prepared.overchannel
           ? Array.from({ length: count }, () => prepared.damageDice.sides)
@@ -2000,6 +2043,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
       if (values.length !== count || values.some((value) => !validDie(value, prepared.damageDice.sides))) {
         return invalidDice(prepared, transaction, now)
       }
+      if(!sharedAreaDamage){try{values=[...rerollDamageGroup('plugin-target:'+index+':'+target.token.id,values)]}catch{return invalidDice(prepared,transaction,now)}}
       if (!sharedAreaDamage) {
         transaction = appendRollLedgerEntry(transaction, {
           id: `${prepared.action.id}:damage:${index}`, kind: 'damage', label: `${prepared.spell.name}·伤害`,
@@ -2059,7 +2103,8 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     })
   }
 
-  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
+  if(supplied.spellDamageDieRerolls?.some(use=>!consumedRerollGroups.has(use.rollId)))return invalidDice(prepared,transaction,now)
+  const { result: initialResult, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'adjudicated-spell',
     sourceActionInterruptionReaction: supplied.sourceActionInterruptionReaction,
     spellcastingSavingThrows: supplied.spellcastingSavingThrows,
@@ -2079,6 +2124,8 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     overchannel: castingPrevented ? false : prepared.overchannel,
     overchannelSelfDamageRolls: suppliedOverchannelSelfDamageRolls,
   }, input.airborneFallDamageRollsByCombatantId, { transaction, now })
+  let result=initialResult
+  if(result.ok&&rerollAudits.length)result={...result,events:[...result.events,...rerollAudits]}
   transaction = result.transaction ?? (result.ok
     ? commitCombatTransaction(transaction, now)
     : rollbackCombatTransaction(transaction, result.reason, now))
@@ -2263,3 +2310,183 @@ function settlePluginSpellMaterials(prepared: PreparedDnd5ePluginSpellCast, stat
   }
   return { ok: true, characters: prepared.characters.map(character => character.id === owner.id ? reserved.character : character) }
 }
+
+/** Keep the public factory signature; only its actual successful result acquires local preparation provenance. */
+function pluginTempestuousExactSignature(value:unknown){try{return JSON.stringify(encodeSecondChanceParentWire(value))}catch{return undefined}}
+const actualPluginTempestuousPreparations=new WeakMap<object,{registry:number;preparedSignature:string;input:Parameters<typeof prepareDnd5ePluginSpellCastInternal>[0];inputSignature:string;selector?:Function;selectorPresent:boolean}>()
+export const prepareDnd5ePluginSpellCast:typeof prepareDnd5ePluginSpellCastInternal=wrapDnd5eMagicTruthPreparedFactory(input=>{const result=prepareDnd5ePluginSpellCastInternal(input);if(result.ok){const facts=pluginTempestuousPreparationData(input);if(facts){const preparedSignature=pluginTempestuousExactSignature(result.prepared),inputSignature=pluginTempestuousExactSignature({keys:Object.keys(facts.data),data:facts.data});if(preparedSignature&&inputSignature)actualPluginTempestuousPreparations.set(result.prepared,{registry:dnd5eRulesPluginRegistrySnapshot(),preparedSignature,input,inputSignature,selector:facts.selector,selectorPresent:facts.selectorPresent})}};return result})
+export interface Dnd5ePluginTempestuousNativeOperation{readonly pluginTempestuousNativeOperation:unique symbol}
+type PluginTempestuousInput=Parameters<typeof resolvePreparedDnd5ePluginSpellCast>[0]
+const actualPluginTempestuousOperations=new WeakMap<object,{operation:Dnd5eActualPluginTempestuousPhase;input:PluginTempestuousInput;signature:string;effectTimestamp:number}>()
+type PluginTempestuousObserver={input:PluginTempestuousInput;matches?:(input:PluginTempestuousInput)=>boolean;observe:(operation:Dnd5eActualPluginTempestuousPhase)=>Dnd5eActualPluginTempestuousFlightContinuation|void;previous?:PluginTempestuousObserver}
+let activePluginTempestuousObserver:PluginTempestuousObserver|undefined
+function pluginTempestuousObserverFor(input:PluginTempestuousInput){let found=false;for(let row=activePluginTempestuousObserver;row;row=row.previous)if(row.input===input||row.matches?.(input)){found=true;break}if(!found)return;return(operation:Dnd5eActualPluginTempestuousPhase)=>{let continued:Dnd5eActualPluginTempestuousFlightContinuation|undefined;for(let row=activePluginTempestuousObserver;row;row=row.previous){if(row.input!==input&&!row.matches?.(input))continue;const next=row.observe(operation);if(next!==undefined){if(continued)throw Error('plugin-tempestuous-replay:ambiguous-native-flight');continued=next}}return continued}}
+/** Only the existing typed random-target producer callback is kept separately.
+ * Its identity is never serialized, executed by recovery, or accepted as permission. */
+function pluginTempestuousPreparationData(input:Parameters<typeof prepareDnd5ePluginSpellCastInternal>[0]){const allowed=['worldMinute','action','authorityRound','map','characters','roomMaps','initiativeOrder','turnEconomy','turnEconomyByToken','roomRequiredPlugins','now','effectiveRules'],data:Record<string,unknown>={};let selector:Function|undefined,selectorPresent=false;for(const key of Object.keys(input)){const descriptor=Object.getOwnPropertyDescriptor(input,key);if(!descriptor||descriptor.get||descriptor.set)return;if(key==='chooseRandomTarget'){if(typeof descriptor.value!=='function')return;selector=descriptor.value;selectorPresent=true;continue}if(!allowed.includes(key)||!pluginTempestuousDataOnly(descriptor.value))return;data[key]=descriptor.value}return{data,selector,selectorPresent}}
+function actualPluginTempestuousPreparationCurrent(prepared:PreparedDnd5ePluginSpellCast){const row=actualPluginTempestuousPreparations.get(prepared),facts=row&&pluginTempestuousPreparationData(row.input);return!!row&&row.registry===dnd5eRulesPluginRegistrySnapshot()&&!!facts&&facts.selector===row.selector&&facts.selectorPresent===row.selectorPresent&&row.preparedSignature===pluginTempestuousExactSignature(prepared)&&row.inputSignature===pluginTempestuousExactSignature({keys:Object.keys(facts.data),data:facts.data})&&JSON.stringify(dnd5ePluginSpellDefinition(prepared.spell.id))===JSON.stringify(prepared.spell)&&JSON.stringify(dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition(prepared.spell.id)))===JSON.stringify(prepared.activity)}
+
+/** Genuine native pause only; this operation grants no Room/dice/world rights. */
+function pluginTempestuousDataOnly(value:unknown,active=new Set<object>()):boolean{if(value===null||value===undefined||typeof value==='string'||typeof value==='boolean')return true;if(typeof value==='number')return Number.isFinite(value);if(typeof value!=='object'||active.has(value))return false;const prototype=Object.getPrototypeOf(value);if(!Array.isArray(value)&&prototype!==Object.prototype&&prototype!==null)return false;active.add(value);for(const key of Object.keys(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||descriptor.get||descriptor.set||!pluginTempestuousDataOnly(descriptor.value,active)){active.delete(value);return false}}active.delete(value);return true}
+export function beginDnd5ePluginTempestuousNativePhase(source:PluginTempestuousInput,phase:'before'|'after'){
+ if(Object.keys(source).some(key=>!['prepared','currentRoom','currentCombatState','rolls','now','airborneFallDamageRollsByCombatantId','attackDecoyRolls'].includes(key))||Object.keys(source.rolls??{}).some(key=>!['spellDamageDieRerolls','sourceSlotSpellHealingTargets','sourceActionInterruptionReaction','activityTeleportInterruptions','spellcastingSavingThrows','effectRollDice','attackD20','attackD20Second','savingThrowD20','savingThrowD20Second','damageRolls','overchannelSelfDamageRolls','targetRolls','activityRolls','activityRetainedSaveDice','activityInterruptChoiceId'].includes(key))||!pluginTempestuousDataOnly(source))throw Error('plugin-tempestuous-original:closed-data-source-required')
+ if(!['before','after'].includes(phase)||!actualPluginTempestuousPreparationCurrent(source.prepared)||source.currentCombatState&&JSON.stringify(source.currentCombatState)!==JSON.stringify(source.prepared.state)||source.currentRoom&&(JSON.stringify(source.currentRoom.characters)!==JSON.stringify(source.prepared.characters)||JSON.stringify(source.currentRoom.maps)!==JSON.stringify(source.prepared.roomMaps??[source.prepared.map])))throw Error('plugin-tempestuous-original:actual-unchanged-preparation-required')
+ const input={...source,now:source.now??Date.now()},signature=pluginTempestuousExactSignature(input);if(!signature)throw Error('plugin-tempestuous-original:exact-data-source-required');let pending:Dnd5ePluginTempestuousNativeOperation|undefined;class ActualPluginTempestuousPause extends Error{};const previous=activePluginTempestuousObserver;activePluginTempestuousObserver={input,previous,observe:operation=>{const native=readDnd5eActualPluginTempestuousPhase(operation);if(native.phase!==phase)return;if(native.transaction.id!==input.prepared.action.id||native.transaction.actorId!==input.prepared.actor.id||native.action.actorId!==input.prepared.actorToken.id||native.action.spell.spellId!==input.prepared.spell.id||!actualPluginTempestuousPreparationCurrent(input.prepared)||signature!==pluginTempestuousExactSignature(input))throw Error('plugin-tempestuous-original:same-actual-cast-required');pending=Object.freeze({})as Dnd5ePluginTempestuousNativeOperation;actualPluginTempestuousOperations.set(pending,{operation,input,signature,effectTimestamp:input.now});throw new ActualPluginTempestuousPause()}}
+ try{return{status:'resolved'as const,native:createDnd5eParentEffectClock({parentId:input.prepared.action.id,sourceKey:JSON.stringify(input.prepared),timestamp:input.now}).run(()=>resolvePreparedDnd5ePluginSpellCast(input))}}catch(error){if(!(error instanceof ActualPluginTempestuousPause)||!pending)throw error;return{status:'pending-plugin-tempestuous-phase'as const,operation:pending}}finally{activePluginTempestuousObserver=previous}
+}
+export function readDnd5ePluginTempestuousNativeOperation(cap:Dnd5ePluginTempestuousNativeOperation){const row=actualPluginTempestuousOperations.get(cap);if(!row||row.signature!==pluginTempestuousExactSignature(row.input)||!actualPluginTempestuousPreparationCurrent(row.input.prepared))throw Error('plugin-tempestuous-original:actual-current-operation-required');const native=readDnd5eActualPluginTempestuousPhase(row.operation);return{...native,effectTimestamp:row.effectTimestamp,source:row.input}}
+export function disposeDnd5ePluginTempestuousNativeOperation(cap:Dnd5ePluginTempestuousNativeOperation){const row=actualPluginTempestuousOperations.get(cap);if(row)disposeDnd5eActualPluginTempestuousPhase(row.operation);actualPluginTempestuousOperations.delete(cap)}
+
+export interface Dnd5ePluginTempestuousNativeFlight{readonly pluginTempestuousNativeFlight:unique symbol}
+const actualPluginTempestuousFlights=new WeakMap<object,{original:Dnd5ePluginTempestuousNativeOperation;result:ReturnType<typeof resolveDnd5eActualPluginTempestuousFlight>;signature:string;intent:TempestuousSpellFlightIntent;rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]}>()
+/** Native mechanical continuation only. No Room/raw/publication capability. */
+export function completeDnd5ePluginTempestuousNativeFlight(operation:Dnd5ePluginTempestuousNativeOperation,intent:TempestuousSpellFlightIntent,rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]){
+ const facts=readDnd5ePluginTempestuousNativeOperation(operation),row=actualPluginTempestuousOperations.get(operation)!;if(!pluginTempestuousDataOnly(intent)||!pluginTempestuousDataOnly(rolls))throw Error('plugin-tempestuous-flight:closed-data-required')
+ const result=createDnd5eParentEffectClock({parentId:facts.transaction.id,sourceKey:JSON.stringify(facts.source.prepared),timestamp:facts.effectTimestamp}).run(()=>withTempestuousCastGeometry({parentId:facts.transaction.id,actorId:facts.action.actorId,map:facts.source.prepared.map},()=>resolveDnd5eActualPluginTempestuousFlight(row.operation,intent,rolls)))
+ const cap=Object.freeze({})as Dnd5ePluginTempestuousNativeFlight;actualPluginTempestuousFlights.set(cap,{original:operation,result,signature:JSON.stringify(result),intent:structuredClone(intent),rolls:structuredClone(rolls)});return cap
+}
+export function readDnd5ePluginTempestuousNativeFlight(cap:Dnd5ePluginTempestuousNativeFlight){const row=actualPluginTempestuousFlights.get(cap);if(!row||row.signature!==JSON.stringify(row.result))throw Error('plugin-tempestuous-flight:actual-current-flight-required');const facts=readDnd5ePluginTempestuousNativeOperation(row.original);return{...facts,intent:structuredClone(row.intent),flight:structuredClone(row.result)}}
+
+export interface Dnd5ePluginTempestuousLandingOperation{readonly pluginTempestuousLandingOperation:unique symbol}
+const actualPluginTempestuousLandings=new WeakMap<object,{original:Dnd5ePluginTempestuousNativeOperation;native:Dnd5eActualPluginTempestuousLanding;intent:TempestuousSpellFlightIntent;signature:string;prefixRolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]}>()
+/** Stop at the actual missing landing pool, never a zero/one fake physical die. */
+export function tryCompleteDnd5ePluginTempestuousNativeFlight(operation:Dnd5ePluginTempestuousNativeOperation,intent:TempestuousSpellFlightIntent,rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]){try{return{status:'resolved'as const,flight:completeDnd5ePluginTempestuousNativeFlight(operation,intent,rolls)}}catch(error){const native=captureDnd5eActualPluginTempestuousLanding(error);if(!native)throw error;const facts=readDnd5ePluginTempestuousNativeOperation(operation),landing=readDnd5eActualPluginTempestuousLanding(native);if(landing.frame.parentId!==facts.transaction.id||landing.frame.actorId!==facts.action.actorId||landing.frame.timing!==facts.phase)throw Error('plugin-tempestuous-landing:same-actual-cast-required');const cap=Object.freeze({})as Dnd5ePluginTempestuousLandingOperation;actualPluginTempestuousLandings.set(cap,{original:operation,native,intent:structuredClone(intent),signature:JSON.stringify(landing),prefixRolls:structuredClone(rolls)});return{status:'pending-plugin-tempestuous-landing'as const,operation:cap}}}
+export function readDnd5ePluginTempestuousLandingOperation(cap:Dnd5ePluginTempestuousLandingOperation){const row=actualPluginTempestuousLandings.get(cap);if(!row)throw Error('plugin-tempestuous-landing:actual-issued-operation-required');const facts=readDnd5ePluginTempestuousNativeOperation(row.original),landing=readDnd5eActualPluginTempestuousLanding(row.native);if(JSON.stringify(landing)!==row.signature)throw Error('plugin-tempestuous-landing:unchanged-native-prefix-required');return{...landing,effectTimestamp:facts.effectTimestamp,beforeFlightState:structuredClone(facts.state),source:facts.source,intent:structuredClone(row.intent),movementRollsPrefix:structuredClone(row.prefixRolls)}}
+
+export function completeDnd5ePluginTempestuousNativeLanding(operation:Dnd5ePluginTempestuousLandingOperation,values:readonly number[]){const facts=readDnd5ePluginTempestuousLandingOperation(operation),row=actualPluginTempestuousLandings.get(operation)!;const result=createDnd5eParentEffectClock({parentId:facts.frame.parentId,sourceKey:JSON.stringify(facts.source.prepared),timestamp:facts.effectTimestamp}).run(()=>withTempestuousCastGeometry({parentId:facts.frame.parentId,actorId:facts.frame.actorId,map:facts.source.prepared.map},()=>resolveDnd5eActualPluginTempestuousLanding(row.native,values)));actualPluginTempestuousLandings.delete(operation);const cap=Object.freeze({})as Dnd5ePluginTempestuousNativeFlight;actualPluginTempestuousFlights.set(cap,{original:row.original,result,signature:JSON.stringify(result),intent:structuredClone(row.intent),rolls:{...structuredClone(row.prefixRolls),fallingDamageRolls:[...values]}});return cap}
+
+export interface Dnd5ePluginTempestuousFlightAnswer{operation:Dnd5ePluginTempestuousNativeOperation;choice?:TempestuousSpellFlightIntent;rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]}
+type PluginTempestuousFlightAnswers={before?:Dnd5ePluginTempestuousFlightAnswer;after?:Dnd5ePluginTempestuousFlightAnswer}
+let activePluginTempestuousReplay:{sourceSignature:string;answerSignature:string;observer:PluginTempestuousObserver;visits:Record<'before'|'after',number>}|undefined
+/** Mechanical scope only, from actual own native phases. Its Room consumer must
+ * independently authenticate the private owner/raw books and final original.
+ * Neither source JSON nor a matching callback result is registered as authority. */
+export function withDnd5ePluginTempestuousActualFlights<T>(source:PluginTempestuousInput,answers:PluginTempestuousFlightAnswers,runNative:()=>T):T{
+ if(!answers||!pluginTempestuousDataOnly(answers)||Object.keys(answers).some(k=>!['before','after'].includes(k))||!answers.before&&!answers.after||runNative.constructor.name==='AsyncFunction')throw Error('plugin-tempestuous-replay:exact-native-phases-required')
+ const sourceSignature=pluginTempestuousExactSignature(source);if(!sourceSignature)throw Error('plugin-tempestuous-replay:exact-data-source-required')
+ const expected=new Map<'before'|'after',{answer:Dnd5ePluginTempestuousFlightAnswer;facts:ReturnType<typeof readDnd5ePluginTempestuousNativeOperation>}>()
+ for(const phase of['before','after']as const){const answer=answers[phase];if(!answer)continue;if(Object.keys(answer).some(k=>!['operation','choice','rolls'].includes(k))||!answer.choice&&answer.rolls!==undefined||!pluginTempestuousDataOnly(answer.choice)||!pluginTempestuousDataOnly(answer.rolls))throw Error('plugin-tempestuous-replay:closed-native-answer-required');const facts=readDnd5ePluginTempestuousNativeOperation(answer.operation);if(facts.phase!==phase||pluginTempestuousExactSignature(facts.source)!==sourceSignature||source.now!==facts.effectTimestamp||answer.choice&&answer.choice.timing!==phase)throw Error('plugin-tempestuous-replay:same-actual-original-required');expected.set(phase,{answer,facts})}
+ const answerSignature=JSON.stringify([...expected].map(([phase,row])=>[phase,row.facts.state,row.facts.action,row.facts.events,row.facts.transaction,row.facts.effectTimestamp,row.answer.choice,row.answer.rolls])),previousReplay=activePluginTempestuousReplay,previousObserver=activePluginTempestuousObserver
+ const verify=()=>{for(const row of expected.values())readDnd5ePluginTempestuousNativeOperation(row.answer.operation);if(pluginTempestuousExactSignature(source)!==sourceSignature)throw Error('plugin-tempestuous-replay:changed-original-source')}
+ if(previousReplay&&previousReplay.sourceSignature===sourceSignature&&previousReplay.answerSignature===answerSignature){const before={...previousReplay.visits};verify();const result=runNative();if(result&&typeof(result as{then?:unknown}).then==='function')throw Error('plugin-tempestuous-replay:sync-only');for(const phase of expected.keys())if(previousReplay.visits[phase]!==before[phase]+1)throw Error('plugin-tempestuous-replay:actual-native-phase-not-reached');verify();return result}
+ const visits={before:0,after:0},observer:PluginTempestuousObserver={input:source,previous:previousObserver,matches:candidate=>pluginTempestuousExactSignature(candidate)===sourceSignature,observe:operation=>{const actual=readDnd5eActualPluginTempestuousPhase(operation),row=expected.get(actual.phase);if(!row)return;verify();if(visits[actual.phase]++!==0||JSON.stringify([actual.state,actual.action,actual.events,actual.transaction])!==JSON.stringify([row.facts.state,row.facts.action,row.facts.events,row.facts.transaction]))throw Error('plugin-tempestuous-replay:exact-native-prefix-required');if(!row.answer.choice)return;return withTempestuousCastGeometry({parentId:actual.transaction.id,actorId:actual.action.actorId,map:source.prepared.map},()=>completeDnd5eActualPluginTempestuousPhaseFlight(operation,row.answer.choice!,row.answer.rolls))}}
+ activePluginTempestuousObserver=observer;activePluginTempestuousReplay={sourceSignature,answerSignature,observer,visits}
+ try{verify();const result=runNative();if(result&&typeof(result as{then?:unknown}).then==='function')throw Error('plugin-tempestuous-replay:sync-only');for(const phase of expected.keys())if(visits[phase]!==1)throw Error('plugin-tempestuous-replay:actual-native-phase-not-reached');verify();return result}finally{activePluginTempestuousObserver=previousObserver;activePluginTempestuousReplay=previousReplay}
+}
+/** Fixed concrete facade for pure/native counters. Actual Room/Flow keeps the
+ * canonical resolver identity and uses the same synchronous scope around it. */
+export function resolveDnd5ePluginSpellWithActualTempestuousFlights(source:PluginTempestuousInput,answers:PluginTempestuousFlightAnswers){const timestamp=source.now;if(typeof timestamp!=='number')throw Error('plugin-tempestuous-replay:actual-original-clock-required');return withDnd5ePluginTempestuousActualFlights(source,answers,()=>createDnd5eParentEffectClock({parentId:source.prepared.action.id,sourceKey:JSON.stringify(source.prepared),timestamp}).run(()=>resolvePreparedDnd5ePluginSpellCast(source)))}
+
+export interface Dnd5ePluginTempestuousSessionScope{readonly pluginTempestuousSessionScope:unique symbol}
+export type Dnd5ePluginTempestuousSessionPending=
+ |{status:'pending-plugin-tempestuous-flight';operation:Dnd5ePluginTempestuousNativeOperation;phase:'before'|'after';snapshot:Dnd5eHeadlessCombatState;effectTimestamp:number}
+ |{status:'pending-plugin-tempestuous-landing';operation:Dnd5ePluginTempestuousLandingOperation;snapshot:Dnd5eHeadlessCombatState;effectTimestamp:number}
+type PluginSessionRow={source:PluginTempestuousInput;signature:string;registry:number;effectTimestamp:number;closed:boolean;earlyBefore?:Dnd5ePluginTempestuousEarlyBeforePrelude;choices:Map<'before'|'after',Dnd5ePluginTempestuousFlightAnswer>;operations:Set<Dnd5ePluginTempestuousNativeOperation>;landings:Set<Dnd5ePluginTempestuousLandingOperation>;pending?:Dnd5ePluginTempestuousSessionPending}
+const pluginTempestuousSessions=new WeakMap<object,PluginSessionRow>(),pluginTempestuousSessionErrors=new WeakMap<object,{scope:Dnd5ePluginTempestuousSessionScope;pending:Dnd5ePluginTempestuousSessionPending}>()
+function pluginSession(scope:Dnd5ePluginTempestuousSessionScope){const row=pluginTempestuousSessions.get(scope);if(!row||row.closed||row.registry!==dnd5eRulesPluginRegistrySnapshot()||row.signature!==pluginTempestuousExactSignature(row.source)||!actualPluginTempestuousPreparationCurrent(row.source.prepared))throw Error('plugin-tempestuous-session:actual-current-original-required');return row}
+/** Fixed canonical factory and genuine prepared identity only. This is a local
+ * native suspension scope, never a Room/raw/World capability. */
+export function createDnd5ePluginTempestuousSessionScope(source:PluginTempestuousInput,resolve:unknown,earlyBefore?:Dnd5ePluginTempestuousEarlyBeforePrelude){
+ if(resolve!==resolvePreparedDnd5ePluginSpellCast||typeof source.now!=='number')throw Error('plugin-tempestuous-session:actual-canonical-clock-required')
+ if(earlyBefore)pluginEarlyBefore(earlyBefore,source)
+ const first=beginDnd5ePluginTempestuousNativePhase(source,'before');if(first.status!=='pending-plugin-tempestuous-phase')return undefined
+ const native=readDnd5ePluginTempestuousNativeOperation(first.operation),scope=Object.freeze({})as Dnd5ePluginTempestuousSessionScope
+ pluginTempestuousSessions.set(scope,{source:native.source,signature:pluginTempestuousExactSignature(native.source)!,registry:dnd5eRulesPluginRegistrySnapshot(),effectTimestamp:native.effectTimestamp,closed:false,earlyBefore,choices:new Map(),operations:new Set([first.operation]),landings:new Set()});return scope
+}
+export function readDnd5ePluginTempestuousSessionScope(scope:Dnd5ePluginTempestuousSessionScope){const row=pluginSession(scope);return{parentId:row.source.prepared.action.id,effectTimestamp:row.effectTimestamp}}
+function pausePluginSession(scope:Dnd5ePluginTempestuousSessionScope,pending:Dnd5ePluginTempestuousSessionPending):never{const row=pluginSession(scope),error=new Error('plugin-tempestuous-session:actual-native-pending');row.pending=pending;pluginTempestuousSessionErrors.set(error,{scope,pending});throw error}
+export function readDnd5ePluginTempestuousSessionPause(scope:Dnd5ePluginTempestuousSessionScope,error:unknown){if(!error||typeof error!=='object')return;const entry=pluginTempestuousSessionErrors.get(error);if(!entry||entry.scope!==scope)return;const row=pluginSession(scope);if(row.pending!==entry.pending)throw Error('plugin-tempestuous-session:actual-pending-lineage-required');return{...entry.pending,snapshot:structuredClone(entry.pending.snapshot)}}
+/** Every worker invocation keeps the caller's canonical resolver identity. The
+ * synchronous observer exists only around the actual native invocation. */
+export function withDnd5ePluginTempestuousSessionNative<T>(scope:Dnd5ePluginTempestuousSessionScope,candidate:unknown,runNative:()=>T):T{
+ const row=pluginSession(scope);if(row.signature!==pluginTempestuousExactSignature(candidate)||runNative.constructor.name==='AsyncFunction')throw Error('plugin-tempestuous-session:exact-plain-original-required')
+ const previous=activePluginTempestuousObserver,seen=new Set<'before'|'after'>(),make=(operation:Parameters<typeof readDnd5eActualPluginTempestuousPhase>[0])=>{const actual=readDnd5eActualPluginTempestuousPhase(operation);if(actual.transaction.id!==row.source.prepared.action.id||actual.transaction.actorId!==row.source.prepared.actor.id||actual.action.actorId!==row.source.prepared.actorToken.id)throw Error('plugin-tempestuous-session:same-actual-cast-required');const cap=Object.freeze({})as Dnd5ePluginTempestuousNativeOperation;actualPluginTempestuousOperations.set(cap,{operation,input:row.source,signature:row.signature,effectTimestamp:row.effectTimestamp});row.operations.add(cap);return cap}
+ activePluginTempestuousObserver={input:row.source,previous,matches:input=>pluginTempestuousExactSignature(input)===row.signature,observe:operation=>{
+  pluginSession(scope);const actual=readDnd5eActualPluginTempestuousPhase(operation);if(seen.has(actual.phase))throw Error('plugin-tempestuous-session:one-native-phase-required');seen.add(actual.phase)
+  if(actual.phase==='before'&&row.earlyBefore)return continueActualPluginEarlyBefore(row.earlyBefore,row.source,operation)
+  const answer=row.choices.get(actual.phase)
+  if(!answer){const cap=make(operation);return pausePluginSession(scope,{status:'pending-plugin-tempestuous-flight',operation:cap,phase:actual.phase,snapshot:structuredClone(actual.state),effectTimestamp:row.effectTimestamp})}
+  const held=readDnd5ePluginTempestuousNativeOperation(answer.operation)
+  if(JSON.stringify([actual.state,actual.action,actual.events,actual.transaction])!==JSON.stringify([held.state,held.action,held.events,held.transaction]))throw Error('plugin-tempestuous-session:exact-native-prefix-required')
+  if(!answer.choice)return
+  try{return withTempestuousCastGeometry({parentId:actual.transaction.id,actorId:actual.action.actorId,map:row.source.prepared.map},()=>completeDnd5eActualPluginTempestuousPhaseFlight(operation,answer.choice!,answer.rolls))}
+  catch(error){const native=captureDnd5eActualPluginTempestuousLanding(error);if(!native)throw error;const landing=readDnd5eActualPluginTempestuousLanding(native);if(landing.frame.parentId!==actual.transaction.id||landing.frame.actorId!==actual.action.actorId||landing.frame.timing!==actual.phase)throw Error('plugin-tempestuous-session:same-actual-landing-required');const cap=Object.freeze({})as Dnd5ePluginTempestuousLandingOperation;actualPluginTempestuousLandings.set(cap,{original:answer.operation,native,intent:structuredClone(answer.choice),signature:JSON.stringify(landing),prefixRolls:structuredClone(answer.rolls)});row.landings.add(cap);return pausePluginSession(scope,{status:'pending-plugin-tempestuous-landing',operation:cap,snapshot:structuredClone(landing.state),effectTimestamp:row.effectTimestamp})}
+ }}
+ try{const result=runNative();if(result&&typeof(result as{then?:unknown}).then==='function')throw Error('plugin-tempestuous-session:sync-only');if(!seen.has('before'))throw Error('plugin-tempestuous-session:actual-native-phase-not-reached');pluginSession(scope);return result}finally{activePluginTempestuousObserver=previous}
+}
+export function acceptDnd5ePluginTempestuousSessionFlight(scope:Dnd5ePluginTempestuousSessionScope,operation:Dnd5ePluginTempestuousNativeOperation,choice?:TempestuousSpellFlightIntent){const row=pluginSession(scope),pending=row.pending;if(!pending||pending.status!=='pending-plugin-tempestuous-flight'||pending.operation!==operation||!pluginTempestuousDataOnly(choice)||choice&&Object.keys(choice).some(key=>!['timing','featureId','to','elevationFeet'].includes(key)))throw Error('plugin-tempestuous-session:actual-pending-flight-required');const facts=readDnd5ePluginTempestuousNativeOperation(operation);if(facts.phase!==pending.phase||choice&&choice.timing!==facts.phase)throw Error('plugin-tempestuous-session:same-actual-phase-required');row.choices.set(facts.phase,{operation,choice:structuredClone(choice)});row.pending=undefined}
+export function acceptDnd5ePluginTempestuousSessionLanding(scope:Dnd5ePluginTempestuousSessionScope,operation:Dnd5ePluginTempestuousLandingOperation,values:readonly number[]){const row=pluginSession(scope),pending=row.pending;if(!pending||pending.status!=='pending-plugin-tempestuous-landing'||pending.operation!==operation)throw Error('plugin-tempestuous-session:actual-pending-landing-required');const facts=readDnd5ePluginTempestuousLandingOperation(operation),answer=row.choices.get(facts.frame.timing);if(!answer||!Array.isArray(values)||values.length!==facts.frame.count||values.some(v=>!Number.isInteger(v)||v<1||v>6))throw Error('plugin-tempestuous-session:exact-original-landing-faces-required');answer.rolls={...answer.rolls,fallingDamageRolls:[...values]};row.pending=undefined}
+export function cancelDnd5ePluginTempestuousSession(scope:Dnd5ePluginTempestuousSessionScope){const row=pluginTempestuousSessions.get(scope);if(!row)return;row.closed=true;row.pending=undefined;for(const op of row.operations)disposeDnd5ePluginTempestuousNativeOperation(op);for(const op of row.landings)actualPluginTempestuousLandings.delete(op);row.choices.clear()}
+
+export interface Dnd5ePluginTempestuousSourceGuard{readonly pluginTempestuousSourceGuard:unique symbol}
+const actualPluginTempestuousSourceGuards=new WeakMap<object,{source:PluginTempestuousInput;signature:string;input:PluginTempestuousInput;inputSignature:string;registry:number;effectTimestamp:number}>()
+/** Read-only lifetime independent of temporary phase operations. This only
+ * witnesses the real original preparation/input/provider, never a completed
+ * Native, raw pool or publication permit. */
+export function captureDnd5ePluginTempestuousSourceGuard(source:PluginTempestuousInput,resolve:unknown){
+ if(resolve!==resolvePreparedDnd5ePluginSpellCast||typeof source.now!=='number')throw Error('plugin-tempestuous-source:actual-canonical-clock-required')
+ const initial=beginDnd5ePluginTempestuousNativePhase(source,'before');if(initial.status!=='pending-plugin-tempestuous-phase')return undefined
+ try{const native=readDnd5ePluginTempestuousNativeOperation(initial.operation),cap=Object.freeze({})as Dnd5ePluginTempestuousSourceGuard;actualPluginTempestuousSourceGuards.set(cap,{source:native.source,signature:pluginTempestuousExactSignature(native.source)!,input:source,inputSignature:pluginTempestuousExactSignature(source)!,registry:dnd5eRulesPluginRegistrySnapshot(),effectTimestamp:native.effectTimestamp});return cap}finally{disposeDnd5ePluginTempestuousNativeOperation(initial.operation)}
+}
+export function readDnd5ePluginTempestuousSourceGuard(cap:Dnd5ePluginTempestuousSourceGuard){const row=actualPluginTempestuousSourceGuards.get(cap);if(!row||row.inputSignature!==pluginTempestuousExactSignature(row.input)||row.registry!==dnd5eRulesPluginRegistrySnapshot()||!actualPluginTempestuousPreparationCurrent(row.source.prepared)||row.signature!==pluginTempestuousExactSignature(row.source))throw Error('plugin-tempestuous-source:actual-current-original-required');return{parentId:row.source.prepared.action.id,mapId:row.source.prepared.map.id,combatId:row.source.prepared.state.combatId,effectTimestamp:row.effectTimestamp}}
+
+/** Read-only no-op presentation predicate, never a source/dice/world issuer. */
+export function shouldPreserveActualPluginTempestuousEmptyIntent(prepared:PreparedDnd5ePluginSpellCast){
+ if(!actualPluginTempestuousPreparationCurrent(prepared)||prepared.action.sourceMode!=='player'||!prepared.activity||!prepared.activityHeadlessAction)return false
+ const activity=prepared.activity,emptyRecord=(v:unknown)=>v===undefined||!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===0,emptyList=(v:unknown)=>v===undefined||Array.isArray(v)&&v.length===0,previous=prepared.activityHeadlessAction.payload
+ if(activity.target.kind!=='creature'||activity.target.requiresWilling||activity.choices?.length||activity.checks?.some(check=>check.kind==='saving-throw'&&check.allowWillingFailure)||prepared.payload.activityTargetFormIds!==undefined||!emptyRecord(prepared.payload.activityChoices)||!emptyList(prepared.payload.activityWillingTargetIds)||previous!==undefined&&(!previous||typeof previous!=='object'||Array.isArray(previous)))return false
+ const data=previous as Record<string,unknown>|undefined
+ if(data?.activityTargetFormIds!==undefined||!emptyRecord(data?.activityChoices)||!emptyList(data?.activityWillingTargetIds))return false
+ return dnd5eAvailableTempestuousSpellFlight(prepared.state,prepared.actorToken.id).length>0
+}
+
+/** A genuine before phase with no original spell inputs yet. This is mechanical
+ * continuity only; a Room consumer must independently authenticate its own early
+ * owner book and every later original pool. It grants no raw or World access. */
+export interface Dnd5ePluginTempestuousEarlyBeforePrelude{readonly pluginTempestuousEarlyBeforePrelude:unique symbol}
+type PluginEarlyBeforeRow={operation:Dnd5ePluginTempestuousNativeOperation;choice?:TempestuousSpellFlightIntent;rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2];flight?:Dnd5ePluginTempestuousNativeFlight;beforeBaseState?:object;prefix:string;sourceSignature:string;registry:number}
+const actualPluginEarlyBeforePreludes=new WeakMap<object,PluginEarlyBeforeRow>()
+function pluginBeforePrefix(data:ReturnType<typeof readDnd5ePluginTempestuousNativeOperation>){const{rolls:_future,...pluginAction}=data.action.pluginAction??{},effectFields=['sourceSlotSpellHealingTargets','sourceActionInterruptionReaction','spellcastingSavingThrows','effectRollDice'];const fixed=Object.fromEntries(Object.entries(data.action).filter(([key])=>!effectFields.includes(key)));return JSON.stringify([data.state,{...fixed,pluginAction},data.events,data.transaction,data.effectTimestamp])}
+function pluginSourceWithoutFutureRolls(source:PluginTempestuousInput){return pluginTempestuousExactSignature({...source,rolls:undefined})}
+export function captureDnd5ePluginTempestuousEarlyBeforePrelude(operation:Dnd5ePluginTempestuousNativeOperation,choice?:TempestuousSpellFlightIntent,rolls?:Parameters<typeof resolveDnd5eActualPluginTempestuousFlight>[2]){
+ const facts=readDnd5ePluginTempestuousNativeOperation(operation);if(facts.phase!=='before'||Object.values(facts.source.rolls??{}).some(v=>v!==undefined)||choice&&choice.timing!=='before'||!pluginTempestuousDataOnly(choice)||!pluginTempestuousDataOnly(rolls))throw Error('plugin-tempestuous-early:actual-missing-original-before-required')
+ const flight=choice?completeDnd5ePluginTempestuousNativeFlight(operation,choice,rolls):undefined;if(flight){const actual=readDnd5ePluginTempestuousNativeFlight(flight).flight;if(!actual.ok||actual.events.some(e=>e.type==='concentration-check-required'&&!e.settled))throw Error('plugin-tempestuous-early:completed-before-Base-required')}const token=Object.freeze({})as Dnd5ePluginTempestuousEarlyBeforePrelude
+ actualPluginEarlyBeforePreludes.set(token,{operation,choice:structuredClone(choice),rolls:structuredClone(rolls),flight,prefix:pluginBeforePrefix(facts),sourceSignature:pluginTempestuousExactSignature(facts.source)!,registry:dnd5eRulesPluginRegistrySnapshot()});return token
+}
+function pluginEarlyBefore(token:Dnd5ePluginTempestuousEarlyBeforePrelude,source:PluginTempestuousInput){
+ const row=actualPluginEarlyBeforePreludes.get(token);if(!row||row.registry!==dnd5eRulesPluginRegistrySnapshot())throw Error('plugin-tempestuous-early:actual-current-prelude-required')
+ if(Object.keys(source.rolls??{}).some(key=>!['activityRolls','effectRollDice','spellcastingSavingThrows','sourceActionInterruptionReaction','sourceSlotSpellHealingTargets','activityInterruptChoiceId','activityRetainedSaveDice','spellDamageDieRerolls','activityTeleportInterruptions','attackD20','attackD20Second','savingThrowD20','savingThrowD20Second','damageRolls','overchannelSelfDamageRolls','targetRolls'].includes(key)))throw Error('plugin-tempestuous-early:closed-future-original-input-required')
+ const held=readDnd5ePluginTempestuousNativeOperation(row.operation);if(row.sourceSignature!==pluginTempestuousExactSignature(held.source)||source.prepared!==held.source.prepared||!actualPluginTempestuousPreparationCurrent(source.prepared)||pluginSourceWithoutFutureRolls(source)!==pluginSourceWithoutFutureRolls(held.source)||!pluginTempestuousDataOnly(source))throw Error('plugin-tempestuous-early:exact-original-and-future-input-required')
+ if(row.flight)readDnd5ePluginTempestuousNativeFlight(row.flight);if(row.beforeBaseState)readDnd5eActualConcentrationResolution(row.beforeBaseState);return row
+}
+/** A new Native visit is mandatory on every synchronous invocation, including
+ * nested calls. Only action.pluginAction.rolls is a future original input slot;
+ * state, transaction, events, geometry, prepared recipe and T1 stay exact. */
+export function withDnd5ePluginTempestuousEarlyBefore<T>(token:Dnd5ePluginTempestuousEarlyBeforePrelude,source:PluginTempestuousInput,runNative:()=>T):T{
+ const row=pluginEarlyBefore(token,source),signature=pluginTempestuousExactSignature(source),previous=activePluginTempestuousObserver;let visits=0
+ if(runNative.constructor.name==='AsyncFunction')throw Error('plugin-tempestuous-early:sync-native-required')
+ activePluginTempestuousObserver={input:source,previous,matches:candidate=>actualPluginTempestuousPreparationCurrent(candidate.prepared)&&pluginTempestuousExactSignature(candidate)===signature,observe:operation=>{const actual=readDnd5eActualPluginTempestuousPhase(operation);if(actual.phase!=='before')return;pluginEarlyBefore(token,source);if(visits++!==0||row.prefix!==pluginBeforePrefix({...actual,effectTimestamp:source.now!,source}))throw Error('plugin-tempestuous-early:exact-new-native-prefix-required');if(row.choice)return withTempestuousCastGeometry({parentId:actual.transaction.id,actorId:actual.action.actorId,map:source.prepared.map},()=>row.beforeBaseState?completeDnd5eActualPluginTempestuousPhaseFlightWithConcentration(operation,row.choice!,row.rolls,row.beforeBaseState):completeDnd5eActualPluginTempestuousPhaseFlight(operation,row.choice!,row.rolls))}}
+ try{const result=runNative();if(result&&typeof(result as{then?:unknown}).then==='function')throw Error('plugin-tempestuous-early:sync-native-required');if(visits!==1)throw Error('plugin-tempestuous-early:actual-new-native-before-required');if(signature!==pluginTempestuousExactSignature(source))throw Error('plugin-tempestuous-early:changed-future-input');pluginEarlyBefore(token,source);return result}finally{activePluginTempestuousObserver=previous}
+}
+export function resolveDnd5ePluginSpellWithEarlyBefore(token:Dnd5ePluginTempestuousEarlyBeforePrelude,source:PluginTempestuousInput){if(typeof source.now!=='number')throw Error('plugin-tempestuous-early:actual-original-clock-required');return withDnd5ePluginTempestuousEarlyBefore(token,source,()=>createDnd5eParentEffectClock({parentId:source.prepared.action.id,sourceKey:JSON.stringify(source.prepared),timestamp:source.now!}).run(()=>resolvePreparedDnd5ePluginSpellCast(source)))}
+
+export function disposeDnd5ePluginTempestuousEarlyBeforePrelude(token:Dnd5ePluginTempestuousEarlyBeforePrelude){actualPluginEarlyBeforePreludes.delete(token)}
+
+function continueActualPluginEarlyBefore(token:Dnd5ePluginTempestuousEarlyBeforePrelude,source:PluginTempestuousInput,operation:Dnd5eActualPluginTempestuousPhase){const row=pluginEarlyBefore(token,source),actual=readDnd5eActualPluginTempestuousPhase(operation);if(actual.phase!=='before'||row.prefix!==pluginBeforePrefix({...actual,effectTimestamp:source.now!,source}))throw Error('plugin-tempestuous-early:exact-new-native-prefix-required');if(row.choice)return withTempestuousCastGeometry({parentId:actual.transaction.id,actorId:actual.action.actorId,map:source.prepared.map},()=>row.beforeBaseState?completeDnd5eActualPluginTempestuousPhaseFlightWithConcentration(operation,row.choice!,row.rolls,row.beforeBaseState):completeDnd5eActualPluginTempestuousPhaseFlight(operation,row.choice!,row.rolls))}
+
+/** Resume from the actual completed native flight, including its retained
+ * mechanically resolved landing input. No caller values or choice are accepted. */
+export function captureDnd5ePluginTempestuousEarlyBeforeFromFlight(flight:Dnd5ePluginTempestuousNativeFlight){
+ const facts=readDnd5ePluginTempestuousNativeFlight(flight),held=actualPluginTempestuousFlights.get(flight)!;if(facts.phase!=='before'||Object.values(facts.source.rolls??{}).some(v=>v!==undefined))throw Error('plugin-tempestuous-early:actual-missing-original-before-required')
+ if(!facts.flight.ok||facts.flight.events.some(e=>e.type==='concentration-check-required'&&!e.settled))throw Error('plugin-tempestuous-early:completed-before-Base-required')
+ const token=Object.freeze({})as Dnd5ePluginTempestuousEarlyBeforePrelude;actualPluginEarlyBeforePreludes.set(token,{operation:held.original,choice:structuredClone(held.intent),rolls:structuredClone(held.rolls),flight,prefix:pluginBeforePrefix(facts),sourceSignature:pluginTempestuousExactSignature(facts.source)!,registry:dnd5eRulesPluginRegistrySnapshot()});return token
+}
+
+/** Read-only actual Native prefix for later dice geometry; no World projection. */
+export function readDnd5ePluginTempestuousEarlyBeforePrelude(token:Dnd5ePluginTempestuousEarlyBeforePrelude,source?:PluginTempestuousInput){const held=actualPluginEarlyBeforePreludes.get(token);if(!held)throw Error('plugin-tempestuous-early:actual-current-prelude-required');const facts=readDnd5ePluginTempestuousNativeOperation(held.operation),row=pluginEarlyBefore(token,source??facts.source),state=row.beforeBaseState?readDnd5eActualConcentrationResolution(row.beforeBaseState).result.state:row.flight?readDnd5ePluginTempestuousNativeFlight(row.flight).flight.state:facts.state;return{parentId:facts.transaction.id,effectTimestamp:facts.effectTimestamp,state:structuredClone(state)}}
+
+/** Native CON identity is mandatory even after the actual Page Base has checked
+ * its own input/completion provenance. No caller Base snapshot is registered. */
+export function captureDnd5ePluginTempestuousEarlyBeforeFromFlightAndConcentration(flight:Dnd5ePluginTempestuousNativeFlight,actualBaseState:object){const facts=readDnd5ePluginTempestuousNativeFlight(flight),held=actualPluginTempestuousFlights.get(flight)!,native=readDnd5eActualConcentrationResolution(actualBaseState),checks=facts.flight.events.filter(e=>e.type==='concentration-check-required'&&!e.settled);if(facts.phase!=='before'||!facts.flight.ok||Object.values(facts.source.rolls??{}).some(v=>v!==undefined)||checks.length!==1||checks[0].type!=='concentration-check-required'||checks[0].targetId!==native.action.actorId||checks[0].dc!==native.action.dc||native.before!==JSON.stringify(facts.flight.state)||native.options.now!==facts.effectTimestamp||native.options.transactionId!==JSON.stringify([facts.transaction.id,'concentration',0,native.action.actorId]))throw Error('plugin-tempestuous-early:actual-before-Base-native-required');const token=Object.freeze({})as Dnd5ePluginTempestuousEarlyBeforePrelude;actualPluginEarlyBeforePreludes.set(token,{operation:held.original,choice:structuredClone(held.intent),rolls:structuredClone(held.rolls),flight,beforeBaseState:actualBaseState,prefix:pluginBeforePrefix(facts),sourceSignature:pluginTempestuousExactSignature(facts.source)!,registry:dnd5eRulesPluginRegistrySnapshot()});return token}
+
+export function assertDnd5ePluginTempestuousEarlyBeforeFlight(token:Dnd5ePluginTempestuousEarlyBeforePrelude,flight:Dnd5ePluginTempestuousNativeFlight){const facts=readDnd5ePluginTempestuousNativeFlight(flight),row=pluginEarlyBefore(token,facts.source);if(row.flight!==flight||!row.beforeBaseState)throw Error('plugin-tempestuous-early:actual-same-flight-Base-required')}

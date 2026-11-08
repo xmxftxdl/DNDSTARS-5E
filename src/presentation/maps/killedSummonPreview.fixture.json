@@ -1,0 +1,272 @@
+{
+  "map": {
+    "id": "hexblade-acceptance-map",
+    "name": "Actual Hexblade curse and Specter",
+    "width": 1500,
+    "height": 1000,
+    "gridSize": 50,
+    "feetPerCell": 5,
+    "gridOffsetX": 0,
+    "gridOffsetY": 0,
+    "showGrid": true,
+    "tokens": [
+      {
+        "id": "soul-token",
+        "characterId": "soul",
+        "type": "player",
+        "label": "Hexblade",
+        "x": 575,
+        "y": 375,
+        "size": 1,
+        "color": "#6ac",
+        "emoji": "H",
+        "hp": 45,
+        "maxHp": 45
+      },
+      {
+        "id": "foe-token",
+        "poolId": "srd-5.1:goblin",
+        "type": "enemy",
+        "label": "Foe",
+        "x": 625,
+        "y": 375,
+        "size": 1,
+        "color": "#c96",
+        "emoji": "G",
+        "hp": 0,
+        "maxHp": 7,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "deathRound": 1,
+          "deathInitiativeIndex": 0,
+          "deathWorldMinute": 480,
+          "bodyPresent": true,
+          "activeEffects": [
+            {
+              "schemaVersion": 1,
+              "id": "activity_3Alocal.test.hexblade-coherent-source_3Ahexblade-curse_3Ahexblade-curse_3Amodifiers_3A0:soul-token:foe-token:modifiers-0",
+              "definitionId": "activity:local.test.hexblade-coherent-source:hexblade-curse:hexblade-curse:modifiers:0",
+              "label": "咒剑诅咒",
+              "tags": [
+                "curse",
+                "dnd5e:warlock-curse",
+                "hexblade-curse"
+              ],
+              "kind": "debuff",
+              "source": {
+                "kind": "plugin",
+                "actorId": "soul-token",
+                "characterId": "soul",
+                "actorName": "Hexblade",
+                "rulesId": "local.test.hexblade-coherent-source:hexblade-curse",
+                "pluginId": "local.test.hexblade-coherent-source",
+                "magical": false
+              },
+              "appliedAt": 1793060650772,
+              "appliedTurnKey": "hexblade-acceptance-map:combat-1793060646201-e07u9yo1z48:1:soul-token:normal",
+              "duration": {
+                "type": "rounds",
+                "remainingRounds": 10,
+                "tickOn": "source-turn-end"
+              },
+              "removal": {
+                "sourceLink": {
+                  "sourceMustNotBeIncapacitated": true
+                }
+              },
+              "breakOn": [
+                "source-dies"
+              ],
+              "stackingKey": "activity:local.test.hexblade-coherent-source:hexblade-curse:hexblade-curse:modifiers:0:soul-token",
+              "stackingPolicy": "replace",
+              "visibility": "public",
+              "modifiers": {
+                "damageRollsBySourceBonus": 3,
+                "attacksBySourceCriticalThreshold": 19,
+                "notifySourceOnBearerDeath": true
+              }
+            }
+          ],
+          "recentCreatureSightings": {
+            "soul-token": {
+              "mapId": "hexblade-acceptance-map",
+              "worldMinute": 480.1,
+              "label": "Hexblade"
+            },
+            "spare-token": {
+              "mapId": "hexblade-acceptance-map",
+              "worldMinute": 480.1,
+              "label": "Spare"
+            }
+          },
+          "monsterActionUsesByActionId": {},
+          "monsterThreatByTargetId": {
+            "soul-token": 7
+          }
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      {
+        "id": "spare-token",
+        "characterId": "spare",
+        "type": "player",
+        "label": "Spare",
+        "x": 1125,
+        "y": 925,
+        "size": 1,
+        "color": "#6ac",
+        "emoji": "S",
+        "hp": 10,
+        "maxHp": 10
+      }
+    ],
+    "dnd5ePluginAreas": [],
+    "dnd5eActivityTurnClock": {
+      "schemaVersion": 1,
+      "combatId": "hexblade-acceptance-map:combat-1793060646201-e07u9yo1z48",
+      "turnKey": "1:soul-token:normal",
+      "sequence": 0,
+      "cursor": {
+        "tokenId": "soul-token",
+        "slotId": "soul-token:normal",
+        "round": 1,
+        "initiativeIndex": 0
+      }
+    }
+  },
+  "activity": {
+    "schemaVersion": 1,
+    "id": "accursed-specter",
+    "name": "咒缚幽灵",
+    "legacySource": {
+      "kind": "subclass-ability",
+      "id": "hexblade:accursed-specter"
+    },
+    "automation": {
+      "schemaVersion": 1,
+      "level": "full",
+      "supportedPhases": [
+        "eligibility",
+        "targeting",
+        "cost",
+        "effects",
+        "interrupt",
+        "persistence"
+      ],
+      "manualPhases": [],
+      "limitations": []
+    },
+    "activation": {
+      "kind": "free"
+    },
+    "invocation": {
+      "kind": "triggered",
+      "event": "creature-killed",
+      "confirmation": "actor-choice",
+      "retention": "single-event"
+    },
+    "target": {
+      "kind": "creature",
+      "relation": "any",
+      "count": 1
+    },
+    "requirements": [
+      {
+        "kind": "class-level",
+        "classId": "warlock",
+        "minimum": 6
+      },
+      {
+        "kind": "resource",
+        "resourceId": "local.test.hexblade-coherent-source:decl-hexblade-accursed-specter-uses",
+        "minimum": {
+          "kind": "constant",
+          "value": 1
+        }
+      },
+      {
+        "kind": "creature-type",
+        "subject": "target",
+        "types": [
+          "humanoid"
+        ]
+      }
+    ],
+    "consumption": [
+      {
+        "kind": "resource",
+        "resourceId": "local.test.hexblade-coherent-source:decl-hexblade-accursed-specter-uses",
+        "amount": {
+          "kind": "constant",
+          "value": 1
+        },
+        "consumeOn": "resolve"
+      }
+    ],
+    "outcomes": [
+      {
+        "id": "raise",
+        "when": {
+          "kind": "always"
+        },
+        "operations": [
+          {
+            "id": "raise",
+            "kind": "summon",
+            "placementOrigin": "killed-target",
+            "monsterId": "srd-5.1:specter",
+            "count": {
+              "kind": "constant",
+              "value": 1
+            },
+            "timing": "immediate",
+            "persistent": true,
+            "concentration": false,
+            "side": "ally",
+            "bondKey": "accursed-specter",
+            "endsOnSourceLongRest": true,
+            "temporaryHitPoints": {
+              "kind": "floor",
+              "value": {
+                "kind": "multiply",
+                "values": [
+                  {
+                    "kind": "constant",
+                    "value": 0.5
+                  },
+                  {
+                    "kind": "reference",
+                    "reference": {
+                      "kind": "actor-class-level",
+                      "classId": "warlock"
+                    }
+                  }
+                ]
+              }
+            },
+            "weaponAttackBonus": {
+              "kind": "maximum",
+              "values": [
+                {
+                  "kind": "constant",
+                  "value": 0
+                },
+                {
+                  "kind": "reference",
+                  "reference": {
+                    "kind": "actor-ability-modifier",
+                    "ability": "cha"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "provenance": {
+    "actualRun": "R194/browser-hex-specter-r6",
+    "scope": "Preview test data only; no serialized authority capability"
+  }
+}

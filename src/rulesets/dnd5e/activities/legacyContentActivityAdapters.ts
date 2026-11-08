@@ -60,6 +60,7 @@ export interface Dnd5eDeclarativeSubclassActivityProjectionOptions {
 }
 
 const HEADLESS_EVENT_MECHANIC_KINDS = new Set<NonNullable<DeclarativeSubclassAbilityV1['mechanic']>['kind']>([
+  'rest-temporary-hit-points',
   'martial-spell-synergy',
   'rage-feature',
   'opening-attack',
@@ -77,6 +78,7 @@ const HEADLESS_EVENT_MECHANIC_KINDS = new Set<NonNullable<DeclarativeSubclassAbi
   'weapon-damage-rider',
   'spell-damage-ability-modifier',
   'spell-healing-dice-maximum',
+  'spell-healing-dice-reroll',
   'spell-range-minimum',
   'spell-optional-bonus-action',
   'spell-ability-check-bonus',
@@ -542,6 +544,9 @@ export function dnd5eActivityFromPluginFeature(
 export function dnd5eActivityFromPluginItem(
   item: Dnd5ePluginItemDefinition,
 ): Dnd5eActivityDefinitionV1 | undefined {
+  // This closed native item transaction owns its three attack allocations and
+  // conditional save; it must not be projected as an unrelated generic use.
+  if (item.use?.effect.kind === 'tentacle-rod-2014') return undefined
   if (!item.use && !item.headlessEffects?.length) return undefined
   const use = item.use
   const limitations: string[] = []

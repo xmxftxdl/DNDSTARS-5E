@@ -1,4 +1,6 @@
 import { droppedDnd5eCompanionObjects } from './companionCarriedObjects'
+import { normalizeDnd5eIllOmenHoundTarget, type Dnd5eIllOmenHoundTarget } from './illOmenHound'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { applyDnd5eEffectiveVisionProfile, compileDnd5eEffectiveVisionProfile } from '../../../shared/dnd5e-vision-profile.mjs'
 import { dnd5eSummonDurationExpired } from '../../../shared/summon-linger.mjs'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
@@ -37,6 +39,7 @@ export interface Dnd5eSummonPlan {
 }
 
 export interface Dnd5eSummonedCreatureSpec {
+  illOmenTarget?: Dnd5eIllOmenHoundTarget
   bondKey?:string
   bondEffectId?:string
   understoodLanguage?:string
@@ -156,6 +159,9 @@ export function planDnd5eSummonedCreature(input: {
 }): { ok: true; plan: Dnd5eSummonPlan } | { ok: false; reason: Dnd5eSummonPlanFailure } {
   if (input.summon.independentPersistent && (!input.summon.persistent || input.summon.bondKey)) return {ok:false,reason:'invalid-summon'}
   if (input.summon.autonomousBehavior != null && (!['attack-nearest-visible','attack-nearest-other-subtype','protect-source'].includes(input.summon.autonomousBehavior) || (input.summon.autonomousBehavior==='attack-nearest-other-subtype' && !input.summon.requiredCreatureSubtype?.trim()) || (input.summon.commandPolicy != null && input.summon.autonomousBehavior !== 'protect-source') || input.summon.controlSave != null || input.summon.cannotAttack)) return {ok:false,reason:'invalid-summon'}
+  const illOmenTarget=normalizeDnd5eIllOmenHoundTarget(input.summon.illOmenTarget)
+  if(input.summon.illOmenTarget!=null && (!illOmenTarget || input.summon.monsterId!=='srd-5.1:dire-wolf' || input.summon.durationRounds!==50 || input.summon.concentration || input.summon.persistent || input.summon.side!=='ally' ||
+    !Number.isInteger(input.summon.temporaryHitPoints) || input.summon.temporaryHitPoints!<3 || input.summon.temporaryHitPoints!>10))return {ok:false,reason:'invalid-summon'}
   const monster = getDnd5eSrdMonster(input.summon.monsterId)
   if (input.summon.uncontrolledLinger != null && (!isDnd5eSummonLingerPolicy(input.summon.uncontrolledLinger) ||
     !input.summon.concentration || input.summon.persistent || input.summon.becomesHostileAfterConcentrationEnds || input.summon.persistAfterConcentrationCompletes)) return { ok: false, reason: 'invalid-summon' }
@@ -186,8 +192,8 @@ export function planDnd5eSummonedCreature(input: {
   const [templateWithVisual] = assignEnemyVisualVariants([template], input.map.tokens)
   const patch = enemyTemplateToTokenPatch(templateWithVisual)
   const tokenBase = {
-    size: patch.size ?? 1,
-    creatureSize: patch.creatureSize,
+    size: illOmenTarget ? 1 : patch.size ?? 1,
+    creatureSize: illOmenTarget ? '中型' as const : patch.creatureSize,
   }
   const { cols, rows } = mapCellExtent(input.map)
   const occupied = new Set(
@@ -211,14 +217,14 @@ export function planDnd5eSummonedCreature(input: {
     footprint.some((cell) => cell.col < 0 || cell.row < 0 || cell.col >= cols || cell.row >= rows) ||
     (!input.animatedObject && footprint.some((cell) => occupied.has(cellKey(cell)))) ||
     mapGeometryPlacementBlocked({ geometry, map: input.map, token: placementToken, at: position }).blocked ||
-    mapGeometryLineOfEffectBlocked({
+    (!illOmenTarget && mapGeometryLineOfEffectBlocked({
       geometry,
       map: input.map,
       from: input.actorToken,
       to: position,
       fromElevationFeet: input.actorToken.elevationFeet,
       toElevationFeet: placementToken.elevationFeet,
-    })
+    }))
   ) return { ok: false, reason: 'summon-position-blocked' }
 
   const side = summonSide(input.actorToken, input.summon.side)
@@ -239,7 +245,7 @@ export function planDnd5eSummonedCreature(input: {
   const token: Token = {
     ...applyDnd5eEffectiveVisionProfile({}, compileDnd5eEffectiveVisionProfile({ monster })),
     id: tokenId,
-    label: input.summon.label?.trim() || monster.name,
+    label: input.summon.label?.trim() || (illOmenTarget ? '凶兆猎犬' : monster.name),
     x: position.x,
     y: position.y,
     color: patch.color ?? '#8b5cf6',
@@ -253,8 +259,8 @@ export function planDnd5eSummonedCreature(input: {
       : undefined,
     poolId: patch.poolId,
     visualVariantId: patch.visualVariantId,
-    creatureTypes: input.summon.creatureTypeOverride ? [input.summon.creatureTypeOverride] : patch.creatureTypes,
-    creatureSize: patch.creatureSize,
+    creatureTypes: illOmenTarget ? ['monstrosity'] : input.summon.creatureTypeOverride ? [input.summon.creatureTypeOverride] : patch.creatureTypes,
+    creatureSize: tokenBase.creatureSize,
     showHpOnToken: true,
     showDetailOnToken: true,
     dnd5eSummon: {
@@ -288,7 +294,8 @@ export function planDnd5eSummonedCreature(input: {
       attacksPerAction: input.summon.attacksPerAction,
       shareSelfSpellsRangeFeet: input.summon.shareSelfSpellsRangeFeet,
       shareSelfSpellsRequiresMounted: input.summon.shareSelfSpellsRequiresMounted,
-      creatureTypeOverride: input.summon.creatureTypeOverride,
+      creatureTypeOverride: illOmenTarget ? 'monstrosity' : input.summon.creatureTypeOverride,
+      illOmenTarget,
       minimumIntelligence: input.summon.minimumIntelligence,
       autonomousBehavior:input.summon.autonomousBehavior,
       independentPersistent:input.summon.independentPersistent,
@@ -306,6 +313,11 @@ export function planDnd5eSummonedCreature(input: {
       sourceDeathBehavior: input.summon.sourceDeathBehavior,
     },
   }
+  if(illOmenTarget)token.dnd5eCombatState={...token.dnd5eCombatState,activeEffects:[createDnd5eMechanicalEffect({
+    id:tokenId+':ill-omen-body',definitionId:'ill-omen-hound-body',label:'凶兆猎犬：幽影躯体',targetId:tokenId,
+    source:{kind:'feature',rulesId:'ill-omen-hound',actorId:tokenId,magical:true},duration:{type:'permanent'},
+    modifiers:{objectCreatureTraversal:{difficultTerrain:true,endOwnTurnInsideObjectDamage:{amount:5,type:'force'}}},
+  })]}
   if(input.summon.controlSave) token.dnd5eCombatState={...token.dnd5eCombatState,activeEffects:[createDnd5eSummonControlEffect(token,input.summon.controlSave)]}
   const initiativeModifier = rules.abilityModifier(monster.abilities.dex)
   const initiative = input.initiativeD20 + initiativeModifier
@@ -382,7 +394,11 @@ export function reconcileDnd5eSummonedCreatures(input: {
     const bondEnded=!!summon.bondKey && !sourceEffects.some(effect=>effect.definitionId===`summon-bond:${summon.bondKey}` && (!summon.bondEffectId || effect.id===summon.bondEffectId) && !effect.tags?.includes('bond-dismissed'))
     const expired = dnd5eSummonDurationExpired(summon, input.round, input.worldMinute)
     const damageDismissed = summon.dismissAtRound != null && input.round >= summon.dismissAtRound
-    const defeated = (token.hp ?? token.maxHp ?? 1) <= 0
+    const chosen=summon.illOmenTarget
+    const chosenToken=chosen ? tokensById.get(chosen.targetTokenId) : undefined
+    const chosenCharacter=chosen?.targetCharacterId ? characters.get(chosen.targetCharacterId) : undefined
+    const chosenDefeated=!!chosen && (chosenCharacter ? chosenCharacter.currentHp<=0 : !!chosenToken && (!chosen.targetCharacterId || chosenToken.characterId===chosen.targetCharacterId) && (chosenToken.hp??chosenToken.maxHp??1)<=0)
+    const defeated = (token.hp ?? token.maxHp ?? 1) <= 0 || chosenDefeated
     // Independent permanent creatures leave their own corpse, not the remains
     // consumed at creation, and do not disappear with their former creator.
     if (summon.independentPersistent && defeated) {
@@ -443,7 +459,7 @@ export function reconcileDnd5eSummonedCreatures(input: {
         },
       }]
     }
-    if ((!source && !sourceToken && !summon.independentPersistent) || bondEnded || summon.dismissed || expired || damageDismissed || defeated || concentrationEnded) {
+    if ((!source && !sourceToken && !summon.independentPersistent && !summon.illOmenTarget) || bondEnded || summon.dismissed || expired || damageDismissed || defeated || concentrationEnded) {
       removedTokenIds.push(token.id)
       const restoredObject = dnd5eRestoredSummonedOriginalObject(token)
       const possessions = droppedDnd5eCompanionObjects(token)

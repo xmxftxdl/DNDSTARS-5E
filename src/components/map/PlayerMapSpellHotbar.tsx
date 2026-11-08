@@ -1,3 +1,4 @@
+import type{ReactNode}from'react'
 import type {
   Dnd5eCombatActionCommand,
   Dnd5eCombatActionDescriptorV1,
@@ -13,7 +14,7 @@ import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { dnd5eEffectiveCharacterMovementProfile } from '../../rulesets/dnd5e/characterMovement'
 import { dnd5eConditionIncapacitated } from '../../rulesets/dnd5e/conditions'
 import { dnd5eActivePreventsActions } from '../../rulesets/dnd5e/activeEffects'
-import { createDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
+import { createDnd5eTurnEconomyCounts, normalizeDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
 import type { BattleMap, Token } from '../../store/maps'
 import { useMapStore } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -28,6 +29,7 @@ import {
 import { resolvePlayerMapSpellHotbarCharacter, simulacrumHotbarTurnEconomy } from './playerMapSpellHotbarCharacter'
 
 interface PlayerMapSpellHotbarProps {
+  inventorySupplement?: (character: Character) => ReactNode
   isDM: boolean
   combatActive: boolean
   combatId?: string
@@ -72,7 +74,9 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
     ((props.triggeredReactionSpellIds?.length ?? 0) > 0 && character.id === props.playerCharacter?.id)
     ? props.activeTurnEconomy
     : token
-      ? createDnd5eTurnEconomyCounts(
+      ? props.combatActive && props.turnEconomyByToken[token.id]
+        ? normalizeDnd5eTurnEconomyCounts(props.turnEconomyByToken[token.id], dnd5eEffectiveCharacterMovementProfile(character).walkSpeed)
+        : createDnd5eTurnEconomyCounts(
           `exploration:${props.map.id}:${token.id}`,
           dnd5eEffectiveCharacterMovementProfile(character).walkSpeed,
         )
@@ -122,6 +126,7 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
   return (
     <div className="map-player-combat-hotbar pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex flex-col items-center gap-2">
       <PlayerCombatHotbar
+        inventorySupplement={props.inventorySupplement}
         key={`${props.combatActive ? 'combat' : 'exploration'}:${token?.id ?? character.id}`}
         mode={props.combatActive ? 'combat' : 'exploration'}
         character={character}

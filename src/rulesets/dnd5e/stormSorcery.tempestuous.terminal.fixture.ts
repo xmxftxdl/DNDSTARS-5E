@@ -1,0 +1,10 @@
+import{installTempestuousSource,flightFeatureId}from'./stormSorcery.tempestuous.native.fixture'
+import{growTempestuousCompound}from'./stormSorcery.tempestuous.compound.growth.fixture'
+import{restoreClassResources}from'../../lib/classResources'
+import{applyDnd5eInventoryMutation}from'./items'
+import{prepareDnd5eSpellCast}from'./spellAction'
+import{activeDnd5eRulesPluginRequirements}from'./pluginApi'
+import{createDnd5eEffectiveRulesContextV1}from'./effectiveRulesContext'
+export async function fixture(spell='mage-armor'){
+ const dispose=await installTempestuousSource();try{let owner=restoreClassResources(growTempestuousCompound(1,spell),'long-rest');const granted=applyDnd5eInventoryMutation([owner],{type:'grant',characterId:owner.id,templateId:'srd-5.1:item:component-pouch',quantity:1});if(!granted.ok)throw Error(granted.reason);owner=granted.characters[0];const map:any={id:'compound-map',name:'Actual single Spell transaction',width:1500,height:1500,gridSize:50,gridOffsetX:0,gridOffsetY:0,feetPerCell:5,showGrid:true,tokens:[{id:'storm-token',characterId:owner.id,label:'Storm',type:'player',x:525,y:525,size:1,color:'#abc',emoji:'S',hp:owner.currentHp,maxHp:owner.maxHp}]},intent={timing:'before' as const,featureId:flightFeatureId,to:{x:625,y:525}},action:any={id:'actual-compound-parent',mapId:map.id,combatId:'actual-compound',sourceMode:'player',status:'pending',actorTokenId:'storm-token',characterId:owner.id,type:'dnd5e-spell-cast',round:1,initiativeIndex:0,seq:1,updatedAt:1,dnd5eSpellCast:{spellId:spell,slotLevel:1,castingClassId:'sorcerer',...(spell==='fog-cloud'?{areaTargetCell:{col:13,row:10}}:{targetTokenId:'storm-token'}),tempestuousMovement:intent}},input={map,geometry:null,characters:[owner],action,initiativeOrder:[{tokenId:'storm-token',label:'Storm',roll:20,color:'',emoji:''}],effectiveRules:createDnd5eEffectiveRulesContextV1({requiredPlugins:activeDnd5eRulesPluginRequirements()})},p=prepareDnd5eSpellCast(input);if(!p.ok)throw Error('Actual preparation:'+p.reason);return{dispose,owner,map,action,input,prepared:p.prepared,intent}}catch(error){dispose();throw error}
+}

@@ -134,7 +134,7 @@ export function migrateLegacyApCombatLogText(text: string): string {
     .trim()
 }
 
-export function buildInitiativeOrder(tokens: Token[], characters: Character[]): InitiativeEntry[] {
+export function buildInitiativeOrder(tokens: Token[], characters: Character[], rollContext?:{combatId:string;phase:'combat-start'|'live-join'}, actualOriginals?:ReadonlyMap<string,{total:number;calculation:NonNullable<InitiativeEntry['initiativeCalculation']>}>): InitiativeEntry[] {
   const combatTokens = tokens.filter((token) => token.type !== 'obstacle')
   const sharedSummonD20ByGroup = new Map<string, number>()
   const sharedSummonD20 = (token: Token): number | undefined => {
@@ -150,7 +150,7 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
     .filter((token) => !token.dnd5eSimulacrum)
     .map((token) => {
       const ch = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
-      const initiative = resolveInitiativeCalculation(token, ch, ch ? undefined : sharedSummonD20(token))
+      const initiative = actualOriginals?.get(token.id) ?? resolveInitiativeCalculation(token, ch, ch ? undefined : sharedSummonD20(token))
       const roll = initiative.total
       const normal: InitiativeEntry = {
         slotId: `${token.id}:normal`,
@@ -163,6 +163,7 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         accent: ch?.accent,
         roll,
         initiativeCalculation: initiative.calculation,
+        initiativeRollReceipt:rollContext?{id:crypto.randomUUID(),combatId:rollContext.combatId,phase:rollContext.phase}:undefined,
       }
       const surprised = ch?.dnd5eCombatState?.surprisedCombatId != null &&
         ch.dnd5eCombatState.surpriseResolvedCombatId !== ch.dnd5eCombatState.surprisedCombatId

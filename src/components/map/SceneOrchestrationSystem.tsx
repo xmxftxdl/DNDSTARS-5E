@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { BattleMap, Token } from '../../store/maps'
 import { useMapStore } from '../../store/maps'
 import { useMapGeometryStore } from '../../store/mapGeometry'
@@ -43,6 +44,10 @@ export interface SceneOrchestrationSystemProps {
   isDm: boolean
   combatActive: boolean
   editorOpen: boolean
+  travelEditorHost?: HTMLElement | null
+  travelEditorOpen?: boolean
+  onCloseTravelEditor?: () => void
+  onOpenMapTravel?: () => void
   focusedInteractionPointId?: string | null
   drawing?: SceneDrawTarget | null
   onBeginDraw: (target: SceneDrawTarget) => void
@@ -71,6 +76,10 @@ export default function SceneOrchestrationSystem({
   isDm,
   combatActive,
   editorOpen,
+  travelEditorHost,
+  travelEditorOpen = false,
+  onCloseTravelEditor,
+  onOpenMapTravel,
   focusedInteractionPointId,
   drawing,
   onBeginDraw,
@@ -79,6 +88,7 @@ export default function SceneOrchestrationSystem({
   onEditorVisibilityChange,
 }: SceneOrchestrationSystemProps) {
   const shared = useSceneOrchestrationStore((state) => state.shared)
+  const authoring = editorOpen || travelEditorOpen
   const [notice, setNotice] = useState('')
   const previousInsideRef = useRef(new Map<string, boolean>())
   const seededMapsRef = useRef(new Set<string>())
@@ -86,10 +96,14 @@ export default function SceneOrchestrationSystem({
   const automaticAudioKeyRef = useRef('')
   const automaticAudioAssetIdRef = useRef<string | undefined>(undefined)
   const editorVisibilityChangeRef = useRef(onEditorVisibilityChange)
+  const cancelDrawRef = useRef(onCancelDraw)
 
   useEffect(() => {
     editorVisibilityChangeRef.current = onEditorVisibilityChange
-  }, [onEditorVisibilityChange])
+    cancelDrawRef.current = onCancelDraw
+  }, [onEditorVisibilityChange, onCancelDraw])
+
+  useEffect(() => { cancelDrawRef.current() }, [map.id])
 
   useEffect(() => () => editorVisibilityChangeRef.current?.(false), [])
 
@@ -319,15 +333,15 @@ export default function SceneOrchestrationSystem({
   }, [isDm, map.id, shared])
 
   useEffect(() => {
-    if (!isDm || !editorOpen) return
+    if (!isDm || !authoring) return
     // Authoring a Region changes the Region/token relationship without Token
     // movement. Treat the next runtime pass as a fresh baseline so dragging an
     // entrance over a Token never emits a false enter/leave event.
     seededMapsRef.current.delete(map.id)
-  }, [editorOpen, isDm, map.id])
+  }, [authoring, isDm, map.id])
 
   useEffect(() => {
-    if (!isDm || editorOpen) return
+    if (!isDm || authoring) return
     const scenes = shared.scenes.filter((scene) => scene.mapId === map.id)
     const keys = new Set<string>()
     const seeded = seededMapsRef.current.has(map.id)
@@ -358,7 +372,7 @@ export default function SceneOrchestrationSystem({
       }
     }
     seededMapsRef.current.add(map.id)
-  }, [editorOpen, isDm, map, shared.scenes])
+  }, [authoring, isDm, map, shared.scenes])
 
   const undoLast = useCallback(() => {
     const store = useSceneOrchestrationStore.getState()
@@ -404,6 +418,7 @@ export default function SceneOrchestrationSystem({
         map={map}
         combatActive={combatActive}
         open={editorOpen}
+        onOpenMapTravel={onOpenMapTravel}
         focusedInteractionPointId={focusedInteractionPointId}
         onOpenChange={(visible) => {
           onEditorVisibilityChange?.(visible)
@@ -418,6 +433,14 @@ export default function SceneOrchestrationSystem({
         onPlayBackground={() => void playBackgroundCue()}
         onStopAudio={() => void useSceneAudioStore.getState().control({ operation: 'stop' })}
       />}
+      {isDm && travelEditorOpen && travelEditorHost && createPortal(<SceneOrchestrationPanel
+        map={map} combatActive={combatActive} open embedded travelOnly
+        onOpenChange={(visible) => { if (!visible) { onCancelDraw(); onCloseTravelEditor?.() } }}
+        drawing={drawing} onBeginDraw={onBeginDraw} onCancelDraw={onCancelDraw}
+        onRunTrigger={runTrigger} onStep={() => void executeNext(false)} onUndo={undoLast}
+        onPlayBackground={() => void playBackgroundCue()}
+        onStopAudio={() => void useSceneAudioStore.getState().control({ operation: 'stop' })}
+      />, travelEditorHost)}
       {notice && (
         <div className="pointer-events-none absolute left-1/2 top-20 z-[125] -translate-x-1/2 rounded-2xl border border-violet-300/25 bg-void-950/94 px-5 py-3 text-sm font-semibold text-violet-100 shadow-2xl backdrop-blur">
           {notice}
