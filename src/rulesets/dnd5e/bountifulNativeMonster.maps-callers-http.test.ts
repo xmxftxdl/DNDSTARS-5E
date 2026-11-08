@@ -10,7 +10,6 @@ import{readBountifulOpportunitySettlementDiceRoute}from'./bountifulOpportunitySe
 import{readBountifulOpportunitySequencePlayerDiceOwner}from'./bountifulOpportunitySequenceSource'
 import{readArcaneBasePrefixPlayerDiceOwner}from'../../pages/maps/arcaneBasePrefixDiceTransport'
 declare const __XGE_MAPS_SOURCE_PATH__:string|undefined
-import fs from 'node:fs'
 import {MAP_GEOMETRY_SCHEMA_VERSION} from '../../lib/mapGeometry'
 import {readBountifulNativeDiceRoute} from './bountifulHostOperation'
 import ts from 'typescript'

@@ -1,6 +1,5 @@
 import { readMapsWorkspaceSource } from '../../__tests__/mapsWorkspaceSource'
 import{readActualIssuedSettlementPresentation}from'./originalDicePageSemantics.testSupport'
-import fs from'node:fs'
 import ts from'typescript'
 import{previewDiceCheck}from'../../presentation/maps/diceCheckOutcome'
 import{hasIssuedBountifulOpportunitySettlementRequest}from'./bountifulOpportunitySettlementDice'

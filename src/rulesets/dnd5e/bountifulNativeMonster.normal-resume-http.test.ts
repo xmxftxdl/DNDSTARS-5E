@@ -11,7 +11,6 @@ import {readArcaneBasePrefixPlayerDiceOwner} from '../../pages/maps/arcaneBasePr
 import {readBountifulOpportunitySettlementDiceRoute} from './bountifulOpportunitySettlementDice'
 import {prepareBountifulNativeMapResume,bountifulNativeMapResumeFacts} from './bountifulNativeMapResume'
 import {dnd5eMonsterDamageRollLogDetail} from '../../pages/maps/monsterAttackDamageLog'
-import fs from 'node:fs'
 import {MAP_GEOMETRY_SCHEMA_VERSION} from '../../lib/mapGeometry'
 import {readBountifulNativeDiceRoute} from './bountifulHostOperation'
 import ts from 'typescript'

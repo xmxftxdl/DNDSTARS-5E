@@ -10,7 +10,6 @@ import {resolveDnd5eActionWithMaterialDamageReactions} from './damageReactionFlo
 import {createDnd5eMovementHazardsProducer} from '../../pages/maps/movementHazardsProducer'
 import {dnd5ePersistentAreaTurnKey} from '../../pages/maps/persistentAreaTurnBoundary'
 import {resolveBountifulOriginalForNormalAck,publishBountifulOrOrdinaryPlayerActionAck} from './bountifulLuckNormalAck'
-import fs from 'node:fs'
 import ts from 'typescript'
 import {createBountifulOpportunityMoveRawBoundary} from './bountifulOpportunityMoveOriginalFlow'
 import {readBountifulNativeDiceRoute} from './bountifulHostOperation'

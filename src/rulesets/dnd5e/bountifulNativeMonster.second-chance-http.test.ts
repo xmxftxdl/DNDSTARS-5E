@@ -22,7 +22,6 @@ import {SecondChanceMapsSettlementSignal} from '../../pages/maps/secondChanceMap
 import {secondChanceTestContent} from '../../pages/maps/secondChance.testFixture'
 import {captureSecondChancePreparedOriginal,createSecondChancePreparedReplayAsync} from '../../pages/maps/secondChancePreparedParent'
 import {issueSecondChanceAttack} from '../../pages/maps/issueSecondChanceAttack'
-import fs from 'node:fs'
 import {readBountifulNativeDiceRoute} from './bountifulHostOperation'
 import ts from 'typescript'
 import {createBountifulPersistentRoomUI} from './bountifulLuckPersistentRoomUI'
