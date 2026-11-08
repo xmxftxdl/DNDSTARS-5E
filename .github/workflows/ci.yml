@@ -21,6 +21,9 @@ jobs:
       - name: Install (clean, lockfile-pinned)
         run: npm ci
 
+      - name: Server runtime import without frontend source
+        run: node --test scripts/runtime-module-boundary.test.mjs
+
       - name: Type-check (tsc -b)
         env:
           NODE_OPTIONS: --max-old-space-size=6144
