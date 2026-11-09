@@ -238,6 +238,7 @@ export function roomHeartbeatErrorIsTerminal(error: unknown): boolean {
     'member-not-found',
     'member-removed',
     'invalid-account-session',
+    'invalid-room-session',
   ].includes(error.code)
 }
 
@@ -758,7 +759,7 @@ export function roomApiErrorMessage(error: unknown): string {
     'plugin-upload-timeout': '规则包上传超时，请检查网络并确认房间规则包状态后重试。',
     'account-required': '请先注册或登录星痕账号，再创建或加入房间。',
     'invalid-account-session': '账号会话已经失效，请返回大厅重新登录。',
-    'invalid-room-session': '房间会话已经失效，请重新加入房间。',
+    'invalid-room-session': '这台设备的房间凭证已失效，可能已在另一台设备接管。DM 请在“我的战役”中选择“接管当前 DM 房间”或“恢复上次 DM 房间”；玩家请重新加入房间。',
     'member-removed': '你已被 DM 移出这个房间；需要 DM 恢复席位后才能重新加入。',
     'server-unavailable': '无法连接共享服务。请确认 DM 服务端口 5273 已启动。',
     'room-not-found': '没有找到这个房间，请检查房间码。',
@@ -772,7 +773,7 @@ export function roomApiErrorMessage(error: unknown): string {
     'spectator-full': '房间的观战席位已满。',
     'room-locked': '房间当前已锁定，暂不接受新玩家。',
     'member-not-found': '当前房间席位已失效，请重新加入。',
-    forbidden: '只有房间创建者可以查看房间玩家名册。',
+    forbidden: '当前账号或房间身份没有执行此操作的权限，请确认登录账号及房间身份。',
     'invalid-room-code': '房间码格式不正确。',
     'invalid-client': '当前浏览器身份无效，请刷新后重试。',
     'invalid-resume-member': '无法恢复这个房间中的旧玩家身份，请重新打开邀请链接后再试。',

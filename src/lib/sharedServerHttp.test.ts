@@ -1293,6 +1293,49 @@ describe('账号级战役与临时房间协议', () => {
     })
     expect(resumed.member.roomToken).not.toBe(original.member.roomToken)
 
+    // Returning to device 1 must identify revoked credentials as session expiry,
+    // even when the account login and DM member ID are still correct.
+    const rosterPath = `${offServer.base}/api/rooms/${original.roomId}/roster`
+    const expiredRoster = await fetch(rosterPath, { headers: { ...ownerHeaders, ...oldCredentialHeaders } })
+    expect(expiredRoster.status).toBe(403)
+    await expect(expiredRoster.json()).resolves.toMatchObject({ error: 'invalid-room-session' })
+    const expiredHeartbeat = await fetch(`${offServer.base}/api/rooms/${original.roomId}/heartbeat`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, ...oldCredentialHeaders },
+      body: JSON.stringify({ memberId: original.member.memberId, activePlugins: [] }),
+    })
+    expect(expiredHeartbeat.status).toBe(403)
+    await expect(expiredHeartbeat.json()).resolves.toMatchObject({ error: 'invalid-room-session' })
+
+    const returnedResponse = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms/current`,
+      {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({ displayName: '跨设备 DM', clientId: 'campaign-resume-device-1', activePlugins: [] }),
+      },
+    )
+    expect(returnedResponse.status).toBe(200)
+    const returned = await returnedResponse.json() as typeof resumed
+    expect(returned.roomId).toBe(original.roomId)
+    expect(returned.member.memberId).toBe(original.member.memberId)
+    expect(returned.member.clientId).toBe('campaign-resume-device-1')
+    expect(returned.member.roomToken).not.toBe(resumed.member.roomToken)
+    const returnedHeaders = {
+      ...ownerHeaders,
+      'X-Stars-Member': returned.member.memberId,
+      'X-Stars-Room-Token': returned.member.roomToken,
+    }
+    expect((await fetch(rosterPath, { headers: returnedHeaders })).status).toBe(200)
+    expect((await fetch(rosterPath, {
+      headers: { ...returnedHeaders, 'X-Stars-Account-Token': outsider.session.sessionToken },
+    })).status).toBe(403)
+    const revokedSecondDevice = await fetch(rosterPath, {
+      headers: { ...ownerHeaders, 'X-Stars-Member': resumed.member.memberId, 'X-Stars-Room-Token': resumed.member.roomToken },
+    })
+    expect(revokedSecondDevice.status).toBe(403)
+    await expect(revokedSecondDevice.json()).resolves.toMatchObject({ error: 'invalid-room-session' })
+
     expect((await fetch(`${offServer.base}/api/state/maps?room=${original.roomId}`, {
       headers: oldCredentialHeaders,
     })).status).toBe(403)
@@ -1300,7 +1343,7 @@ describe('账号级战役与临时房间协议', () => {
       headers: {
         'X-Stars-Protocol': '5',
         'X-Stars-Member': resumed.member.memberId,
-        'X-Stars-Room-Token': resumed.member.roomToken,
+        'X-Stars-Room-Token': returned.member.roomToken,
       },
     })).status).toBe(404)
 
@@ -1309,7 +1352,7 @@ describe('账号级战役与临时房间协议', () => {
       headers: {
         ...ownerHeaders,
         'X-Stars-Member': resumed.member.memberId,
-        'X-Stars-Room-Token': resumed.member.roomToken,
+        'X-Stars-Room-Token': returned.member.roomToken,
       },
       body: JSON.stringify({ memberId: resumed.member.memberId }),
     })).status).toBe(200)

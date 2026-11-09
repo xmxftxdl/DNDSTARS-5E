@@ -193,6 +193,54 @@ test('可从账号战役页创建长期战役并为它开启第一场临时房�
   await context.close()
 })
 
+test('返回旧设备后提示恢复房间，并能重新接管和读取名册', async ({ browser, request }) => {
+  const suffix = Date.now()
+  const account = await createAccount(request, suffix)
+  const campaign = await createCampaign(request, account, suffix)
+  const room = await createRoom(request, account, campaign, suffix)
+  const context = await browser.newContext()
+  // This checks credentials and navigation; avoid starting the unrelated 3D
+  // dice renderer in the headless browser during repeated document reloads.
+  await context.route('**/dice-box-frame.html?*', (route) => route.fulfill({
+    contentType: 'text/html', body: '<!doctype html><title>Session test</title>',
+  }))
+  await installAccount(context, account)
+  const page = await context.newPage()
+  await page.goto(`${APP}/app`, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [
+    ROOM_SESSION_KEY,
+    { roomId: room.roomId, campaignId: room.campaignId, roomName: room.roomName,
+      rulesetId: room.rulesetId, createdAt: room.createdAt, ...room.member },
+  ] as const)
+
+  const otherDevice = await request.post(`${APP}/api/accounts/me/campaigns/${campaign.campaignId}/rooms/current`, {
+    headers: { 'X-Stars-Account-Token': account.sessionToken },
+    data: { displayName: account.displayName, clientId: `second-device-${suffix}`, activePlugins: [] },
+  })
+  expect(otherDevice.status()).toBe(200)
+  await page.goto(`${APP}/campaign/${campaign.campaignId}/characters`, { waitUntil: 'domcontentloaded' })
+  await expect(page).toHaveURL(`${APP}/app`, { timeout: 45_000 })
+  await expect(page.getByRole('alert')).toContainText('这台设备的房间凭证已失效')
+  expect(await page.evaluate((key) => localStorage.getItem(key), ROOM_SESSION_KEY)).toBeNull()
+  await page.getByRole('button', { name: '接管当前 DM 房间' }).click()
+  await page.getByTestId('app-dialog-confirm').click()
+  await expect(page).toHaveURL(`${APP}/campaign/${campaign.campaignId}/overview`)
+  await page.getByRole('link', { name: '查看角色页' }).click()
+  const playerRoster = page.getByTestId('dm-room-player-roster')
+  await expect(playerRoster).toBeVisible()
+  await expect(playerRoster.getByRole('button', { name: '刷新房间玩家' })).toBeEnabled()
+  await expect(playerRoster).not.toContainText('只有房间创建者')
+  const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? 'null'), ROOM_SESSION_KEY)
+  expect(session.roomId).toBe(room.roomId)
+  expect(session.roomToken).not.toBe(room.member.roomToken)
+  const roster = await request.get(`${APP}/api/rooms/${room.roomId}/roster`, {
+    headers: { 'X-Stars-Account-Token': account.sessionToken,
+      'X-Stars-Member': session.memberId, 'X-Stars-Room-Token': session.roomToken },
+  })
+  expect(roster.status()).toBe(200)
+  await context.close()
+})
+
 test('登录同一账号后可在新设备接管未关闭的 DM 房间', async ({ browser, request }) => {
   const suffix = Date.now()
   const account = await createAccount(request, suffix)

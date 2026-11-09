@@ -99,6 +99,14 @@ describe('room heartbeat recovery policy', () => {
     expect(roomHeartbeatErrorIsTerminal(new RoomApiError('room-closed', 409))).toBe(true)
     expect(roomHeartbeatErrorIsTerminal(new RoomApiError('room-not-found', 404))).toBe(true)
     expect(roomHeartbeatErrorIsTerminal(new RoomApiError('member-not-found', 404))).toBe(true)
+    expect(roomHeartbeatErrorIsTerminal(new RoomApiError('invalid-room-session', 403))).toBe(true)
+  })
+
+  it('explains cross-device credential expiry without calling the owner a non-DM', () => {
+    const message = roomApiErrorMessage(new RoomApiError('invalid-room-session', 403))
+    expect(message).toContain('另一台设备')
+    expect(message).toContain('恢复上次 DM 房间')
+    expect(roomApiErrorMessage(new RoomApiError('forbidden', 403))).not.toContain('只有房间创建者')
   })
 })
 
