@@ -1251,7 +1251,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     }
     const requestMember = lobbyRoomMember(protectedRoom, req?.headers?.['x-stars-member'])
     if (!requestMember || !roomMemberSessionAuthorized(requestMember, req?.headers?.['x-stars-room-token'])) {
-      throw new RoomProtocolError(403, 'forbidden')
+      throw new RoomProtocolError(403, 'invalid-room-session')
     }
   }
 

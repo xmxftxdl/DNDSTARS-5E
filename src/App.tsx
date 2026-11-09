@@ -321,6 +321,12 @@ export default function App() {
           accountAvatar={account?.avatar}
           activeCampaignPath={activeCampaignPath}
         >
+          {roomNotice && (
+            <div role="alert" className="mb-4 flex items-start justify-between gap-4 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+              <span>{roomNotice}</span>
+              <button type="button" onClick={() => setRoomNotice(null)} className="shrink-0 underline">关闭提示</button>
+            </div>
+          )}
           <Routes>
             <Route
               path="/app"

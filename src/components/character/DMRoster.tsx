@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock3, Eye, LoaderCircle, MoonStar, RefreshCw, ShieldCheck, Trash2, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { assignableRoomCharactersForPlayer, roomCharactersOwnedByMembers } from '../../lib/playerView'
 import { assignRoomPlayerCharacter, loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
-import { getRoomSession } from '../../lib/roomSession'
+import { getRoomSession, subscribeRoomSession } from '../../lib/roomSession'
 import { completeDnd5eCampaignLongRest } from '../../store/campaignLongRest'
 import { useCharacterStore } from '../../store/characters'
 import { useMapStore } from '../../store/maps'
@@ -18,7 +18,8 @@ import CharacterExportButton from './CharacterExportButton'
 const CharacterSheet = lazy(() => import('./CharacterSheet'))
 
 export default function DMRoster() {
-  const roomSession = useMemo(() => getRoomSession(), [])
+  const [roomSession, setRoomSession] = useState(() => getRoomSession())
+  useEffect(() => subscribeRoomSession(setRoomSession), [])
   const characters = useCharacterStore((state) => state.characters)
   const updateCharacter = useCharacterStore((state) => state.update)
   const removeCharacter = useCharacterStore((state) => state.remove)
