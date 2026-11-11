@@ -9,6 +9,7 @@ import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
 import {
   contentDefinitionRegistryRevision,
   getRegisteredContentActivity,
+  getRegisteredContentDefinitionPackageIdentity,
   listRegisteredContentActivities,
   listRegisteredContentDefinitionPackages,
   type RegisteredContentDefinition,
@@ -97,6 +98,13 @@ export function listRegisteredDnd5eActivityPackages(): readonly RegisteredDnd5eA
     packageVersion: value.packageVersion,
     activities: listRegisteredContentActivities<Dnd5eActivityDefinitionV1>(value.packageId),
   }))
+}
+
+export const getRegisteredDnd5eActivityPackageIdentity = getRegisteredContentDefinitionPackageIdentity
+
+export function getRegisteredDnd5eActivityPackage(packageId: string): RegisteredDnd5eActivityPackage | undefined {
+  const identity = getRegisteredDnd5eActivityPackageIdentity(packageId)
+  return identity ? { ...identity, activities: listRegisteredContentActivities<Dnd5eActivityDefinitionV1>(packageId) } : undefined
 }
 
 let currentActivityCatalogSignature: { revision: number; signature: string } | undefined

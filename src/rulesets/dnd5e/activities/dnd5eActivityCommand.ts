@@ -8,7 +8,7 @@ import { dnd5eActivityEffectiveTargetV1 } from './dnd5eActivityScaling'
 import { dnd5eAreaTargetSelectionValid } from './dnd5eAreaTargetSelection'
 import { dnd5eActivityExchangeOutputAllowed, dnd5eActivityInventorySnapshot, dnd5eActivitySelectsInventoryItem, dnd5eActivitySelectsEquipmentItem } from './dnd5eActivityInventorySelection'
 import type { Dnd5eActivityInventoryItemSnapshotV1 } from './dnd5eActivityExecutor'
-import { getRegisteredDnd5eActivity, listRegisteredDnd5eActivityPackages } from './dnd5eActivityRegistry'
+import { getRegisteredDnd5eActivity, getRegisteredDnd5eActivityPackageIdentity } from './dnd5eActivityRegistry'
 import {
   resolveDnd5eActivity,
   type Dnd5eActivityActorSnapshot,
@@ -270,7 +270,7 @@ export function resolveDnd5eActivityCommand(
   if (input.actor.id !== input.command.actorId) {
     return { ok: false, reason: 'unauthorized-actor', details: ['actor snapshot does not match the submitted intent'] }
   }
-  const registeredPackage = listRegisteredDnd5eActivityPackages().find((entry) => entry.packageId === input.command.packageId)
+  const registeredPackage = getRegisteredDnd5eActivityPackageIdentity(input.command.packageId)
   if (registeredPackage && registeredPackage.packageVersion !== input.command.packageVersion) {
     return { ok: false, reason: 'content-version-mismatch', details: ['installed content version does not match the command'] }
   }

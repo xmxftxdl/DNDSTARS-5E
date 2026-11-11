@@ -109,6 +109,14 @@ export function listRegisteredContentDefinitionPackages(): readonly RegisteredCo
   return [...packages.values()].map(({ value }) => structuredClone(value))
 }
 
+/** Read current identity without copying unrelated definitions or activities. */
+export function getRegisteredContentDefinitionPackageIdentity(
+  packageId: string,
+): Pick<RegisteredContentPackage, 'packageId' | 'packageVersion'> | undefined {
+  const value = packages.get(packageId)?.value
+  return value ? { packageId: value.packageId, packageVersion: value.packageVersion } : undefined
+}
+
 /** Monotonic identity for read-through indexes; no mutable registry state is exposed. */
 export function contentDefinitionRegistryRevision(): number {
   return registryRevision

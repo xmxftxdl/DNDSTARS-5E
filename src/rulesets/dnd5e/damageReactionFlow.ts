@@ -35,7 +35,7 @@ import { rollDnd5eActivityTriggerDiceV1, type Dnd5eActivityTriggerChoiceRequestV
 import { listDnd5eWeaponHitActivities } from './activities/dnd5eWeaponHitDiscovery'
 import { dnd5eWeaponHitSecondaryCandidates, dnd5eWeaponHitConditionChoices, resolveDnd5eWeaponHitActivity } from './activities/dnd5eWeaponHitActivity'
 import { dnd5eActivityTriggerContextsFromCombatEventV1 } from './activities/dnd5eActivityTriggerWindows'
-import { getRegisteredDnd5eActivity, listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
+import { getRegisteredDnd5eActivity, getRegisteredDnd5eActivityPackageIdentity } from './activities/dnd5eActivityRegistry'
 import type { Dnd5eWeaponHitEvent, Dnd5eWeaponHitDecision } from './weaponHitCheckpoint'
 import {collectDnd5eHitPushConsequences} from './weaponHitPushConsequences'
 import { dnd5eCriticalCancellationOptions } from './headlessCombatEngine'
@@ -188,7 +188,7 @@ async function driveDamageReactions<Result>(input:Dnd5eDamageReactionFlowOptions
   const guard = () => {
     if(!input.authorityUnchanged()) {session.cancel();throw new Error('damage-reaction-stale-authority')}
     for (const definition of hitDefinitions.values()) if (JSON.stringify(getRegisteredDnd5eActivity(definition.packageId,definition.activityId)) !== definition.signature ||
-      listRegisteredDnd5eActivityPackages().find(entry=>entry.packageId===definition.packageId)?.packageVersion !== definition.version) {
+      getRegisteredDnd5eActivityPackageIdentity(definition.packageId)?.packageVersion !== definition.version) {
       session.cancel();throw new Error('weapon-hit-activity-changed')
     }
   }
