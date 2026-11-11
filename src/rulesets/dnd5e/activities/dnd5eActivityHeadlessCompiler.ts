@@ -71,7 +71,7 @@ import { dnd5eEnchantedInventoryInstanceIds, dnd5eActiveArmorEnchantmentBonus, d
 import { dnd5eActivityEffectOriginId } from './dnd5eActivityEffectOrigin'
 import { settleDnd5eSummonActivityCapability } from './dnd5eSummonActivitySettlement'
 import { shareDnd5eSelfSpellProposals } from './dnd5eSelfSpellSharing'
-import { listRegisteredDnd5eActivityPackages } from './dnd5eActivityRegistry'
+import { getRegisteredDnd5eActivityPackageIdentity } from './dnd5eActivityRegistry'
 import { getDnd5eActivityContinuationV1, prepareDnd5eActivityContinuationV1, finishDnd5eActivityContinuationV1 } from './dnd5eActivityContinuation'
 import type { Dnd5eExecuteActivityCommandV1 } from './dnd5eActivityCommand'
 import { dnd5eClassDefinition } from '../classes'
@@ -590,7 +590,7 @@ return withActivityAttackFailureScopes(()=>{
             : context.target
               ? [context.target]
               : []
-      const packageVersion = listRegisteredDnd5eActivityPackages().find(entry => entry.packageId === context.action.pluginId)?.packageVersion ?? '1.0.0'
+      const packageVersion = getRegisteredDnd5eActivityPackageIdentity(context.action.pluginId)?.packageVersion ?? '1.0.0'
       // The plugin transport must enforce the same Host perception requirements
       // as ExecuteActivity; submitted target ids do not establish visibility.
       if (((selectedTarget.kind === 'creature' && selectedTarget.requiresLineOfSight === true) ||

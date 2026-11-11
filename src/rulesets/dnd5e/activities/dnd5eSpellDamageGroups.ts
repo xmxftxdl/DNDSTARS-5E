@@ -1,4 +1,4 @@
-import {listRegisteredDnd5eActivityPackages} from './dnd5eActivityRegistry'
+import {getRegisteredDnd5eActivityPackage} from './dnd5eActivityRegistry'
 import {grantedDamageSource,type Dnd5eHeadlessCombatState} from '../headlessCombatEngine'
 import type {Character} from '../../../types/character'
 import type {Dnd5eSpellDamageDiceChoice} from '../spellDamageDieRerolls'
@@ -22,7 +22,7 @@ export function dnd5eActivitySpellDamageGroups(input:{activity:Dnd5eActivityDefi
    if(operation.kind==='create-persistent-area')for(const trigger of operation.triggers??[])if(trigger.damage)damageTypes.add(trigger.damage.type)
    if(operation.kind==='apply-effect'){
     const effect=input.activity.effects?.find(effect=>effect.id===operation.effectId);if(effect?.periodicDamage)damageTypes.add(effect.periodicDamage.type)
-    const relatives=input.packageId?listRegisteredDnd5eActivityPackages().find(pkg=>pkg.packageId===input.packageId)?.activities:[]
+    const relatives=input.packageId?getRegisteredDnd5eActivityPackage(input.packageId)?.activities:[]
     for(const linked of relatives??[]){
      if(linked.id===input.activity.id||linked.legacySource?.kind!=='spell'||linked.legacySource.id!==input.activity.legacySource.id||!linked.requirements?.some(requirement=>requirement.kind==='active-effect'&&requirement.subject==='actor'&&requirement.present&&requirement.source==='self'&&requirement.effectId===operation.effectId))continue
      const linkedTypes=dnd5eActivitySpellDamageGroups({activity:linked,choices:input.choices,rolls:input.rolls,parentDamageType:input.parentDamageType,collectGroups:false}).damageTypes

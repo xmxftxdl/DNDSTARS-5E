@@ -2,7 +2,7 @@ import type { Dnd5eAction, Dnd5eHeadlessCombatState } from '../headlessCombatEng
 import { createDnd5eWeaponHitSession } from '../weaponHitSession'
 import type { Dnd5eWeaponHitEvent } from '../weaponHitCheckpoint'
 import type { Dnd5eFormulaRollResult } from './dnd5eFormula'
-import { getRegisteredDnd5eActivity, listRegisteredDnd5eActivityPackages } from './dnd5eActivityRegistry'
+import { getRegisteredDnd5eActivity, getRegisteredDnd5eActivityPackageIdentity } from './dnd5eActivityRegistry'
 import { resolveDnd5eWeaponHitActivity } from './dnd5eWeaponHitActivity'
 
 /** Host-owned wrapper for one selected imported ability. Wire callers supply
@@ -15,7 +15,7 @@ export function createDnd5eRegisteredWeaponHitSession(input: {
   const frozen = structuredClone(input)
   const definition = () => JSON.stringify({
     activity: getRegisteredDnd5eActivity(frozen.packageId, frozen.activityId),
-    version: listRegisteredDnd5eActivityPackages().find(entry => entry.packageId === frozen.packageId)?.packageVersion,
+    version: getRegisteredDnd5eActivityPackageIdentity(frozen.packageId)?.packageVersion,
   })
   const signature = definition()
   let pending: { event: Dnd5eWeaponHitEvent; snapshot: Dnd5eHeadlessCombatState; index: number } | undefined
